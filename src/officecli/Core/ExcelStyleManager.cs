@@ -105,8 +105,8 @@ public class ExcelStyleManager
         // Map "font" shorthand to font.name
         if (styleProps.TryGetValue("font", out var fontShorthand))
             fontProps["name"] = fontShorthand;
-        // Map shorthand keys (bold, italic, strike, underline, superscript, subscript, strikethrough) to font.* equivalents
-        foreach (var shortKey in new[] { "bold", "italic", "strike", "underline", "superscript", "subscript", "strikethrough" })
+        // Map shorthand keys (bold, italic, strike, underline, superscript, subscript, strikethrough, size) to font.* equivalents
+        foreach (var shortKey in new[] { "bold", "italic", "strike", "underline", "superscript", "subscript", "strikethrough", "size" })
         {
             if (styleProps.TryGetValue(shortKey, out var shortVal))
                 fontProps[shortKey == "strikethrough" ? "strike" : shortKey] = shortVal;
@@ -240,7 +240,7 @@ public class ExcelStyleManager
         var lower = key.ToLowerInvariant();
         return lower is "numfmt" or "fill" or "bgcolor" or "font" or "border"
             or "bold" or "italic" or "strike" or "strikethrough" or "underline"
-            or "superscript" or "subscript"
+            or "superscript" or "subscript" or "size"
             or "wrap" or "wraptext" or "numberformat" or "format" or "halign" or "valign"
             or "rotation" or "indent" or "shrinktofit"
             or "locked" or "formulahidden"
