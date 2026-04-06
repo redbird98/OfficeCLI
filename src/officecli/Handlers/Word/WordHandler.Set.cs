@@ -600,7 +600,12 @@ public partial class WordHandler
                 s.StyleId?.Value == styleId || s.StyleName?.Val?.Value == styleId);
             if (style == null)
             {
-                style = new Style { Type = StyleValues.Paragraph, StyleId = styleId, CustomStyle = true };
+                var isBuiltIn = styleId is "Normal" or "Heading1" or "Heading2" or "Heading3" or "Heading4"
+                    or "Heading5" or "Heading6" or "Heading7" or "Heading8" or "Heading9"
+                    or "Title" or "Subtitle" or "Quote" or "IntenseQuote" or "ListParagraph"
+                    or "NoSpacing" or "TOCHeading";
+                style = new Style { Type = StyleValues.Paragraph, StyleId = styleId };
+                if (!isBuiltIn) style.CustomStyle = true;
                 style.AppendChild(new StyleName { Val = styleId });
                 styles.AppendChild(style);
             }

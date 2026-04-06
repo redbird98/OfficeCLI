@@ -280,12 +280,23 @@ public partial class WordHandler
             _ => throw new ArgumentException($"Invalid style type: '{properties.GetValueOrDefault("type", "paragraph")}'. Valid values: paragraph, character, table, numbering.")
         };
 
+        // Built-in styles must not have customStyle=true, or Word won't recognize them
+        // (e.g. TOC won't find Heading1 if it's marked as custom)
+        var builtInIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Normal", "Heading1", "Heading2", "Heading3", "Heading4", "Heading5",
+            "Heading6", "Heading7", "Heading8", "Heading9", "Title", "Subtitle",
+            "Quote", "IntenseQuote", "ListParagraph", "NoSpacing", "TOCHeading"
+        };
+        var isBuiltIn = builtInIds.Contains(styleId);
+
         var newStyle = new Style
         {
             Type = styleType,
             StyleId = styleId,
-            CustomStyle = true
         };
+        if (!isBuiltIn)
+            newStyle.CustomStyle = true;
         newStyle.AppendChild(new StyleName { Val = styleName });
 
         if ((properties.TryGetValue("basedon", out var basedOn) || properties.TryGetValue("basedOn", out basedOn)) && !string.IsNullOrEmpty(basedOn))
