@@ -191,18 +191,18 @@ internal static class PivotTableHelper
         // multi_row_authored.xlsx with rows=地区,城市 → still firstDataCol=1).
         int rowLabelCols = 1;
 
-        // Width depends on number of col fields:
-        //   N=0: 1 row label + 0 data + 0 grand total = 1 (degenerate)
-        //   N=1: 1 row label + L*K data + K grand total = 1 + L*K + K
-        //   N=2: 1 row label + per-outer (inner_count + 1 subtotal) + 1 grand total
+        // Width depends on number of col fields and data fields:
+        //   N_col=0: 1 row label + K data cols (no col labels, no grand total)
+        //   N_col=1: 1 row label + L*K data cols + K grand total cols
+        //   N_col=2: 1 row label + per-outer ((inner_count + 1 subtotal) * K) + K grand total
         int valueCols, totalCols;
         if (colFieldIndices.Count >= 2)
         {
             var groups = BuildOuterInnerGroups(
                 colFieldIndices[0], colFieldIndices[1], columnData);
-            // Per-outer: inner leaf cols + 1 subtotal col, then 1 final grand total.
-            valueCols = groups.Sum(g => g.inners.Count + 1);
-            totalCols = 1; // grand total col only (subtotals already counted above)
+            // Per-outer: K leaf cells per inner + K subtotal cells.
+            valueCols = groups.Sum(g => (g.inners.Count + 1) * dataFieldCount);
+            totalCols = dataFieldCount; // K grand total cols (one per data field)
         }
         else
         {
@@ -227,12 +227,17 @@ internal static class PivotTableHelper
             dataRowCount = Math.Max(1, ProductOfUniqueValues(rowFieldIndices, columnData));
         }
 
-        // Header row count rules (each adds 1 extra row vs the K=1, N_col=1 baseline):
-        //   - K>1 data fields: extra row to repeat data field names per col group
-        //   - N_col>=2 col fields: extra row for the inner col labels
-        // For now we only support ONE of these at a time (multi-col + multi-data is v4).
+        // Header row count rules (each addition adds 1 extra row vs baseline):
+        //   - Baseline (1 col, K=1):    2 rows = caption + col labels
+        //   - K>1 data fields:          +1 row to repeat data field names per col group
+        //   - N_col>=2 col fields:      +1 row for inner col labels
+        //   - Both combined (N_col=2 AND K>1): +2 rows = 4 total
+        // Verified for the 1×2×2 case against multi_col_K_authored.xlsx
+        // (location ref="A3:O10" firstHeaderRow=1 firstDataRow=4).
         int headerRows;
-        if (colFieldIndices.Count >= 2)
+        if (colFieldIndices.Count >= 2 && dataFieldCount > 1)
+            headerRows = 4; // caption + outer col + inner col + data field names
+        else if (colFieldIndices.Count >= 2)
             headerRows = 3; // caption + outer col labels + inner col labels
         else if (colFieldIndices.Count > 0)
             headerRows = dataFieldCount > 1 ? 3 : 2;
@@ -1009,55 +1014,52 @@ internal static class PivotTableHelper
         List<(int idx, string func, string name)> valueFields,
         List<int>? filterFieldIndices)
     {
-        if (valueFields.Count != 1)
-        {
-            Console.Error.WriteLine(
-                "WARNING: 2-col-field pivots currently support exactly 1 data field. " +
-                "Falling back to empty skeleton.");
-            return;
-        }
-
         var rowFieldIdx = rowFieldIndices[0];
         var outerColIdx = colFieldIndices[0];
         var innerColIdx = colFieldIndices[1];
-        var (dataFieldIdx, func, dataFieldName) = valueFields[0];
+        int K = valueFields.Count;
 
         var rowVals = columnData[rowFieldIdx];
         var outerColVals = columnData[outerColIdx];
         var innerColVals = columnData[innerColIdx];
-        var dataVals = columnData[dataFieldIdx];
 
-        // Reuse BuildOuterInnerGroups to compute (outer col → [inner cols])
-        // groups. The groupings semantics are identical to the row case — only
-        // existing (outer, inner) combinations are listed, sorted ordinally.
         var colGroups = BuildOuterInnerGroups(outerColIdx, innerColIdx, columnData);
         var uniqueRows = rowVals.Where(v => !string.IsNullOrEmpty(v)).Distinct()
             .OrderBy(v => v, StringComparer.Ordinal).ToList();
 
-        // Aggregate per (row, outerCol, innerCol). Same LibreOffice all-values
-        // semantics so totals reduce raw values, not pre-aggregated sub-results.
-        var leafBucket = new Dictionary<(string r, string oc, string ic), List<double>>();
-        var allValues = new List<double>();
-        for (int i = 0; i < dataVals.Length; i++)
+        // Aggregate per (row, outerCol, innerCol, dataFieldIdx). For K=1 the d
+        // dimension is degenerate but the same data structure works uniformly.
+        var leafBucket = new Dictionary<(string r, string oc, string ic, int d), List<double>>();
+        var perDataField = new List<List<double>>();
+        for (int d = 0; d < K; d++) perDataField.Add(new List<double>());
+
+        for (int i = 0; i < rowVals.Length; i++)
         {
             var rv = rowVals.Length > i ? rowVals[i] : null;
             var ocv = outerColVals.Length > i ? outerColVals[i] : null;
             var icv = innerColVals.Length > i ? innerColVals[i] : null;
             if (string.IsNullOrEmpty(rv) || string.IsNullOrEmpty(ocv) || string.IsNullOrEmpty(icv)) continue;
-            if (!double.TryParse(dataVals[i], System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var num)) continue;
 
-            var key = (rv, ocv, icv);
-            if (!leafBucket.TryGetValue(key, out var list))
+            for (int d = 0; d < K; d++)
             {
-                list = new List<double>();
-                leafBucket[key] = list;
+                var dataIdx = valueFields[d].idx;
+                var dataValues = columnData[dataIdx];
+                if (i >= dataValues.Length) continue;
+                if (!double.TryParse(dataValues[i], System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var num)) continue;
+
+                var key = (rv, ocv, icv, d);
+                if (!leafBucket.TryGetValue(key, out var list))
+                {
+                    list = new List<double>();
+                    leafBucket[key] = list;
+                }
+                list.Add(num);
+                perDataField[d].Add(num);
             }
-            list.Add(num);
-            allValues.Add(num);
         }
 
-        double Reduce(IEnumerable<double> values)
+        double Reduce(IEnumerable<double> values, string func)
         {
             var arr = values as double[] ?? values.ToArray();
             if (arr.Length == 0) return 0;
@@ -1072,54 +1074,52 @@ internal static class PivotTableHelper
             };
         }
 
-        // Reductions over raw value buckets, NOT over previously-computed numbers.
-        double LeafCell(string row, string outerCol, string innerCol)
-            => leafBucket.TryGetValue((row, outerCol, innerCol), out var b) && b.Count > 0
-                ? Reduce(b) : double.NaN;
+        // Per-(row, outerCol, innerCol, d) reductions over raw values.
+        double LeafCell(string row, string outerCol, string innerCol, int d)
+            => leafBucket.TryGetValue((row, outerCol, innerCol, d), out var b) && b.Count > 0
+                ? Reduce(b, valueFields[d].func) : double.NaN;
 
-        double OuterColSubtotalForRow(string row, string outerCol)
+        double OuterColSubtotalForRow(string row, string outerCol, int d)
         {
             var all = new List<double>();
             foreach (var (oc, inners) in colGroups)
                 if (oc == outerCol)
                     foreach (var inner in inners)
-                        if (leafBucket.TryGetValue((row, outerCol, inner), out var b))
+                        if (leafBucket.TryGetValue((row, outerCol, inner, d), out var b))
                             all.AddRange(b);
-            return Reduce(all);
+            return Reduce(all, valueFields[d].func);
         }
 
-        double RowGrandTotal(string row)
+        double RowGrandTotal(string row, int d)
         {
             var all = new List<double>();
             foreach (var (oc, inners) in colGroups)
                 foreach (var inner in inners)
-                    if (leafBucket.TryGetValue((row, oc, inner), out var b))
+                    if (leafBucket.TryGetValue((row, oc, inner, d), out var b))
                         all.AddRange(b);
-            return Reduce(all);
+            return Reduce(all, valueFields[d].func);
         }
 
-        double LeafColTotal(string outerCol, string innerCol)
+        double LeafColTotal(string outerCol, string innerCol, int d)
         {
             var all = new List<double>();
             foreach (var row in uniqueRows)
-                if (leafBucket.TryGetValue((row, outerCol, innerCol), out var b))
+                if (leafBucket.TryGetValue((row, outerCol, innerCol, d), out var b))
                     all.AddRange(b);
-            return Reduce(all);
+            return Reduce(all, valueFields[d].func);
         }
 
-        double OuterColTotal(string outerCol)
+        double OuterColTotal(string outerCol, int d)
         {
             var all = new List<double>();
             foreach (var (oc, inners) in colGroups)
                 if (oc == outerCol)
                     foreach (var inner in inners)
                         foreach (var row in uniqueRows)
-                            if (leafBucket.TryGetValue((row, outerCol, inner), out var b))
+                            if (leafBucket.TryGetValue((row, outerCol, inner, d), out var b))
                                 all.AddRange(b);
-            return Reduce(all);
+            return Reduce(all, valueFields[d].func);
         }
-
-        var grandTotal = Reduce(allValues);
 
         // ===== Write cells =====
         var (anchorCol, anchorRow) = ParseCellRef(position);
@@ -1135,62 +1135,133 @@ internal static class PivotTableHelper
             ws.AppendChild(sheetData);
         }
 
-        // Pre-compute the absolute column indices for each rendered column.
-        // This makes the 4 header/data/total row writers all share one mapping
-        // and avoids the off-by-one bugs of recomputing positions per row.
-        // Column layout: row label | (per outer: inner_count leaf cols + 1 subtotal col) | grand total
-        var leafColPositions = new Dictionary<(string outer, string inner), int>();
-        var subtotalColPositions = new Dictionary<string, int>();
+        // Pre-compute absolute column indices. K data fields multiply the leaf
+        // and subtotal positions by K. Layout (left to right):
+        //   row label
+        //   For each outer:
+        //     For each inner:                            K cells (data fields)
+        //     subtotal:                                  K cells (per-data subtotal)
+        //   grand total:                                 K cells (per-data grand)
+        var leafColPositions = new Dictionary<(string outer, string inner, int d), int>();
+        var subtotalColPositions = new Dictionary<(string outer, int d), int>();
+        var grandTotalColPositions = new int[K];
         int currentCol = anchorColIdx + 1;
         foreach (var (outer, inners) in colGroups)
         {
             foreach (var inner in inners)
             {
-                leafColPositions[(outer, inner)] = currentCol;
+                for (int d = 0; d < K; d++)
+                {
+                    leafColPositions[(outer, inner, d)] = currentCol;
+                    currentCol++;
+                }
+            }
+            for (int d = 0; d < K; d++)
+            {
+                subtotalColPositions[(outer, d)] = currentCol;
                 currentCol++;
             }
-            subtotalColPositions[outer] = currentCol;
+        }
+        for (int d = 0; d < K; d++)
+        {
+            grandTotalColPositions[d] = currentCol;
             currentCol++;
         }
-        int grandTotalCol = currentCol;
-        int totalCols = grandTotalCol - anchorColIdx + 1;
 
-        // Row 0 (caption row): data field name in row-label col, col field name (outer)
-        // in the first data col area. Only one cell after the row-label cell.
-        var captionRow = new Row { RowIndex = (uint)anchorRow };
-        captionRow.AppendChild(MakeStringCell(anchorColIdx, anchorRow, dataFieldName));
-        captionRow.AppendChild(MakeStringCell(anchorColIdx + 1, anchorRow, headers[outerColIdx]));
-        sheetData.AppendChild(captionRow);
-
-        // Row 1 (outer col header): outer col label at the FIRST col of each group.
-        // Subtotal cols and grand total col are left empty in this row — Excel
-        // visually spans the outer label across the group via colItems metadata.
-        var outerHeaderRowIdx = anchorRow + 1;
-        var outerHeaderRow = new Row { RowIndex = (uint)outerHeaderRowIdx };
-        foreach (var (outer, inners) in colGroups)
+        // ----- Header rows -----
+        // K=1 → 3 header rows (caption, outer col labels, inner col labels)
+        // K>1 → 4 header rows (caption, outer col labels + subtotal/grand-total
+        //                      labels in same row, inner col labels, data field names)
+        if (K == 1)
         {
-            // First leaf col of this group gets the outer label
-            int firstLeafCol = leafColPositions[(outer, inners[0])];
-            outerHeaderRow.AppendChild(MakeStringCell(firstLeafCol, outerHeaderRowIdx, outer));
-        }
-        sheetData.AppendChild(outerHeaderRow);
+            // Row 0 (caption): data field name + col field name.
+            var captionRow = new Row { RowIndex = (uint)anchorRow };
+            captionRow.AppendChild(MakeStringCell(anchorColIdx, anchorRow, valueFields[0].name));
+            captionRow.AppendChild(MakeStringCell(anchorColIdx + 1, anchorRow, headers[outerColIdx]));
+            sheetData.AppendChild(captionRow);
 
-        // Row 2 (inner col header): row field caption + inner col labels at leaf cols
-        // + "<outer> Total" at subtotal cols + "Grand Total" at grand total col.
-        var innerHeaderRowIdx = anchorRow + 2;
-        var innerHeaderRow = new Row { RowIndex = (uint)innerHeaderRowIdx };
-        innerHeaderRow.AppendChild(MakeStringCell(anchorColIdx, innerHeaderRowIdx, headers[rowFieldIdx]));
-        foreach (var (outer, inners) in colGroups)
+            // Row 1 (outer col header): outer col label at first leaf col of each group.
+            var outerHeaderRowIdx = anchorRow + 1;
+            var outerHeaderRow = new Row { RowIndex = (uint)outerHeaderRowIdx };
+            foreach (var (outer, inners) in colGroups)
+            {
+                int firstLeafCol = leafColPositions[(outer, inners[0], 0)];
+                outerHeaderRow.AppendChild(MakeStringCell(firstLeafCol, outerHeaderRowIdx, outer));
+            }
+            sheetData.AppendChild(outerHeaderRow);
+
+            // Row 2 (inner col header): row field caption + inner col labels +
+            //                            "<outer> Total" at subtotal cols + "总计" at grand.
+            var innerHeaderRowIdx = anchorRow + 2;
+            var innerHeaderRow = new Row { RowIndex = (uint)innerHeaderRowIdx };
+            innerHeaderRow.AppendChild(MakeStringCell(anchorColIdx, innerHeaderRowIdx, headers[rowFieldIdx]));
+            foreach (var (outer, inners) in colGroups)
+            {
+                foreach (var inner in inners)
+                    innerHeaderRow.AppendChild(MakeStringCell(leafColPositions[(outer, inner, 0)], innerHeaderRowIdx, inner));
+                innerHeaderRow.AppendChild(MakeStringCell(subtotalColPositions[(outer, 0)], innerHeaderRowIdx, outer + " Total"));
+            }
+            innerHeaderRow.AppendChild(MakeStringCell(grandTotalColPositions[0], innerHeaderRowIdx, totalLabel));
+            sheetData.AppendChild(innerHeaderRow);
+        }
+        else
         {
-            foreach (var inner in inners)
-                innerHeaderRow.AppendChild(MakeStringCell(leafColPositions[(outer, inner)], innerHeaderRowIdx, inner));
-            innerHeaderRow.AppendChild(MakeStringCell(subtotalColPositions[outer], innerHeaderRowIdx, outer + " Total"));
-        }
-        innerHeaderRow.AppendChild(MakeStringCell(grandTotalCol, innerHeaderRowIdx, totalLabel));
-        sheetData.AppendChild(innerHeaderRow);
+            // Row 0 (caption): only the col field caption (no data caption when K>1).
+            var captionRow = new Row { RowIndex = (uint)anchorRow };
+            captionRow.AppendChild(MakeStringCell(anchorColIdx + 1, anchorRow, headers[outerColIdx]));
+            sheetData.AppendChild(captionRow);
 
-        // Data rows.
-        int firstDataRow = anchorRow + 3;
+            // Row 1 (outer col header): outer label at first leaf col of group +
+            // per-subtotal labels "<outer> <data field>" + grand total labels
+            // "Total <data field>". This is verified against multi_col_K_authored.xlsx
+            // where the subtotal labels live in row 4 (the outer header row) NOT
+            // in the inner-label or data-field rows below.
+            var outerHeaderRowIdx = anchorRow + 1;
+            var outerHeaderRow = new Row { RowIndex = (uint)outerHeaderRowIdx };
+            foreach (var (outer, inners) in colGroups)
+            {
+                int firstLeafCol = leafColPositions[(outer, inners[0], 0)];
+                outerHeaderRow.AppendChild(MakeStringCell(firstLeafCol, outerHeaderRowIdx, outer));
+                for (int d = 0; d < K; d++)
+                    outerHeaderRow.AppendChild(MakeStringCell(subtotalColPositions[(outer, d)],
+                        outerHeaderRowIdx, $"{outer} {valueFields[d].name}"));
+            }
+            for (int d = 0; d < K; d++)
+                outerHeaderRow.AppendChild(MakeStringCell(grandTotalColPositions[d],
+                    outerHeaderRowIdx, $"Total {valueFields[d].name}"));
+            sheetData.AppendChild(outerHeaderRow);
+
+            // Row 2 (inner col header): inner label at the first data col of each
+            // (outer, inner) sub-group. Subtotal/grand-total cols are EMPTY in this
+            // row (their labels live one row above).
+            var innerHeaderRowIdx = anchorRow + 2;
+            var innerHeaderRow = new Row { RowIndex = (uint)innerHeaderRowIdx };
+            foreach (var (outer, inners) in colGroups)
+            {
+                foreach (var inner in inners)
+                    innerHeaderRow.AppendChild(MakeStringCell(leafColPositions[(outer, inner, 0)],
+                        innerHeaderRowIdx, inner));
+            }
+            sheetData.AppendChild(innerHeaderRow);
+
+            // Row 3 (data field name row): row field caption + data field name at
+            // every leaf col. Subtotal/grand-total cols stay empty (already labeled
+            // in the outer header row above).
+            var dfNameRowIdx = anchorRow + 3;
+            var dfNameRow = new Row { RowIndex = (uint)dfNameRowIdx };
+            dfNameRow.AppendChild(MakeStringCell(anchorColIdx, dfNameRowIdx, headers[rowFieldIdx]));
+            foreach (var (outer, inners) in colGroups)
+            {
+                foreach (var inner in inners)
+                    for (int d = 0; d < K; d++)
+                        dfNameRow.AppendChild(MakeStringCell(leafColPositions[(outer, inner, d)],
+                            dfNameRowIdx, valueFields[d].name));
+            }
+            sheetData.AppendChild(dfNameRow);
+        }
+
+        // ----- Data rows -----
+        int firstDataRow = anchorRow + (K == 1 ? 3 : 4);
         for (int r = 0; r < uniqueRows.Count; r++)
         {
             var rowIdx = firstDataRow + r;
@@ -1201,17 +1272,25 @@ internal static class PivotTableHelper
             {
                 foreach (var inner in inners)
                 {
-                    var v = LeafCell(uniqueRows[r], outer, inner);
-                    if (!double.IsNaN(v))
-                        dataRow.AppendChild(MakeNumericCell(leafColPositions[(outer, inner)], rowIdx, v));
+                    for (int d = 0; d < K; d++)
+                    {
+                        var v = LeafCell(uniqueRows[r], outer, inner, d);
+                        if (!double.IsNaN(v))
+                            dataRow.AppendChild(MakeNumericCell(leafColPositions[(outer, inner, d)], rowIdx, v));
+                    }
                 }
-                // Outer col subtotal for this row
-                var sub = OuterColSubtotalForRow(uniqueRows[r], outer);
-                if (sub != 0 || HasAnyValueInRowOuter(uniqueRows[r], outer, colGroups, leafBucket))
-                    dataRow.AppendChild(MakeNumericCell(subtotalColPositions[outer], rowIdx, sub));
+                // Outer col subtotal cells (K per outer).
+                bool any = HasAnyValueInRowOuter(uniqueRows[r], outer, colGroups, leafBucket, K);
+                for (int d = 0; d < K; d++)
+                {
+                    var sub = OuterColSubtotalForRow(uniqueRows[r], outer, d);
+                    if (sub != 0 || any)
+                        dataRow.AppendChild(MakeNumericCell(subtotalColPositions[(outer, d)], rowIdx, sub));
+                }
             }
 
-            dataRow.AppendChild(MakeNumericCell(grandTotalCol, rowIdx, RowGrandTotal(uniqueRows[r])));
+            for (int d = 0; d < K; d++)
+                dataRow.AppendChild(MakeNumericCell(grandTotalColPositions[d], rowIdx, RowGrandTotal(uniqueRows[r], d)));
             sheetData.AppendChild(dataRow);
         }
 
@@ -1222,11 +1301,15 @@ internal static class PivotTableHelper
         foreach (var (outer, inners) in colGroups)
         {
             foreach (var inner in inners)
-                grandRow.AppendChild(MakeNumericCell(leafColPositions[(outer, inner)], grandRowIdx,
-                    LeafColTotal(outer, inner)));
-            grandRow.AppendChild(MakeNumericCell(subtotalColPositions[outer], grandRowIdx, OuterColTotal(outer)));
+                for (int d = 0; d < K; d++)
+                    grandRow.AppendChild(MakeNumericCell(leafColPositions[(outer, inner, d)], grandRowIdx,
+                        LeafColTotal(outer, inner, d)));
+            for (int d = 0; d < K; d++)
+                grandRow.AppendChild(MakeNumericCell(subtotalColPositions[(outer, d)], grandRowIdx, OuterColTotal(outer, d)));
         }
-        grandRow.AppendChild(MakeNumericCell(grandTotalCol, grandRowIdx, grandTotal));
+        for (int d = 0; d < K; d++)
+            grandRow.AppendChild(MakeNumericCell(grandTotalColPositions[d], grandRowIdx,
+                Reduce(perDataField[d], valueFields[d].func)));
         sheetData.AppendChild(grandRow);
 
         // Page filter cells (same logic as the single-row renderer).
@@ -1250,29 +1333,26 @@ internal static class PivotTableHelper
         }
 
         ws.Save();
-
-        // Suppress the unused-variable warning for totalCols which is computed
-        // for clarity but not currently consumed (geometry is computed separately
-        // by ComputePivotGeometry). Kept for readability.
-        _ = totalCols;
     }
 
     /// <summary>
     /// Helper for RenderMultiColPivot: like HasAnyValueInOuterCol but flipped
     /// (checks if a (row, outerCol) pair has any non-empty leaf bucket across
-    /// the outer's inners). Used to decide whether to write a 0-valued
-    /// subtotal cell or skip it entirely on a sparse row.
+    /// the outer's inners and any data field). Used to decide whether to
+    /// write a 0-valued subtotal cell or skip it entirely on a sparse row.
     /// </summary>
     private static bool HasAnyValueInRowOuter(string row, string outerCol,
         List<(string outer, List<string> inners)> colGroups,
-        Dictionary<(string r, string oc, string ic), List<double>> leafBucket)
+        Dictionary<(string r, string oc, string ic, int d), List<double>> leafBucket,
+        int dataFieldCount)
     {
         foreach (var (oc, inners) in colGroups)
         {
             if (oc != outerCol) continue;
             foreach (var inner in inners)
-                if (leafBucket.TryGetValue((row, outerCol, inner), out var b) && b.Count > 0)
-                    return true;
+                for (int d = 0; d < dataFieldCount; d++)
+                    if (leafBucket.TryGetValue((row, outerCol, inner, d), out var b) && b.Count > 0)
+                        return true;
         }
         return false;
     }
@@ -1637,7 +1717,8 @@ internal static class PivotTableHelper
         {
             Reference = geom.RangeRef,
             FirstHeaderRow = 1u,
-            FirstDataRow = (valueFields.Count > 1 || colFieldIndices.Count >= 2) ? 3u : 2u,
+            FirstDataRow = (colFieldIndices.Count >= 2 && valueFields.Count > 1) ? 4u
+                         : ((valueFields.Count > 1 || colFieldIndices.Count >= 2) ? 3u : 2u),
             FirstDataColumn = (uint)geom.RowLabelCols
         };
 
@@ -2087,19 +2168,21 @@ internal static class PivotTableHelper
     }
 
     /// <summary>
-    /// Build the &lt;colItems&gt; element for a 2-col-field pivot. Mirrors
-    /// BuildMultiRowItems but uses the col-subtotal pattern (t="default") and
-    /// emits 2 x children on the first leaf of each outer group instead of one.
+    /// Build the &lt;colItems&gt; element for a 2-col-field pivot, supporting K
+    /// data fields. Mirrors BuildMultiRowItems but uses the col-subtotal
+    /// pattern (t="default") instead of the bare-i form rows use, and the
+    /// first leaf of each outer group emits 2 x children (outer + inner).
     ///
-    /// dataFieldCount must be 1 in v3; multi-col + multi-data layouts are
-    /// tracked as a v4 expansion.
+    /// For K&gt;1 (multi-col + multi-data, e.g. 1×2×2), each leaf and each
+    /// subtotal/grand-total entry is multiplied by K, with the additional
+    /// data field entries using r='2' (repeat outer + inner) and i='d' to
+    /// flag the data field index. Verified against multi_col_K_authored.xlsx.
     /// </summary>
     private static OpenXmlElement BuildMultiColItems(
         List<int> fieldIndices, List<string[]> columnData, int dataFieldCount)
     {
         var container = new ColumnItems();
-        if (fieldIndices.Count < 2 || fieldIndices[0] >= columnData.Count || fieldIndices[1] >= columnData.Count
-            || dataFieldCount != 1)
+        if (fieldIndices.Count < 2 || fieldIndices[0] >= columnData.Count || fieldIndices[1] >= columnData.Count)
         {
             container.AppendChild(new RowItem());
             container.Count = 1u;
@@ -2110,9 +2193,7 @@ internal static class PivotTableHelper
         var innerIdx = fieldIndices[1];
         var groups = BuildOuterInnerGroups(outerIdx, innerIdx, columnData);
 
-        // Same value→pivotField-items-index mapping logic as the row case:
-        // pivotField items are appended in StringComparer.Ordinal order, so the
-        // index of "value V" is "V's position in the sorted unique list".
+        // Value → pivotField-items-index map (alphabetical ordinal sort).
         var outerOrder = columnData[outerIdx]
             .Where(v => !string.IsNullOrEmpty(v))
             .Distinct()
@@ -2126,48 +2207,90 @@ internal static class PivotTableHelper
             .Select((v, i) => (v, i))
             .ToDictionary(t => t.v, t => t.i, StringComparer.Ordinal);
 
+        int K = Math.Max(1, dataFieldCount);
         int count = 0;
         foreach (var (outer, inners) in groups)
         {
             var outerPivIdx = outerOrder[outer];
 
-            // First leaf of this outer group: 2 x children (outer + first inner).
             for (int idx = 0; idx < inners.Count; idx++)
             {
                 var inner = inners[idx];
                 var innerPivIdx = innerOrder[inner];
-                if (idx == 0)
+
+                // First leaf of (this outer, this inner): K entries (one per data field).
+                // The very first entry has the full path; subsequent K-1 use r=2 (repeat
+                // outer + inner) to compress the encoding.
+                for (int d = 0; d < K; d++)
                 {
-                    var first = new RowItem();
-                    if (outerPivIdx == 0) first.AppendChild(new MemberPropertyIndex());
-                    else first.AppendChild(new MemberPropertyIndex { Val = outerPivIdx });
-                    if (innerPivIdx == 0) first.AppendChild(new MemberPropertyIndex());
-                    else first.AppendChild(new MemberPropertyIndex { Val = innerPivIdx });
-                    container.AppendChild(first);
+                    if (d == 0)
+                    {
+                        // First data field: full path.
+                        // For new outer (idx==0): 2 or 3 x children (outer + inner + maybe d).
+                        //   With K==1: just outer + inner = 2 x children.
+                        //   With K>1: outer + inner + first data = 3 x children.
+                        // For new inner (idx>0) with new outer leaf area: r=1 (repeat outer)
+                        //   With K==1: r=1, then inner = 1 x child total.
+                        //   With K>1: r=1, then inner + first data = 2 x children.
+                        if (idx == 0)
+                        {
+                            // First leaf of new outer: write everything fresh.
+                            var first = new RowItem();
+                            if (outerPivIdx == 0) first.AppendChild(new MemberPropertyIndex());
+                            else first.AppendChild(new MemberPropertyIndex { Val = outerPivIdx });
+                            if (innerPivIdx == 0) first.AppendChild(new MemberPropertyIndex());
+                            else first.AppendChild(new MemberPropertyIndex { Val = innerPivIdx });
+                            if (K > 1)
+                            {
+                                // First data field index = 0 → bare <x/>
+                                first.AppendChild(new MemberPropertyIndex());
+                            }
+                            container.AppendChild(first);
+                        }
+                        else
+                        {
+                            // Inner shift within same outer: r=1 keeps outer.
+                            var rep = new RowItem { RepeatedItemCount = 1u };
+                            if (innerPivIdx == 0) rep.AppendChild(new MemberPropertyIndex());
+                            else rep.AppendChild(new MemberPropertyIndex { Val = innerPivIdx });
+                            if (K > 1) rep.AppendChild(new MemberPropertyIndex());
+                            container.AppendChild(rep);
+                        }
+                    }
+                    else
+                    {
+                        // Additional data field for the same (outer, inner): r=2 keeps
+                        // outer + inner, i=d marks the data field, x v=d gives the index.
+                        var rep = new RowItem { RepeatedItemCount = 2u, Index = (uint)d };
+                        if (d == 0) rep.AppendChild(new MemberPropertyIndex());
+                        else rep.AppendChild(new MemberPropertyIndex { Val = d });
+                        container.AppendChild(rep);
+                    }
+                    count++;
                 }
-                else
-                {
-                    var rep = new RowItem { RepeatedItemCount = 1u };
-                    if (innerPivIdx == 0) rep.AppendChild(new MemberPropertyIndex());
-                    else rep.AppendChild(new MemberPropertyIndex { Val = innerPivIdx });
-                    container.AppendChild(rep);
-                }
-                count++;
             }
 
-            // Outer subtotal column: t="default" + 1 x child for outer index.
-            var sub = new RowItem { ItemType = ItemValues.Default };
-            if (outerPivIdx == 0) sub.AppendChild(new MemberPropertyIndex());
-            else sub.AppendChild(new MemberPropertyIndex { Val = outerPivIdx });
-            container.AppendChild(sub);
-            count++;
+            // Outer subtotal columns: K entries with t="default", x v=outer, i=d for d>0.
+            for (int d = 0; d < K; d++)
+            {
+                var sub = new RowItem { ItemType = ItemValues.Default };
+                if (d > 0) sub.Index = (uint)d;
+                if (outerPivIdx == 0) sub.AppendChild(new MemberPropertyIndex());
+                else sub.AppendChild(new MemberPropertyIndex { Val = outerPivIdx });
+                container.AppendChild(sub);
+                count++;
+            }
         }
 
-        // Grand total column.
-        var grand = new RowItem { ItemType = ItemValues.Grand };
-        grand.AppendChild(new MemberPropertyIndex());
-        container.AppendChild(grand);
-        count++;
+        // Grand total columns: K entries with t="grand", x=0, i=d for d>0.
+        for (int d = 0; d < K; d++)
+        {
+            var grand = new RowItem { ItemType = ItemValues.Grand };
+            if (d > 0) grand.Index = (uint)d;
+            grand.AppendChild(new MemberPropertyIndex());
+            container.AppendChild(grand);
+            count++;
+        }
 
         container.Count = (uint)count;
         return container;
