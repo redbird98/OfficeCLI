@@ -5130,9 +5130,23 @@ internal static class PivotTableHelper
         if (!props.TryGetValue(key, out var value) || string.IsNullOrEmpty(value))
             return new List<(int, string, string, string)>();
 
+        // CONSISTENCY(aggregate-override): the optional sibling 'aggregate'
+        // property is a comma-list aligned positionally with 'values'. It
+        // overrides the per-field func parsed from the colon-suffix syntax.
+        // This lets users write `values=Sales,Sales aggregate=sum,count`
+        // instead of `values=Sales:sum,Sales:count` — both forms are
+        // equivalent. Per-spec colon syntax still wins for any slot the
+        // aggregate list does not cover (shorter list ⇒ remaining slots
+        // keep their parsed func).
+        string[]? aggregateOverrides = null;
+        if (props.TryGetValue("aggregate", out var aggSpec) && !string.IsNullOrEmpty(aggSpec))
+            aggregateOverrides = aggSpec.Split(',').Select(s => s.Trim().ToLowerInvariant()).ToArray();
+
         var result = new List<(int idx, string func, string showAs, string name)>();
-        foreach (var spec in value.Split(','))
+        var specs = value.Split(',');
+        for (int specIndex = 0; specIndex < specs.Length; specIndex++)
         {
+            var spec = specs[specIndex];
             // Format: "FieldName" | "FieldName:func" | "FieldName:func:showAs"
             //   default func    = sum
             //   default showAs  = normal
@@ -5148,6 +5162,12 @@ internal static class PivotTableHelper
             // as the documented default ("sum") rather than crashing on
             // func[0] below. This keeps the showAs slot positionally addressable.
             if (string.IsNullOrEmpty(func)) func = "sum";
+
+            // CONSISTENCY(aggregate-override): if aggregate=<list> was passed
+            // and has an entry at this position, it wins over the colon form.
+            if (aggregateOverrides != null && specIndex < aggregateOverrides.Length
+                && !string.IsNullOrEmpty(aggregateOverrides[specIndex]))
+                func = aggregateOverrides[specIndex];
 
             int fieldIdx = -1;
             if (int.TryParse(fieldName, out var idx)) fieldIdx = idx;
