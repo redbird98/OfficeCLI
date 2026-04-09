@@ -3240,6 +3240,35 @@ internal static class PivotTableHelper
         bool emitRowGrand = ActiveRowGrandTotals;
         bool emitColGrand = ActiveColGrandTotals;
 
+        // Compact-form row-label indentation: for pivots with 2+ row fields,
+        // Excel's canonical compact layout puts every row field into col A with
+        // progressively deeper cell alignment indents (level 1 = indent 0,
+        // level 2 = indent 1, ...). The indent is a cell style, not a rowItem
+        // attribute — verified against Excel-authored test_encrypted.xlsx.
+        // Build a cached indent→styleIndex map so the renderer resolves each
+        // distinct depth to a single cellXfs entry. Lazy: only initialized
+        // when rowFieldIndices.Count >= 2.
+        var workbookPart = targetSheet.GetParentParts().OfType<WorkbookPart>().FirstOrDefault();
+        var indentStyleByLevel = new Dictionary<int, uint>();
+        ExcelStyleManager? styleManager = null;
+        if (rowFieldIndices.Count >= 2 && workbookPart != null)
+            styleManager = new ExcelStyleManager(workbookPart);
+
+        uint GetIndentStyleIndex(int indentLevel)
+        {
+            if (indentLevel <= 0 || styleManager == null) return 0u;
+            if (indentStyleByLevel.TryGetValue(indentLevel, out var cached)) return cached;
+            // ApplyStyle mutates a temp cell but returns the xfIndex we need.
+            var probe = new Cell();
+            var styleIdx = styleManager.ApplyStyle(probe, new Dictionary<string, string>
+            {
+                ["alignment.horizontal"] = "left",
+                ["alignment.indent"] = indentLevel.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            });
+            indentStyleByLevel[indentLevel] = styleIdx;
+            return styleIdx;
+        }
+
         // Pre-compute absolute col indices for every col position × data field.
         // colPositions does not include the grand total column — that's tracked
         // separately so the writer doesn't accidentally include it inside the
@@ -3430,7 +3459,13 @@ internal static class PivotTableHelper
             var (rowNode, rIsLeaf, rIsSubtotal) = rowPositions[rp];
             int rowIdx = firstDataRowIdx + rp;
             var row = new Row { RowIndex = (uint)rowIdx };
-            row.AppendChild(MakeStringCell(anchorColIdx, rowIdx, rowNode.Label));
+            var rowLabelCell = MakeStringCell(anchorColIdx, rowIdx, rowNode.Label);
+            // Compact-mode indent: level 1 (outermost row field) gets no indent
+            // (style 0), level 2 gets indent 1, level 3 gets indent 2, etc.
+            // rowNode.Depth is 1-based (1 for top-level children of root).
+            var indentStyle = GetIndentStyleIndex(rowNode.Depth - 1);
+            if (indentStyle != 0) rowLabelCell.StyleIndex = indentStyle;
+            row.AppendChild(rowLabelCell);
 
             for (int cp = 0; cp < colPositions.Count; cp++)
             {
