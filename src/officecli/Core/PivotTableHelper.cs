@@ -191,6 +191,7 @@ internal static class PivotTableHelper
             "aggregate", "showdataas", "topn",
             "sort",
             "grandtotals", "rowgrandtotals", "colgrandtotals",
+            "subtotals", "defaultsubtotal",
             // <pivotTableStyleInfo> bool toggles (see ApplyPivotStyleInfoProps).
             // Canonical keys only; col/column aliases are handled by the switch
             // in SetPivotTableProperties and the helper's case labels.
@@ -5426,10 +5427,15 @@ internal static class PivotTableHelper
     private static void AppendFieldItems(PivotField pf, string[] values)
     {
         var unique = values.Where(v => !string.IsNullOrEmpty(v)).Distinct().OrderByAxis(v => v).ToList();
-        var items = new Items { Count = (uint)(unique.Count + 1) };
+        // CONSISTENCY(subtotals-opts): trailing <item t="default"/> is the
+        // field-level subtotal sentinel. Must be omitted when defaultSubtotal=0
+        // or Excel rejects with "problem with some content" validation error.
+        bool emitSub = ActiveDefaultSubtotal;
+        var items = new Items { Count = (uint)(unique.Count + (emitSub ? 1 : 0)) };
         for (int i = 0; i < unique.Count; i++)
             items.AppendChild(new Item { Index = (uint)i });
-        items.AppendChild(new Item { ItemType = ItemValues.Default }); // grand total
+        if (emitSub)
+            items.AppendChild(new Item { ItemType = ItemValues.Default });
         pf.AppendChild(items);
     }
 
@@ -6438,10 +6444,15 @@ internal static class PivotTableHelper
         var count = sharedItems?.Elements<StringItem>().Count() ?? 0;
         if (count == 0) return;
 
-        var items = new Items { Count = (uint)(count + 1) };
+        // CONSISTENCY(subtotals-opts): mirror AppendFieldItems — the trailing
+        // <item t="default"/> is the field-level subtotal sentinel, gated on
+        // ActiveDefaultSubtotal.
+        bool emitSub = ActiveDefaultSubtotal;
+        var items = new Items { Count = (uint)(count + (emitSub ? 1 : 0)) };
         for (int i = 0; i < count; i++)
             items.AppendChild(new Item { Index = (uint)i });
-        items.AppendChild(new Item { ItemType = ItemValues.Default }); // grand total
+        if (emitSub)
+            items.AppendChild(new Item { ItemType = ItemValues.Default });
         pf.AppendChild(items);
     }
 
