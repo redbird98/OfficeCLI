@@ -262,10 +262,12 @@ public partial class ExcelHandler
     private Workbook GetWorkbook() =>
         _doc.WorkbookPart?.Workbook ?? throw new InvalidOperationException("Corrupt file: workbook missing");
 
-    private List<(string Name, WorksheetPart Part)> GetWorksheets()
+    private List<(string Name, WorksheetPart Part)> GetWorksheets() => GetWorksheets(_doc);
+
+    private static List<(string Name, WorksheetPart Part)> GetWorksheets(SpreadsheetDocument doc)
     {
         var result = new List<(string, WorksheetPart)>();
-        var workbook = _doc.WorkbookPart?.Workbook;
+        var workbook = doc.WorkbookPart?.Workbook;
         if (workbook == null) return result;
 
         var sheets = workbook.GetFirstChild<Sheets>();
@@ -276,7 +278,7 @@ public partial class ExcelHandler
             var name = sheet.Name?.Value ?? "?";
             var id = sheet.Id?.Value;
             if (id == null) continue;
-            var part = (WorksheetPart)_doc.WorkbookPart!.GetPartById(id);
+            var part = (WorksheetPart)doc.WorkbookPart!.GetPartById(id);
             result.Add((name, part));
         }
 
