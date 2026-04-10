@@ -2092,8 +2092,18 @@ internal static partial class PivotTableHelper
             {
                 // Outline/Tabular: each row field level writes to its own column.
                 // rowNode.Depth is 1-based; the label goes at column (anchor + depth - 1).
+                // Tabular subtotal rows append " Total" to match Excel — the
+                // subtotal row sits AFTER its leaves so the suffix disambiguates
+                // it from a leaf row of the same name. Outline subtotals sit
+                // BEFORE leaves and act as group headers, so they keep the
+                // bare label (matches Excel's outline mode).
+                // CONSISTENCY(subtotal-total-suffix): mirrors col-axis subtotal
+                // labels at PivotTableHelper.Render.cs:1981.
                 int labelCol = anchorColIdx + rowNode.Depth - 1;
-                row.AppendChild(MakeStringCell(labelCol, rowIdx, rowNode.Label));
+                string labelText = rowNode.Label;
+                if (rIsSubtotal && ActiveLayoutMode == "tabular")
+                    labelText = rowNode.Label + " Total";
+                row.AppendChild(MakeStringCell(labelCol, rowIdx, labelText));
                 // Ancestor labels for non-compact leaf rows. Two modes:
                 //   - repeatLabels=true: write every ancestor on every leaf,
                 //     unconditionally (Excel's "Repeat All Item Labels" toggle).
