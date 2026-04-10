@@ -1528,7 +1528,7 @@ internal static partial class PivotTableHelper
         // (spreadsheetml main).
         if (filterCount > 0)
         {
-            location.SetAttribute(new OpenXmlAttribute("rowPageCount", "", "1"));
+            location.SetAttribute(new OpenXmlAttribute("rowPageCount", "", filterCount.ToString()));
             location.SetAttribute(new OpenXmlAttribute("colPageCount", "", "1"));
         }
 
