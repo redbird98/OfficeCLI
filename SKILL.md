@@ -375,7 +375,7 @@ officecli add data.xlsx /Sheet1 --type pivottable \
   --prop grandTotals=rows --prop subtotals=off --prop sort=asc
 ```
 
-Key props: `rows`, `cols`, `values` (Field:func[:showDataAs]), `filters`, `source`, `position`, `layout` (compact/outline/tabular), `repeatLabels` (true/false — repeat outer row labels on every data row), `aggregate`, `showDataAs` (percent_of_total/row/col, running_total), `grandTotals` (both/rows/cols/none), `subtotals` (on/off), `sort` (asc/desc/locale/locale-desc). Aggregators: sum, count, average, max, min, product, stdDev, stdDevp, var, varp, countNums. Date columns auto-group. Multiple data fields and N×N row/col hierarchies supported. Run `officecli xlsx set pivottable` for full property list.
+Key props: `rows`, `cols`, `values` (Field:func[:showDataAs]), `filters`, `source`, `position`, `layout` (compact/outline/tabular), `repeatLabels` (true/false — repeat outer row labels on every data row), `blankRows` (true/false — insert blank line after each group), `aggregate`, `showDataAs` (percent_of_total/row/col, running_total), `grandTotals` (both/rows/cols/none), `subtotals` (on/off), `sort` (asc/desc/locale/locale-desc). Aggregators: sum, count, average, max, min, product, stdDev, stdDevp, var, varp, countNums. Date columns auto-group. Multiple data fields and N×N row/col hierarchies supported. Run `officecli xlsx set pivottable` for full property list.
 
 ### Document-level properties (all formats)
 
