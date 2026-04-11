@@ -10,8 +10,12 @@ namespace OfficeCli.Core;
 
 /// <summary>
 /// Shared chart SVG rendering logic used by both PowerPoint and Excel HTML preview.
+/// Split across two files:
+///   ChartSvgRenderer.cs           — regular c:chart extraction + render
+///   ChartSvgRenderer.CxExtract.cs — cx:chart extraction + render (histogram,
+///                                    funnel, treemap, sunburst, boxWhisker)
 /// </summary>
-internal class ChartSvgRenderer
+internal partial class ChartSvgRenderer
 {
     // Fallback chart colors — used only when no theme is available
     public static readonly string[] FallbackColors = [
@@ -1276,6 +1280,15 @@ internal class ChartSvgRenderer
         var isHorizBarType = chartType.Contains("bar") && !chartType.Contains("column");
         if (info.PlotFillColor != null && !isHorizBarType)
             sb.AppendLine($"    <rect x=\"{marginLeft}\" y=\"{marginTop}\" width=\"{plotW}\" height=\"{plotH}\" fill=\"#{info.PlotFillColor}\"/>");
+
+        // cx extended chart types (funnel / treemap / sunburst / boxWhisker)
+        // dispatch to dedicated emitters before the regular bar/line/pie
+        // branches — otherwise they fall through to the column fallback and
+        // render as generic bar charts. Histogram intentionally falls through
+        // here: it uses the regular column pipeline after ExtractCxChartInfo
+        // has pre-binned the values into categories.
+        if (TryRenderCxSpecificType(sb, info, marginLeft, marginTop, plotW, plotH))
+            return;
 
         if (chartType.Contains("pie") || chartType.Contains("doughnut"))
         {

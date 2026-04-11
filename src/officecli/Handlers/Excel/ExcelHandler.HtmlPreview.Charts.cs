@@ -38,7 +38,7 @@ public partial class ExcelHandler
 
         var chartFrames = drawingsPart.WorksheetDrawing
             .Descendants<XDR.GraphicFrame>()
-            .Where(gf => gf.Descendants<C.ChartReference>().Any())
+            .Where(gf => gf.Descendants<C.ChartReference>().Any() || IsExtendedChartFrame(gf))
             .ToList();
 
         if (chartFrames.Count == 0) return result;
@@ -105,6 +105,14 @@ public partial class ExcelHandler
     private void RenderExcelChart(StringBuilder sb, XDR.GraphicFrame gf,
         DrawingsPart drawingsPart, WorksheetPart worksheetPart)
     {
+        // cx:chart (extended) path — histogram / funnel / treemap / sunburst /
+        // boxWhisker. Delegate to the cx-aware extractor and shared renderer.
+        if (IsExtendedChartFrame(gf))
+        {
+            RenderExcelCxChart(sb, gf, drawingsPart, worksheetPart);
+            return;
+        }
+
         // 1. Get chart reference and load ChartPart
         var chartRef = gf.Descendants<C.ChartReference>().FirstOrDefault();
         if (chartRef?.Id?.Value == null) return;
@@ -426,5 +434,67 @@ public partial class ExcelHandler
             colIndex /= 26;
         }
         return result;
+    }
+
+    /// <summary>
+    /// Render a cx:chart (Office 2016 extended chart) inside a GraphicFrame.
+    /// Mirrors the regular <see cref="RenderExcelChart"/> flow: extract
+    /// ChartInfo from the cx:chart element, instantiate the shared renderer
+    /// with theme colors, and emit the SVG + legend inside a chart-container div.
+    /// </summary>
+    private void RenderExcelCxChart(StringBuilder sb, XDR.GraphicFrame gf,
+        DrawingsPart drawingsPart, WorksheetPart worksheetPart)
+    {
+        var relId = GetExtendedChartRelId(gf);
+        if (relId == null) return;
+
+        DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.Chart? chart;
+        try
+        {
+            var extPart = (ExtendedChartPart)drawingsPart.GetPartById(relId);
+            chart = extPart.ChartSpace?
+                .GetFirstChild<DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.Chart>();
+            if (chart == null) return;
+        }
+        catch { return; }
+
+        var info = ChartSvgRenderer.ExtractCxChartInfo(chart);
+        if (info.Series.Count == 0) return;
+
+        // Dimensions from the TwoCellAnchor, same as regular charts.
+        var colWidths = GetColumnWidths(GetSheet(worksheetPart));
+        var (widthPt, heightPt) = EstimateChartSize(gf, colWidths);
+
+        var renderer = new ChartSvgRenderer
+        {
+            ThemeAccentColors = ChartSvgRenderer.BuildThemeAccentColors(GetExcelThemeColors()),
+            ValueColor = info.ValFontColor ?? "#333",
+            CatColor = info.CatFontColor ?? "#555",
+            AxisColor = info.ValFontColor ?? "#666",
+            GridColor = info.GridlineColor ?? "#ddd",
+            AxisLineColor = info.AxisLineColor ?? "#999",
+            ValFontPx = info.ValFontPx,
+            CatFontPx = info.CatFontPx,
+        };
+
+        var svgW = Math.Max(widthPt, 225);
+        var svgH = Math.Max(heightPt, 150);
+        var titleFontPt = 10.0;
+        if (!string.IsNullOrEmpty(info.TitleFontSize) && double.TryParse(info.TitleFontSize.Replace("pt", ""), out var tfp))
+            titleFontPt = tfp;
+        var titleH = string.IsNullOrEmpty(info.Title) ? 0 : (int)(titleFontPt * 1.6 + 8);
+        var chartSvgH = svgH - titleH;
+        if (chartSvgH < 80) return;
+
+        sb.AppendLine($"<div class=\"chart-container\" style=\"max-width:max({svgW}pt,100%);flex:1;min-width:200pt\">");
+
+        var titleColor = info.TitleFontColor ?? "#333";
+        if (!string.IsNullOrEmpty(info.Title))
+            sb.AppendLine($"  <div style=\"text-align:center;font-size:{info.TitleFontSize};font-weight:bold;padding:6px 0;color:{titleColor}\">{HtmlEncode(info.Title)}</div>");
+
+        sb.AppendLine($"  <svg viewBox=\"0 0 {svgW} {chartSvgH}\" style=\"width:100%;height:auto\" preserveAspectRatio=\"xMidYMin meet\">");
+        renderer.RenderChartSvgContent(sb, info, svgW, chartSvgH);
+        sb.AppendLine("  </svg>");
+        sb.AppendLine("</div>");
     }
 }
