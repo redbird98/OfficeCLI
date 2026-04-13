@@ -108,6 +108,21 @@ internal static partial class ChartHelper
 
     // ==================== Error Bars Helpers ====================
 
+    /// <summary>
+    /// Check if the parent chart type supports errBars on its series (CT_*Ser).
+    /// OOXML allows errBars in: barChart, bar3DChart, scatterChart, areaChart,
+    /// area3DChart, bubbleChart.  Not allowed in: lineChart, line3DChart,
+    /// pieChart, pie3DChart, doughnutChart, radarChart, stockChart.
+    /// </summary>
+    internal static bool SeriesSupportsErrorBars(OpenXmlElement ser)
+    {
+        var parentName = ser.Parent?.LocalName ?? "";
+        return parentName is "barChart" or "bar3DChart"
+            or "scatterChart"
+            or "areaChart" or "area3DChart"
+            or "bubbleChart";
+    }
+
     internal static C.ErrorBars BuildErrorBars(string spec)
     {
         // Format: "type" or "type:value" e.g. "fixed:5", "percent:10", "stddev", "stderr"
@@ -353,8 +368,9 @@ internal static partial class ChartHelper
 
             case "errbars" or "errorbars":
                 ser.RemoveAllChildren<C.ErrorBars>();
-                if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
-                    ser.AppendChild(BuildErrorBars(value));
+                if (!value.Equals("none", StringComparison.OrdinalIgnoreCase)
+                    && SeriesSupportsErrorBars(ser))
+                    InsertSeriesChildInOrder(ser, BuildErrorBars(value));
                 break;
 
             case "explosion" or "explode":
@@ -664,6 +680,7 @@ internal static partial class ChartHelper
         string[] insertBeforeNames = child.LocalName switch
         {
             "trendline" => ["errBars", "cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "smooth", "extLst"],
+            "errBars" => ["cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "smooth", "extLst"],
             "smooth" => ["extLst"],
             _ => ["extLst"]
         };

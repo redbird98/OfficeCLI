@@ -1157,8 +1157,9 @@ internal static partial class ChartHelper
                     foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
                     {
                         ser.RemoveAllChildren<C.ErrorBars>();
-                        if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
-                            ser.AppendChild(BuildErrorBars(value));
+                        if (!value.Equals("none", StringComparison.OrdinalIgnoreCase)
+                            && SeriesSupportsErrorBars(ser))
+                            InsertSeriesChildInOrder(ser, BuildErrorBars(value));
                     }
                     break;
                 }
