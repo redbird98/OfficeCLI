@@ -688,8 +688,8 @@ internal static partial class ChartHelper
         string[]? categories, List<(string name, double[] values)> seriesData,
         uint catAxisId, uint valAxisId)
     {
-        // Stock chart expects series in High-Low-Close order (minimum 3 series)
-        // or Open-High-Low-Close order (4 series)
+        // Stock chart expects series in Open-High-Low-Close order (4 series)
+        // or High-Low-Close order (3 series)
         var stockChart = new C.StockChart();
 
         for (int i = 0; i < seriesData.Count; i++)
@@ -699,9 +699,41 @@ internal static partial class ChartHelper
                 new C.Order { Val = (uint)i },
                 new C.SeriesText(new C.NumericValue(seriesData[i].name))
             );
+
+            // Hide individual series lines — stock chart visuals come from
+            // hiLowLines + upDownBars, not from the series lines themselves
+            var spPr = new C.ChartShapeProperties();
+            spPr.AppendChild(new Drawing.Outline(new Drawing.NoFill()));
+            series.AppendChild(spPr);
+
+            // No markers on stock series
+            series.AppendChild(new C.Marker(new C.Symbol { Val = C.MarkerStyleValues.None }));
+
             if (categories != null) series.AppendChild(BuildCategoryData(categories));
             series.AppendChild(BuildValues(seriesData[i].values));
             stockChart.AppendChild(series);
+        }
+
+        // Hi-low lines: vertical lines connecting High to Low at each data point
+        stockChart.AppendChild(new C.HighLowLines());
+
+        // Up-down bars: colored boxes from Open to Close (green=up, red=down)
+        if (seriesData.Count >= 4)
+        {
+            var upDownBars = new C.UpDownBars(
+                new C.GapWidth { Val = 150 }
+            );
+            var upBars = new C.UpBars();
+            var upSpPr = new C.ChartShapeProperties();
+            upSpPr.AppendChild(new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = "4CAF50" }));
+            upBars.AppendChild(upSpPr);
+            upDownBars.AppendChild(upBars);
+            var downBars = new C.DownBars();
+            var dnSpPr = new C.ChartShapeProperties();
+            dnSpPr.AppendChild(new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = "F44336" }));
+            downBars.AppendChild(dnSpPr);
+            upDownBars.AppendChild(downBars);
+            stockChart.AppendChild(upDownBars);
         }
 
         stockChart.AppendChild(new C.AxisId { Val = catAxisId });
