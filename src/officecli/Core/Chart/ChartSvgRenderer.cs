@@ -655,7 +655,8 @@ internal partial class ChartSvgRenderer
     }
 
     public void RenderRadarChartSvg(StringBuilder sb, List<(string name, double[] values)> series,
-        string[] categories, List<string> colors, int svgW, int svgH, int catLabelFontSize = 0)
+        string[] categories, List<string> colors, int svgW, int svgH, int catLabelFontSize = 0,
+        string radarStyle = "filled")
     {
         var catCount = Math.Max(categories.Length, series.Max(s => s.values.Length));
         if (catCount < 3) return;
@@ -697,11 +698,19 @@ internal partial class ChartSvgRenderer
             if (points.Count > 0)
             {
                 var serColor = colors[s % colors.Count];
-                sb.AppendLine($"        <polygon points=\"{string.Join(" ", points)}\" fill=\"{serColor}\" fill-opacity=\"0.2\" stroke=\"{serColor}\" stroke-width=\"2\"/>");
-                foreach (var pt in points)
+                var isFilled = radarStyle == "filled";
+                var fillAttr = isFilled ? $"fill=\"{serColor}\" fill-opacity=\"0.2\"" : "fill=\"none\"";
+                sb.AppendLine($"        <polygon points=\"{string.Join(" ", points)}\" {fillAttr} stroke=\"{serColor}\" stroke-width=\"2\"/>");
+                // Markers for marker and standard styles (standard gets small dots, marker gets circles)
+                var showMarkers = radarStyle != "filled";
+                var markerR = radarStyle == "marker" ? 4 : 2;
+                if (showMarkers)
                 {
-                    var parts = pt.Split(',');
-                    sb.AppendLine($"        <circle cx=\"{parts[0]}\" cy=\"{parts[1]}\" r=\"3\" fill=\"{serColor}\"/>");
+                    foreach (var pt in points)
+                    {
+                        var parts = pt.Split(',');
+                        sb.AppendLine($"        <circle cx=\"{parts[0]}\" cy=\"{parts[1]}\" r=\"{markerR}\" fill=\"{serColor}\"/>");
+                    }
                 }
             }
         }
@@ -1168,6 +1177,9 @@ internal partial class ChartSvgRenderer
 
         // --- Data table ---
         public bool HasDataTable { get; set; }
+
+        // --- Radar style (standard, marker, filled) ---
+        public string RadarStyle { get; set; } = "filled";
     }
 
     /// <summary>
@@ -1454,6 +1466,15 @@ internal partial class ChartSvgRenderer
         var dataTableEl = chart?.Descendants().FirstOrDefault(e => e.LocalName == "dTable");
         info.HasDataTable = dataTableEl != null;
 
+        // Radar style
+        var radarChartEl = plotArea.Elements().FirstOrDefault(e => e.LocalName == "radarChart");
+        if (radarChartEl != null)
+        {
+            var rsEl = radarChartEl.Elements().FirstOrDefault(e => e.LocalName == "radarStyle");
+            var rsVal = rsEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+            info.RadarStyle = rsVal ?? "marker";
+        }
+
         return info;
     }
 
@@ -1593,7 +1614,7 @@ internal partial class ChartSvgRenderer
         }
         else if (chartType.Contains("radar"))
         {
-            RenderRadarChartSvg(sb, info.Series, info.Categories, info.Colors, svgW, svgH, CatFontPx);
+            RenderRadarChartSvg(sb, info.Series, info.Categories, info.Colors, svgW, svgH, CatFontPx, info.RadarStyle);
         }
         else if (chartType == "bubble")
         {
