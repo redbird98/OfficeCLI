@@ -475,6 +475,7 @@
                     startX: e.clientX, startY: e.clientY,
                     anchor: cell,
                     base: additive ? _selection.slice() : [],
+                    snapshot: _selection.slice(), // full pre-drag state for Esc restore
                     active: false // becomes true after threshold
                 };
                 e.preventDefault(); // prevent text selection during drag
@@ -611,7 +612,7 @@
     function _cancelDrags() {
         if (_rubber) { if (_rubber.div) _rubber.div.remove(); _rubber = null; }
         if (_cellDrag) {
-            _selection = _cellDrag.base.slice();
+            _selection = _cellDrag.snapshot.slice();
             applySelectionToDom();
             _cellDrag = null;
         }
