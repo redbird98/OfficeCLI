@@ -239,7 +239,7 @@ officecli watch deck.pptx
 # Opens http://localhost:26315 — refreshes on every set/add/remove
 ```
 
-Renders shapes, charts, equations, 3D models (Three.js), morph transitions, zoom navigation, and all shape effects.
+Renders shapes, charts (with trendlines, error bars, pseudo-3D, waterfall, stock candlestick), equations, 3D models (Three.js), morph transitions, zoom navigation, and all shape effects. Excel watch uses native-style green cell selection with crosshair.
 
 ### Resident Mode & Batch
 

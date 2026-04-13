@@ -123,7 +123,7 @@ officecli view report.docx html --browser             # open in default browser
 
 ### get
 
-Any XML path via element localName. Use `--depth N` to expand children. Add `--json` for structured output.
+Any XML path via element localName. Use `--depth N` to expand children. Add `--json` for structured output. Default text output is grep-friendly single-line per node: `path (type) "text" key=val key=val ...`
 
 ```bash
 officecli get report.docx '/body/p[3]' --depth 2 --json
@@ -175,7 +175,7 @@ officecli watch <file> [--port N]      # Start preview server (default port 1808
 officecli unwatch <file>               # Stop the preview server
 ```
 
-Open the printed `http://localhost:N` URL in a browser. Click any shape to select (blue outline highlight); shift/cmd/ctrl+click to multi-select; drag from empty space to box-select (rubber-band).
+Open the printed `http://localhost:N` URL in a browser. Click any element to select; shift/cmd/ctrl+click to multi-select; drag from empty space to box-select (rubber-band). PPT/Word uses blue outline; Excel uses native-style green selection with crosshair.
 
 ### `get <file> selected` — read what the user clicked
 
@@ -325,7 +325,7 @@ officecli add <file> <parent> --from <path>                               # clon
 |--------|-------|
 | **pptx** | slide, shape (textbox), picture (image/img), chart, table, row (tr), connector (connection/line), group, video (audio/media), equation (formula/math), notes, paragraph (para), run, zoom (slidezoom), ole (oleobject/object/embed) |
 | **docx** | paragraph (para), run, table, row (tr), cell (td), image (picture/img), header, footer, section, bookmark, comment, footnote, endnote, formfield (text/checkbox/dropdown), sdt (contentcontrol), chart, equation (formula/math), field, hyperlink, style, toc, watermark, break (pagebreak/columnbreak), ole (oleobject/object/embed). Document protection: `set / --prop protection=forms\|readOnly\|comments\|trackedChanges\|none` |
-| **xlsx** | sheet, row, cell, chart, image (picture), comment, table (listobject), namedrange (definedname), pivottable (pivot), sparkline, validation (datavalidation), autofilter, shape, textbox, databar/colorscale/iconset/formulacf (conditional formatting), ole (oleobject/object/embed — no Remove yet), csv (tsv). Formulas auto-evaluated on write (150+ functions including VLOOKUP, SUMIF, IF, DATE, PMT, etc.) |
+| **xlsx** | sheet, row, cell, chart, image (picture), comment, table (listobject), namedrange (definedname), pivottable (pivot), sparkline, validation (datavalidation), autofilter, shape, textbox, databar/colorscale/iconset/formulacf (conditional formatting), ole (oleobject/object/embed — no Remove yet), csv (tsv). `value="=SUM(...)"` auto-detects as formula. Formulas auto-evaluated on write (150+ functions including VLOOKUP, SUMIF, IF, DATE, PMT, etc.) |
 
 ### Pivot tables (xlsx)
 
