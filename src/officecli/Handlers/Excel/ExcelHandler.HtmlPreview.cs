@@ -213,9 +213,8 @@ public partial class ExcelHandler
     {
         var ws = GetSheet(worksheetPart);
         var sheetData = ws.GetFirstChild<SheetData>();
-        if (sheetData == null)
+        if (sheetData == null && (charts == null || charts.Count == 0))
         {
-            // Don't show "Empty sheet" if there are charts
             if (worksheetPart.DrawingsPart?.WorksheetDrawing == null)
                 sb.AppendLine("<div class=\"empty-sheet\">Empty sheet</div>");
             return;
@@ -238,15 +237,15 @@ public partial class ExcelHandler
         }
 
         // Create formula evaluator for this sheet to compute uncached formula values
-        var evaluator = new Core.FormulaEvaluator(sheetData, _doc.WorkbookPart);
+        var evaluator = sheetData != null ? new Core.FormulaEvaluator(sheetData, _doc.WorkbookPart) : null;
 
         // Collect merge info
         var mergeMap = BuildMergeMap(ws);
 
-        // Build conditional formatting CSS overrides
-        var cfMap = BuildConditionalFormatMap(ws, stylesheet, sheetData, _doc.WorkbookPart);
-        var dataBarMap = BuildDataBarMap(ws, sheetData);
-        var iconSetMap = BuildIconSetMap(ws, sheetData);
+        // Build conditional formatting CSS overrides (skip if no cell data)
+        var cfMap = sheetData != null ? BuildConditionalFormatMap(ws, stylesheet, sheetData, _doc.WorkbookPart) : new Dictionary<string, string>();
+        var dataBarMap = sheetData != null ? BuildDataBarMap(ws, sheetData) : new Dictionary<string, string>();
+        var iconSetMap = sheetData != null ? BuildIconSetMap(ws, sheetData) : new Dictionary<string, string>();
 
         // Collect column widths
         var colWidths = GetColumnWidths(ws);
@@ -272,7 +271,7 @@ public partial class ExcelHandler
         // even if the cell is empty (no value, no formula). Empty cells are
         // explicitly created by the user or by Excel; either way they should
         // render so the grid matches the actual data range.
-        var rows = sheetData.Elements<Row>().ToList();
+        var rows = sheetData?.Elements<Row>().ToList() ?? new List<Row>();
         int maxCol = 0;
         int maxRow = 0;
         foreach (var row in rows)
@@ -291,18 +290,21 @@ public partial class ExcelHandler
             if (rowHasCells && rowIdx > maxRow) maxRow = rowIdx;
         }
 
-        // Empty sheet (SheetData exists but no rows/cells)
+        // Extend maxRow/maxCol from chart anchors even when no cell data
+        if (charts != null)
+        {
+            foreach (var (fromRow, toRow, fromCol, toCol, _) in charts)
+            {
+                if (toRow > maxRow) maxRow = toRow;
+                if (toCol > maxCol) maxCol = toCol;
+            }
+        }
+
+        // Empty sheet (no cells and no charts)
         if (maxRow == 0 || maxCol == 0)
         {
-            if (charts == null || charts.Count == 0)
-            {
-                if (worksheetPart.DrawingsPart?.WorksheetDrawing == null)
-                    sb.AppendLine("<div class=\"empty-sheet\">Empty sheet</div>");
-                return;
-            }
-            // Charts exist but no cell data — just render charts
-            foreach (var (_, _, _, _, html) in charts)
-                sb.Append(html);
+            if (worksheetPart.DrawingsPart?.WorksheetDrawing == null)
+                sb.AppendLine("<div class=\"empty-sheet\">Empty sheet</div>");
             return;
         }
 
