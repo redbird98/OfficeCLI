@@ -2094,7 +2094,13 @@ public partial class ExcelHandler
             bool desc = tokens.Length > 1 && tokens[1].Equals("desc", StringComparison.OrdinalIgnoreCase);
             if (tokens.Length > 1 && !desc && !tokens[1].Equals("asc", StringComparison.OrdinalIgnoreCase))
                 throw new ArgumentException($"Invalid sort direction '{tokens[1]}'. Expected 'asc' or 'desc'.");
-            sortKeys.Add((ColumnNameToIndex(colName), desc));
+            int keyColIdx = ColumnNameToIndex(colName);
+            // Key column must lie within the sort range, otherwise the sort is silently
+            // a no-op and writes a malformed sortCondition ref.
+            if (keyColIdx < col1 || keyColIdx > col2)
+                throw new ArgumentException(
+                    $"Sort column {colName} is outside the range {IndexToColumnName(col1)}:{IndexToColumnName(col2)}");
+            sortKeys.Add((keyColIdx, desc));
         }
         if (sortKeys.Count == 0) return;
 
