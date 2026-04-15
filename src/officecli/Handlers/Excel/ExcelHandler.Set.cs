@@ -1875,10 +1875,13 @@ public partial class ExcelHandler
                         break;
 
                     var sd = ws.GetFirstChild<SheetData>();
-                    if (sd == null) break;
+                    if (sd == null) sd = ws.AppendChild(new SheetData());
                     var rows = sd.Elements<Row>().ToList();
-                    if (rows.Count == 0) break;
-
+                    // R12-2: DO NOT early-return on empty sheet here. Empty sheet + invalid
+                    // sort spec (e.g. "XFE asc", "AAAA asc", "sort=asc") used to silently
+                    // succeed because we bailed before spec validation. Always dispatch into
+                    // SortRangeRows so it validates the spec first; if spec is valid and there
+                    // is no data, it no-ops cleanly via its existing dataStartRow > row2 guard.
                     int maxCol = 1;
                     foreach (var r in rows)
                         foreach (var c in r.Elements<Cell>())
@@ -1887,8 +1890,8 @@ public partial class ExcelHandler
                             if (cref == null) continue;
                             maxCol = Math.Max(maxCol, ColumnNameToIndex(ParseCellReference(cref).Column));
                         }
-                    int minRowIdx = (int)rows.Min(r => r.RowIndex?.Value ?? 1u);
-                    int maxRowIdx = (int)rows.Max(r => r.RowIndex?.Value ?? 1u);
+                    int minRowIdx = rows.Count == 0 ? 1 : (int)rows.Min(r => r.RowIndex?.Value ?? 1u);
+                    int maxRowIdx = rows.Count == 0 ? 1 : (int)rows.Max(r => r.RowIndex?.Value ?? 1u);
 
                     // CONSISTENCY(sort-header-default): sortHeader defaults to false
                     // (row 1 participates in the reorder). This matches our general
@@ -2169,16 +2172,25 @@ public partial class ExcelHandler
             if (!Regex.IsMatch(colName, @"^[A-Z]+$"))
                 throw new ArgumentException(
                     $"Invalid sort column '{tokens[0]}'. Expected column letters (A, B, AA). Column names are not supported; use letters.");
+            // R12-3: "asc" and "desc" are direction keywords, not column letters. When a
+            // user writes `sort=asc` (forgot the column) the token parses as a column
+            // name and produced a misleading "outside the range" error. Reject up-front
+            // with a targeted message. Applies regardless of case (Regex above already
+            // upper-cased via ToUpperInvariant, so match against "ASC"/"DESC").
+            if (colName == "ASC" || colName == "DESC")
+                throw new ArgumentException(
+                    $"Invalid sort key '{spec.Trim()}': sort key must start with a column letter, not a direction keyword ('{tokens[0]}'). Expected '<col> [asc|desc]'.");
             bool desc = tokens.Length > 1 && tokens[1].Equals("desc", StringComparison.OrdinalIgnoreCase);
             if (tokens.Length > 1 && !desc && !tokens[1].Equals("asc", StringComparison.OrdinalIgnoreCase))
                 throw new ArgumentException($"Invalid sort direction '{tokens[1]}'. Expected 'asc' or 'desc'.");
             int keyColIdx = ColumnNameToIndex(colName);
-            // R11-1: distinguish "likely a header/name, not a column letter" from a
-            // genuine out-of-range column letter. Excel's max column is XFD (16384,
-            // 3 letters). Anything that parses past XFD with length >= 4 is almost
-            // certainly a column name like "Score" or "TotalAmount" — give a
-            // targeted error instead of a misleading "outside the range A:B".
-            if (keyColIdx > 16384 && colName.Length >= 4)
+            // R11-1 / R12-2: Excel's max column is XFD (16384, 3 letters). Anything
+            // that parses past XFD is an invalid column:
+            //   - length >= 4 (e.g. "AAAA", "Score"): almost certainly a column name
+            //   - length == 3 but > XFD (e.g. "XFE", "ZZZ"): out of Excel's column space
+            // Both cases used to fall through to a misleading "outside the range A:B"
+            // error (especially pronounced on empty sheets where the range is A:A).
+            if (keyColIdx > 16384)
                 throw new ArgumentException(
                     $"Invalid sort column '{tokens[0]}'. Column names are not supported; use column letters (A, B, AA, up to XFD).");
             // Key column must lie within the sort range, otherwise the sort is silently
