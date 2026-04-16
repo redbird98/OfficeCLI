@@ -185,6 +185,25 @@ public partial class WordHandler
             return;
         }
 
+        // VML legacy picture (<w:pict>). The full geometry rendering is
+        // deferred (see KNOWN_ISSUES #7e); as a safety net, extract any
+        // text content so WordArt strings and textbox text don't vanish
+        // from the preview entirely.
+        var vmlPict = run.ChildElements.FirstOrDefault(c => c.LocalName == "pict");
+        if (vmlPict != null)
+        {
+            // v:textbox → w:txbxContent → w:t
+            var txbxTexts = vmlPict.Descendants().Where(e => e.LocalName == "t").Select(e => e.InnerText);
+            // v:textpath string="..." (WordArt / classic watermark)
+            var textpathStrings = vmlPict.Descendants()
+                .Where(e => e.LocalName == "textpath")
+                .Select(e => e.GetAttributes().FirstOrDefault(a => a.LocalName == "string").Value ?? "");
+            var text = string.Join(" ", txbxTexts.Concat(textpathStrings).Where(s => !string.IsNullOrWhiteSpace(s)));
+            if (!string.IsNullOrWhiteSpace(text))
+                sb.Append($"<span class=\"vml-fallback\" style=\"color:#666;font-style:italic\">{HtmlEncode(text)}</span>");
+            return;
+        }
+
         // OLE embedded objects (Visio, Excel, etc.) carry a v:imagedata
         // preview image that we can render for a read-only snapshot.
         var oleObject = run.GetFirstChild<EmbeddedObject>();
