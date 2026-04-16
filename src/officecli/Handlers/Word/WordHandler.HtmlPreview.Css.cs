@@ -78,6 +78,44 @@ public partial class WordHandler
             }
         }
 
+        // Gradient fill → CSS linear-gradient. OOXML stores stops as <a:gsLst>
+        // with each <a:gs pos="N"/> (in 1/1000 of a percent). Direction comes
+        // from <a:lin ang="N"/> (in 60000ths of a degree).
+        var gradFill = spPr.Elements().FirstOrDefault(e => e.LocalName == "gradFill");
+        if (gradFill != null)
+        {
+            var gsLst = gradFill.Elements().FirstOrDefault(e => e.LocalName == "gsLst");
+            if (gsLst != null)
+            {
+                var stops = new List<string>();
+                foreach (var gs in gsLst.Elements().Where(e => e.LocalName == "gs"))
+                {
+                    var posAttr = gs.GetAttributes().FirstOrDefault(a => a.LocalName == "pos").Value;
+                    double pct = int.TryParse(posAttr, out var posVal) ? posVal / 1000.0 : 0;
+                    string? color = null;
+                    var gsRgb = gs.Elements().FirstOrDefault(e => e.LocalName == "srgbClr");
+                    if (gsRgb != null)
+                        color = "#" + gsRgb.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+                    var gsScheme = gs.Elements().FirstOrDefault(e => e.LocalName == "schemeClr");
+                    if (gsScheme != null) color = ResolveSchemeColor(gsScheme);
+                    if (color != null)
+                        stops.Add($"{color} {pct:0.##}%");
+                }
+                if (stops.Count > 0)
+                {
+                    // ang: 60000ths of a degree; CSS linear-gradient uses "to <dir>" or "<deg>"
+                    // OOXML 0 = left→right; CSS 0deg = bottom→top. Convert OOXML → CSS:
+                    // CSS angle = (OOXML angle / 60000 + 90) % 360
+                    var lin = gradFill.Elements().FirstOrDefault(e => e.LocalName == "lin");
+                    double cssAngleDeg = 90;
+                    var angAttr = lin?.GetAttributes().FirstOrDefault(a => a.LocalName == "ang").Value;
+                    if (long.TryParse(angAttr, out var angVal))
+                        cssAngleDeg = (angVal / 60000.0 + 90) % 360;
+                    return $"background:linear-gradient({cssAngleDeg:0.##}deg,{string.Join(",", stops)})";
+                }
+            }
+        }
+
         return "";
     }
 

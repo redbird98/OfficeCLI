@@ -507,6 +507,11 @@ public partial class WordHandler
             var widthPx = extCx / 9525;
             var heightPx = extCy / 9525;
             style = $"display:inline-block;width:{widthPx}px;min-height:{heightPx}px;vertical-align:top";
+
+            // Rotation on standalone shapes too (was only applied inside groups)
+            var sXfrm = spPr?.Elements().FirstOrDefault(e => e.LocalName == "xfrm");
+            var sRot = GetLongAttr(sXfrm, "rot");
+            if (sRot != 0) style += $";transform:rotate({sRot / 60000.0:0.##}deg)";
         }
         else
         {
@@ -522,17 +527,23 @@ public partial class WordHandler
             if (rot != 0) style += $";transform:rotate({rot / 60000.0:0.##}deg)";
         }
 
+        // prstGeom → border-radius for ellipse, round rect, etc.
+        var prstGeom = spPr?.Elements().FirstOrDefault(e => e.LocalName == "prstGeom");
+        var prst = prstGeom?.GetAttributes().FirstOrDefault(a => a.LocalName == "prst").Value;
+        if (prst == "ellipse" || prst == "oval")
+            style += ";border-radius:50%";
+        else if (prst == "roundRect")
+            style += ";border-radius:12px";
+
         if (!string.IsNullOrEmpty(fillCss)) style += $";{fillCss}";
         if (!string.IsNullOrEmpty(borderCss)) style += $";{borderCss}";
 
         // Body properties: text layout + padding
         var bodyPr = shape.Elements().FirstOrDefault(e => e.LocalName == "bodyPr");
-        if (!standalone)
-        {
-            var vAnchor = bodyPr?.GetAttributes().FirstOrDefault(a => a.LocalName == "anchor").Value;
-            if (vAnchor == "ctr") style += ";display:flex;align-items:center";
-            else if (vAnchor == "b") style += ";display:flex;align-items:flex-end";
-        }
+        // Vertical text anchor applies to both standalone and positioned shapes
+        var vAnchor = bodyPr?.GetAttributes().FirstOrDefault(a => a.LocalName == "anchor").Value;
+        if (vAnchor == "ctr") style += ";display:flex;align-items:center";
+        else if (vAnchor == "b") style += ";display:flex;align-items:flex-end";
 
         var lIns = GetLongAttr(bodyPr, "lIns", 91440);
         var tIns = GetLongAttr(bodyPr, "tIns", 45720);
