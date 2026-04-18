@@ -2147,7 +2147,11 @@ public partial class ExcelHandler
                 // T1 — accept `showHeader=false` alias alongside `headerRow=false`.
                 var hasHeader = !(properties.TryGetValue("headerRow", out var hrVal) && !IsTruthy(hrVal))
                              && !(properties.TryGetValue("showHeader", out var shVal) && !IsTruthy(shVal));
-                var hasTotalRow = properties.TryGetValue("totalRow", out var trVal) && IsTruthy(trVal);
+                // CONSISTENCY(table-totalrow): accept `showTotals=true` alias
+                // alongside `totalRow=true` (mirrors the `showHeader` alias
+                // pattern above for users coming from Office API vocabulary).
+                var hasTotalRow = (properties.TryGetValue("totalRow", out var trVal) && IsTruthy(trVal))
+                               || (properties.TryGetValue("showTotals", out var stVal) && IsTruthy(stVal));
 
                 var rangeParts = rangeRef.Split(':');
                 var (startCol, startRow) = ParseCellReference(rangeParts[0]);

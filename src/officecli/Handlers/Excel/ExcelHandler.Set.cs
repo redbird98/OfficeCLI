@@ -804,6 +804,7 @@ public partial class ExcelHandler
                     case "displayname": table.DisplayName = value; break;
                     case "headerrow": table.HeaderRowCount = IsTruthy(value) ? 1u : 0u; break;
                     case "totalrow":
+                    case "showtotals":
                         var totalRowEnabled = IsTruthy(value);
                         table.TotalsRowShown = totalRowEnabled;
                         table.TotalsRowCount = totalRowEnabled ? 1u : 0u;
