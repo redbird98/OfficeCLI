@@ -1670,11 +1670,11 @@ public partial class WordHandler
                             {
                                 case "font":
                                     pmrp.RemoveAllChildren<RunFonts>();
-                                    pmrp.AppendChild(new RunFonts { Ascii = value, HighAnsi = value, EastAsia = value });
+                                    InsertRunPropInSchemaOrder(pmrp, new RunFonts { Ascii = value, HighAnsi = value, EastAsia = value });
                                     break;
                                 case "size":
                                     pmrp.RemoveAllChildren<FontSize>();
-                                    pmrp.AppendChild(new FontSize { Val = ((int)Math.Round(ParseFontSize(value) * 2, MidpointRounding.AwayFromZero)).ToString() });
+                                    InsertRunPropInSchemaOrder(pmrp, new FontSize { Val = ((int)Math.Round(ParseFontSize(value) * 2, MidpointRounding.AwayFromZero)).ToString() });
                                     break;
                                 case "bold":
                                     pmrp.RemoveAllChildren<Bold>();
