@@ -1018,7 +1018,7 @@ internal static partial class ChartHelper
                     break;
                 }
 
-                case "logbase" or "logscale":
+                case "logbase" or "logscale" or "yaxisscale":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     var valAx = plotArea2?.GetFirstChild<C.ValueAxis>();
@@ -1029,13 +1029,18 @@ internal static partial class ChartHelper
                     // as shorthand for logBase=10 (Excel's default log base).
                     // `false`/`none` removes the log scale. `logBase=<n>` still
                     // accepts an explicit numeric base via the same key.
+                    // R19-2: also accept `yAxisScale=log` / `yAxisScale=linear`
+                    // as a verb-style alias. `log` == shorthand for logBase=10,
+                    // `linear`/`none` removes the log scale.
                     if (value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
                         value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+                        value.Equals("log", StringComparison.OrdinalIgnoreCase) ||
                         value == "1")
                     {
                         scaling.PrependChild(new C.LogBase { Val = 10d });
                     }
                     else if (!value.Equals("none", StringComparison.OrdinalIgnoreCase) &&
+                             !value.Equals("linear", StringComparison.OrdinalIgnoreCase) &&
                              !value.Equals("false", StringComparison.OrdinalIgnoreCase) &&
                              !value.Equals("no", StringComparison.OrdinalIgnoreCase) &&
                              value != "0")

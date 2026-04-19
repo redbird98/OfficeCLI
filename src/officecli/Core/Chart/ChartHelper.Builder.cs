@@ -422,7 +422,7 @@ internal static partial class ChartHelper
         "bubblescale", "shownegbubbles", "sizerepresents",
         "gapdepth", "shape", "barshape",
         "droplines", "hilowlines", "updownbars", "serlines", "serieslines",
-        "axisorientation", "axisreverse", "logbase", "logscale",
+        "axisorientation", "axisreverse", "logbase", "logscale", "yaxisscale",
         "dispunits", "displayunits", "labeloffset", "ticklabelskip", "tickskip",
         "axisposition", "axispos", "crosses", "crossesat", "crossbetween",
         "plotvisonly", "plotvisibleonly", "autotitledeleted",
