@@ -407,6 +407,31 @@ public partial class WordHandler
     private string AddHeader(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
         var mainPartH = _doc.MainDocumentPart!;
+
+        // Resolve requested header type first, so we can reject duplicates before
+        // creating an orphaned HeaderPart.
+        var preHeaderType = HeaderFooterValues.Default;
+        if (properties.TryGetValue("type", out var preHTypeStr) ||
+            properties.TryGetValue("kind", out preHTypeStr) ||
+            properties.TryGetValue("ref", out preHTypeStr))
+        {
+            preHeaderType = preHTypeStr.ToLowerInvariant() switch
+            {
+                "first" => HeaderFooterValues.First,
+                "even" => HeaderFooterValues.Even,
+                "default" => HeaderFooterValues.Default,
+                _ => throw new ArgumentException($"Invalid header type: '{preHTypeStr}'. Valid values: default, first, even.")
+            };
+        }
+        var preSectPr = mainPartH.Document!.Body!.Elements<SectionProperties>().LastOrDefault();
+        if (preSectPr != null && preSectPr.Elements<HeaderReference>()
+                .Any(r => r.Type != null && r.Type.Value == preHeaderType))
+        {
+            throw new ArgumentException(
+                $"Header of type '{preHeaderType}' already exists in this section. " +
+                "Remove the existing one first or use --prop type=<first|even>.");
+        }
+
         var headerPart = mainPartH.AddNewPart<HeaderPart>();
 
         var hPara = new Paragraph();
@@ -484,17 +509,7 @@ public partial class WordHandler
         var hSectPr = hBody.Elements<SectionProperties>().LastOrDefault()
             ?? hBody.AppendChild(new SectionProperties());
 
-        var headerType = HeaderFooterValues.Default;
-        if (properties.TryGetValue("type", out var hTypeStr))
-        {
-            headerType = hTypeStr.ToLowerInvariant() switch
-            {
-                "first" => HeaderFooterValues.First,
-                "even" => HeaderFooterValues.Even,
-                "default" => HeaderFooterValues.Default,
-                _ => throw new ArgumentException($"Invalid header type: '{hTypeStr}'. Valid values: default, first, even.")
-            };
-        }
+        var headerType = preHeaderType;
 
         var headerRef = new HeaderReference
         {
@@ -516,6 +531,31 @@ public partial class WordHandler
     private string AddFooter(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
         var mainPartF = _doc.MainDocumentPart!;
+
+        // Resolve requested footer type first, so we can reject duplicates before
+        // creating an orphaned FooterPart.
+        var preFooterType = HeaderFooterValues.Default;
+        if (properties.TryGetValue("type", out var preFTypeStr) ||
+            properties.TryGetValue("kind", out preFTypeStr) ||
+            properties.TryGetValue("ref", out preFTypeStr))
+        {
+            preFooterType = preFTypeStr.ToLowerInvariant() switch
+            {
+                "first" => HeaderFooterValues.First,
+                "even" => HeaderFooterValues.Even,
+                "default" => HeaderFooterValues.Default,
+                _ => throw new ArgumentException($"Invalid footer type: '{preFTypeStr}'. Valid values: default, first, even.")
+            };
+        }
+        var preFSectPr = mainPartF.Document!.Body!.Elements<SectionProperties>().LastOrDefault();
+        if (preFSectPr != null && preFSectPr.Elements<FooterReference>()
+                .Any(r => r.Type != null && r.Type.Value == preFooterType))
+        {
+            throw new ArgumentException(
+                $"Footer of type '{preFooterType}' already exists in this section. " +
+                "Remove the existing one first or use --prop type=<first|even>.");
+        }
+
         var footerPart = mainPartF.AddNewPart<FooterPart>();
 
         var fPara = new Paragraph();
@@ -593,17 +633,7 @@ public partial class WordHandler
         var fSectPr = fBody.Elements<SectionProperties>().LastOrDefault()
             ?? fBody.AppendChild(new SectionProperties());
 
-        var footerType = HeaderFooterValues.Default;
-        if (properties.TryGetValue("type", out var fTypeStr))
-        {
-            footerType = fTypeStr.ToLowerInvariant() switch
-            {
-                "first" => HeaderFooterValues.First,
-                "even" => HeaderFooterValues.Even,
-                "default" => HeaderFooterValues.Default,
-                _ => throw new ArgumentException($"Invalid footer type: '{fTypeStr}'. Valid values: default, first, even.")
-            };
-        }
+        var footerType = preFooterType;
 
         var footerRef = new FooterReference
         {
