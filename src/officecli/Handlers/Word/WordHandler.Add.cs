@@ -135,6 +135,18 @@ public partial class WordHandler
             "sdt" or "contentcontrol" => AddSdt(parent, parentPath, index, properties),
             "watermark" => AddWatermark(parent, parentPath, index, properties),
             "formfield" => AddFormField(parent, parentPath, index, properties),
+            // Reject tracked-revision element types. Falling through to
+            // AddDefault produces schema-invalid XML (unnamespaced attrs —
+            // OOXML needs w:author/w:id/w:date) and, without --index,
+            // clobbers the target paragraph's existing runs (data loss).
+            // There is also no way to express the required <w:r><w:t>
+            // content via --prop. Revisions are authored by word processors
+            // with track-changes enabled; route users back to the normal
+            // inline add flow. Mirrors footnote/endnote/comment rejection
+            // added in round 6.
+            "ins" or "del" or "moveto" or "movefrom" =>
+                throw new ArgumentException(
+                    $"Cannot add '{type}' directly. Tracked revisions (<w:ins>/<w:del>/<w:moveTo>/<w:moveFrom>) are authored by word processors with track-changes enabled. To insert content that reviewers see as a tracked change, add the run normally (--type run --prop text=...) and enable track-changes in Word."),
             _ => AddDefault(parent, parentPath, index, properties, type),
         };
         }

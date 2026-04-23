@@ -59,9 +59,14 @@ public partial class WordHandler
         {
             var numPr = pProps.NumberingProperties ?? (pProps.NumberingProperties = new NumberingProperties());
             numPr.NumberingId = new NumberingId { Val = ParseHelpers.SafeParseInt(numId, "numid") };
-            if (properties.TryGetValue("numlevel", out var numLevel))
+            // Accept both "numlevel" and "ilvl" (the OOXML name) — users who
+            // already know OOXML frequently reach for --prop ilvl=N, and
+            // `set --prop ilvl=N` on the same paragraph already works; keep
+            // the two paths in sync here.
+            if (properties.TryGetValue("numlevel", out var numLevel)
+                || properties.TryGetValue("ilvl", out numLevel))
             {
-                numPr.NumberingLevelReference = new NumberingLevelReference { Val = ParseHelpers.SafeParseInt(numLevel, "numlevel") };
+                numPr.NumberingLevelReference = new NumberingLevelReference { Val = ParseHelpers.SafeParseInt(numLevel, "ilvl") };
             }
         }
         if (properties.TryGetValue("shd", out var pShdVal) || properties.TryGetValue("shading", out pShdVal))
