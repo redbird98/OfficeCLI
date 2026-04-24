@@ -379,59 +379,7 @@ public partial class WordHandler
                 throw new ArgumentException($"Section {secIdx} not found (total: {sectionProps.Count})");
 
             var sectPr = sectionProps[secIdx - 1];
-            var secNode = new DocumentNode { Path = path, Type = "section" };
-
-            var sectType = sectPr.GetFirstChild<SectionType>();
-            if (sectType?.Val?.Value != null)
-                secNode.Format["type"] = sectType.Val.InnerText;
-            var pageSize = sectPr.GetFirstChild<PageSize>();
-            // Default to A4 size (11906 × 16838 twips) if no explicit page size
-            var pgW = pageSize?.Width?.Value ?? 11906u;
-            var pgH = pageSize?.Height?.Value ?? 16838u;
-            secNode.Format["pageWidth"] = FormatTwipsToCm(pgW);
-            secNode.Format["pageHeight"] = FormatTwipsToCm(pgH);
-            if (pageSize?.Orient?.Value != null) secNode.Format["orientation"] = pageSize.Orient.InnerText;
-            var margin = sectPr.GetFirstChild<PageMargin>();
-            if (margin?.Top?.Value != null) secNode.Format["marginTop"] = FormatTwipsToCm((uint)Math.Abs(margin.Top.Value));
-            if (margin?.Bottom?.Value != null) secNode.Format["marginBottom"] = FormatTwipsToCm((uint)Math.Abs(margin.Bottom.Value));
-            if (margin?.Left?.Value != null) secNode.Format["marginLeft"] = FormatTwipsToCm(margin.Left.Value);
-            if (margin?.Right?.Value != null) secNode.Format["marginRight"] = FormatTwipsToCm(margin.Right.Value);
-
-            // Line numbers
-            var lnNum = sectPr.GetFirstChild<LineNumberType>();
-            if (lnNum != null)
-            {
-                var countBy = lnNum.CountBy?.Value ?? 1;
-                var restartVal = lnNum.Restart?.InnerText ?? "continuous";
-                var restart = restartVal switch
-                {
-                    "newPage" => "restartPage",
-                    "newSection" => "restartSection",
-                    _ => "continuous"
-                };
-                secNode.Format["lineNumbers"] = restart;
-                if (countBy != 1) secNode.Format["lineNumberCountBy"] = countBy;
-            }
-
-            // Column properties
-            var cols = sectPr.GetFirstChild<Columns>();
-            if (cols != null)
-            {
-                secNode.Format["columns"] = cols.ColumnCount?.Value ?? 1;
-                if (cols.Space?.Value != null && uint.TryParse(cols.Space.Value, out var colSpaceTwips))
-                    secNode.Format["columnSpace"] = FormatTwipsToCm(colSpaceTwips);
-                if (cols.EqualWidth?.Value != null) secNode.Format["equalWidth"] = cols.EqualWidth.Value;
-                if (cols.Separator?.Value == true) secNode.Format["separator"] = true;
-                var colDefs = cols.Elements<Column>().ToList();
-                if (colDefs.Count > 0)
-                {
-                    var widths = colDefs.Select(c => c.Width?.Value ?? "0");
-                    var spaces = colDefs.Select(c => c.Space?.Value ?? "0");
-                    secNode.Format["colWidths"] = string.Join(",", widths);
-                    secNode.Format["colSpaces"] = string.Join(",", spaces);
-                }
-            }
-            return secNode;
+            return BuildSectionNode(sectPr, path);
         }
 
         // Style paths: /styles/StyleId
@@ -494,6 +442,64 @@ public partial class WordHandler
         // Use the resolved positional path when available (normalizes @paraId etc.)
         var nodePath = !string.IsNullOrEmpty(resolvedPath) ? resolvedPath : path;
         return ElementToNode(element, nodePath, depth);
+    }
+
+    /// <summary>Build a DocumentNode for a section from its SectionProperties element.</summary>
+    private DocumentNode BuildSectionNode(SectionProperties sectPr, string path)
+    {
+        var secNode = new DocumentNode { Path = path, Type = "section" };
+
+        var sectType = sectPr.GetFirstChild<SectionType>();
+        if (sectType?.Val?.Value != null)
+            secNode.Format["type"] = sectType.Val.InnerText;
+        var pageSize = sectPr.GetFirstChild<PageSize>();
+        // Default to A4 size (11906 × 16838 twips) if no explicit page size
+        var pgW = pageSize?.Width?.Value ?? 11906u;
+        var pgH = pageSize?.Height?.Value ?? 16838u;
+        secNode.Format["pageWidth"] = FormatTwipsToCm(pgW);
+        secNode.Format["pageHeight"] = FormatTwipsToCm(pgH);
+        if (pageSize?.Orient?.Value != null) secNode.Format["orientation"] = pageSize.Orient.InnerText;
+        var margin = sectPr.GetFirstChild<PageMargin>();
+        if (margin?.Top?.Value != null) secNode.Format["marginTop"] = FormatTwipsToCm((uint)Math.Abs(margin.Top.Value));
+        if (margin?.Bottom?.Value != null) secNode.Format["marginBottom"] = FormatTwipsToCm((uint)Math.Abs(margin.Bottom.Value));
+        if (margin?.Left?.Value != null) secNode.Format["marginLeft"] = FormatTwipsToCm(margin.Left.Value);
+        if (margin?.Right?.Value != null) secNode.Format["marginRight"] = FormatTwipsToCm(margin.Right.Value);
+
+        // Line numbers
+        var lnNum = sectPr.GetFirstChild<LineNumberType>();
+        if (lnNum != null)
+        {
+            var countBy = lnNum.CountBy?.Value ?? 1;
+            var restartVal = lnNum.Restart?.InnerText ?? "continuous";
+            var restart = restartVal switch
+            {
+                "newPage" => "restartPage",
+                "newSection" => "restartSection",
+                _ => "continuous"
+            };
+            secNode.Format["lineNumbers"] = restart;
+            if (countBy != 1) secNode.Format["lineNumberCountBy"] = countBy;
+        }
+
+        // Column properties
+        var cols = sectPr.GetFirstChild<Columns>();
+        if (cols != null)
+        {
+            secNode.Format["columns"] = cols.ColumnCount?.Value ?? 1;
+            if (cols.Space?.Value != null && uint.TryParse(cols.Space.Value, out var colSpaceTwips))
+                secNode.Format["columnSpace"] = FormatTwipsToCm(colSpaceTwips);
+            if (cols.EqualWidth?.Value != null) secNode.Format["equalWidth"] = cols.EqualWidth.Value;
+            if (cols.Separator?.Value == true) secNode.Format["separator"] = true;
+            var colDefs = cols.Elements<Column>().ToList();
+            if (colDefs.Count > 0)
+            {
+                var widths = colDefs.Select(c => c.Width?.Value ?? "0");
+                var spaces = colDefs.Select(c => c.Space?.Value ?? "0");
+                secNode.Format["colWidths"] = string.Join(",", widths);
+                secNode.Format["colSpaces"] = string.Join(",", spaces);
+            }
+        }
+        return secNode;
     }
 
     /// <summary>Find all SectionProperties in the document (paragraph-level + body-level).</summary>
@@ -784,6 +790,22 @@ public partial class WordHandler
         // Simple selector parser: element[attr=value]
         var parsed = ParseSelector(selector);
 
+        // Handle section selector — sections live in paragraph-level sectPr
+        // and the body-level sectPr (last section). OOXML tag is "sectPr",
+        // so GenericXmlQuery with element "section" never matches; route
+        // explicitly here for parity with /section[N] Get.
+        if (parsed.Element == "section")
+        {
+            var sectionProps = FindSectionProperties();
+            for (int si = 0; si < sectionProps.Count; si++)
+            {
+                var node = BuildSectionNode(sectionProps[si], $"/section[{si + 1}]");
+                if (parsed.ContainsText == null || (node.Text?.Contains(parsed.ContainsText) == true))
+                    results.Add(node);
+            }
+            return results;
+        }
+
         // Handle header/footer selectors
         if (parsed.Element is "header" or "footer")
         {
@@ -1033,6 +1055,7 @@ public partial class WordHandler
                 or "revision" or "change" or "trackchange"
                 or "media"
                 or "hyperlink"
+                or "section"
                 or "ole" or "oleobject" or "object" or "embed";
         if (!isKnownType && parsed.ChildSelector == null)
         {

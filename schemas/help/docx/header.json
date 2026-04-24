@@ -3,6 +3,7 @@
   "format": "docx",
   "element": "header",
   "parent": "section",
+  "addParent": "/",
   "operations": {
     "add": true,
     "set": true,
