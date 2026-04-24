@@ -3112,15 +3112,19 @@ public partial class ExcelHandler
                     DeleteCalcChainIfPresent();
                 }
 
-                // Optionally set column width/hidden (CONSISTENCY(add-set-symmetry):
-                // create a Column element if EITHER width or hidden is supplied).
+                // CONSISTENCY(add-set-symmetry): always materialize a <col> element so
+                // Get/Query can find the column even when no width/hidden was supplied.
+                // Width/Hidden are attached only when the caller provides them.
                 bool hasColWidth = properties.TryGetValue("width", out var widthStr) && !string.IsNullOrWhiteSpace(widthStr);
                 bool hasColHidden = properties.TryGetValue("hidden", out var addColHidden);
-                if (hasColWidth || hasColHidden)
                 {
                     var ws = GetSheet(colWorksheet);
                     var columns = ws.GetFirstChild<Columns>() ?? ws.PrependChild(new Columns());
-                    var newCol = new Column
+                    // Idempotent: if a Column with exact Min==Max==insertColIdx already exists,
+                    // update it rather than appending a duplicate.
+                    var existingCol = columns.Elements<Column>()
+                        .FirstOrDefault(c => c.Min?.Value == (uint)insertColIdx && c.Max?.Value == (uint)insertColIdx);
+                    var newCol = existingCol ?? new Column
                     {
                         Min = (uint)insertColIdx,
                         Max = (uint)insertColIdx
@@ -3135,7 +3139,8 @@ public partial class ExcelHandler
                         newCol.Hidden = addColHidden!.Equals("true", StringComparison.OrdinalIgnoreCase)
                             || addColHidden == "1" || addColHidden.Equals("yes", StringComparison.OrdinalIgnoreCase);
                     }
-                    columns.AppendChild(newCol);
+                    if (existingCol == null)
+                        columns.AppendChild(newCol);
                 }
 
                 SaveWorksheet(colWorksheet);
