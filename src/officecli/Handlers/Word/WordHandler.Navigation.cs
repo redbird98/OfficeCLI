@@ -1188,17 +1188,26 @@ public partial class WordHandler
                                 Path = $"{path}/tr[{rowIdx + 1}]/tc[{cellIdx + 1}]",
                                 Type = "cell",
                                 Text = string.Join("", cell.Descendants<Text>().Select(t => t.Text)),
-                                ChildCount = cell.Elements<Paragraph>().Count()
+                                // CONSISTENCY(cell-children): include nested Table children alongside Paragraphs.
+                                ChildCount = cell.Elements<OpenXmlElement>().Count(e => e is Paragraph || e is Table)
                             };
                             ReadCellProps(cell, cellNode);
                             if (depth > 2)
                             {
-                                int pIdx = 0;
-                                foreach (var cellPara in cell.Elements<Paragraph>())
+                                int cellPIdx = 0, cellTblIdx = 0;
+                                foreach (var cellChild in cell.Elements<OpenXmlElement>())
                                 {
-                                    var cParaSegment = BuildParaPathSegment(cellPara, pIdx + 1);
-                                    cellNode.Children.Add(ElementToNode(cellPara, $"{path}/tr[{rowIdx + 1}]/tc[{cellIdx + 1}]/{cParaSegment}", depth - 3));
-                                    pIdx++;
+                                    if (cellChild is Paragraph cellPara)
+                                    {
+                                        cellPIdx++;
+                                        var cParaSegment = BuildParaPathSegment(cellPara, cellPIdx);
+                                        cellNode.Children.Add(ElementToNode(cellPara, $"{path}/tr[{rowIdx + 1}]/tc[{cellIdx + 1}]/{cParaSegment}", depth - 3));
+                                    }
+                                    else if (cellChild is Table cellTbl)
+                                    {
+                                        cellTblIdx++;
+                                        cellNode.Children.Add(ElementToNode(cellTbl, $"{path}/tr[{rowIdx + 1}]/tc[{cellIdx + 1}]/tbl[{cellTblIdx}]", depth - 3));
+                                    }
                                 }
                             }
                             rowNode.Children.Add(cellNode);
@@ -1214,16 +1223,25 @@ public partial class WordHandler
         {
             node.Type = "cell";
             node.Text = string.Join("", directCell.Descendants<Text>().Select(t => t.Text));
-            node.ChildCount = directCell.Elements<Paragraph>().Count();
+            // CONSISTENCY(cell-children): include nested Table children alongside Paragraphs.
+            node.ChildCount = directCell.Elements<OpenXmlElement>().Count(e => e is Paragraph || e is Table);
             ReadCellProps(directCell, node);
             if (depth > 0)
             {
-                int pIdx = 0;
-                foreach (var cellPara in directCell.Elements<Paragraph>())
+                int dcPIdx = 0, dcTblIdx = 0;
+                foreach (var dcChild in directCell.Elements<OpenXmlElement>())
                 {
-                    var dcParaSegment = BuildParaPathSegment(cellPara, pIdx + 1);
-                    node.Children.Add(ElementToNode(cellPara, $"{path}/{dcParaSegment}", depth - 1));
-                    pIdx++;
+                    if (dcChild is Paragraph cellPara)
+                    {
+                        dcPIdx++;
+                        var dcParaSegment = BuildParaPathSegment(cellPara, dcPIdx);
+                        node.Children.Add(ElementToNode(cellPara, $"{path}/{dcParaSegment}", depth - 1));
+                    }
+                    else if (dcChild is Table dcTbl)
+                    {
+                        dcTblIdx++;
+                        node.Children.Add(ElementToNode(dcTbl, $"{path}/tbl[{dcTblIdx}]", depth - 1));
+                    }
                 }
             }
         }
@@ -1242,17 +1260,26 @@ public partial class WordHandler
                         Path = $"{path}/tc[{cellIdx + 1}]",
                         Type = "cell",
                         Text = string.Join("", cell.Descendants<Text>().Select(t => t.Text)),
-                        ChildCount = cell.Elements<Paragraph>().Count()
+                        // CONSISTENCY(cell-children): include nested Table children alongside Paragraphs.
+                        ChildCount = cell.Elements<OpenXmlElement>().Count(e => e is Paragraph || e is Table)
                     };
                     ReadCellProps(cell, cellNode);
                     if (depth > 1)
                     {
-                        int pIdx = 0;
-                        foreach (var cellPara in cell.Elements<Paragraph>())
+                        int drPIdx = 0, drTblIdx = 0;
+                        foreach (var drChild in cell.Elements<OpenXmlElement>())
                         {
-                            var drParaSegment = BuildParaPathSegment(cellPara, pIdx + 1);
-                            cellNode.Children.Add(ElementToNode(cellPara, $"{path}/tc[{cellIdx + 1}]/{drParaSegment}", depth - 2));
-                            pIdx++;
+                            if (drChild is Paragraph cellPara)
+                            {
+                                drPIdx++;
+                                var drParaSegment = BuildParaPathSegment(cellPara, drPIdx);
+                                cellNode.Children.Add(ElementToNode(cellPara, $"{path}/tc[{cellIdx + 1}]/{drParaSegment}", depth - 2));
+                            }
+                            else if (drChild is Table drTbl)
+                            {
+                                drTblIdx++;
+                                cellNode.Children.Add(ElementToNode(drTbl, $"{path}/tc[{cellIdx + 1}]/tbl[{drTblIdx}]", depth - 2));
+                            }
                         }
                     }
                     node.Children.Add(cellNode);

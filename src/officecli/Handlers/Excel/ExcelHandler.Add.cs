@@ -186,6 +186,11 @@ public partial class ExcelHandler
                 }
                 var cell = FindOrCreateCell(cellSheetData, cellRef);
 
+                // CONSISTENCY(cell-value-alias): Set accepts "text" as alias for
+                // "value" (see WordHandler.Set cell text handling); mirror that here.
+                if (!properties.ContainsKey("value") && properties.TryGetValue("text", out var textAlias))
+                    properties["value"] = textAlias;
+
                 if (properties.TryGetValue("value", out var value))
                 {
                     // R13-1: reject values longer than Excel's 32767-char limit

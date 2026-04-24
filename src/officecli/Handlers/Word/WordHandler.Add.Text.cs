@@ -554,7 +554,7 @@ public partial class WordHandler
     /// round-trip through Word instead of being collapsed to a single space.
     /// CRLF/CR are normalized to LF first.
     /// </summary>
-    private static void AppendTextWithBreaks(Run run, string text)
+    internal static void AppendTextWithBreaks(Run run, string text)
     {
         if (string.IsNullOrEmpty(text))
         {

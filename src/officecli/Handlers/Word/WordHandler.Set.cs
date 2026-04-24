@@ -1577,14 +1577,19 @@ public partial class WordHandler
                         }
                         break;
                     case "text":
-                        // Set text on paragraph: update first run or create one
+                        // Set text on paragraph: update first run or create one.
+                        // CONSISTENCY(text-breaks): route through AppendTextWithBreaks
+                        // so \n/\t in value become <w:br/>/<w:tab/>, matching Add behavior.
                         var existingRuns = para.Elements<Run>().ToList();
                         if (existingRuns.Count > 0)
                         {
-                            var firstText = existingRuns[0].GetFirstChild<Text>();
-                            if (firstText != null) firstText.Text = value;
-                            else existingRuns[0].AppendChild(new Text(value) { Space = SpaceProcessingModeValues.Preserve });
-                            // Remove extra runs
+                            // Preserve RunProperties from first run, drop all prior text/break/tab children.
+                            var keepRun = existingRuns[0];
+                            var keepRProps = keepRun.RunProperties;
+                            keepRun.RemoveAllChildren();
+                            if (keepRProps != null)
+                                keepRun.AppendChild(keepRProps);
+                            AppendTextWithBreaks(keepRun, value);
                             for (int i = 1; i < existingRuns.Count; i++) existingRuns[i].Remove();
                         }
                         else
@@ -1599,7 +1604,7 @@ public partial class WordHandler
                                     cloned.AppendChild(child.CloneNode(true));
                                 newRun.PrependChild(cloned);
                             }
-                            newRun.AppendChild(new Text(value) { Space = SpaceProcessingModeValues.Preserve });
+                            AppendTextWithBreaks(newRun, value);
                             para.AppendChild(newRun);
                         }
                         break;
