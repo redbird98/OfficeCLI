@@ -1570,7 +1570,7 @@ public partial class WordHandler
                 node.Format["vmerge"] = tcPr.VerticalMerge.Val?.Value == MergedCellValues.Restart ? "restart" : "continue";
             // Grid span
             if (tcPr.GridSpan?.Val?.Value != null && tcPr.GridSpan.Val.Value > 1)
-                node.Format["gridSpan"] = tcPr.GridSpan.Val.Value;
+                node.Format["colspan"] = tcPr.GridSpan.Val.Value;
             // Cell padding/margins
             var mar = tcPr.TableCellMargin;
             if (mar != null)

@@ -132,7 +132,7 @@
       "aliases": ["gridspan"],
       "add": false, "set": true, "get": true,
       "examples": ["--prop colspan=2"],
-      "readback": "under key 'gridSpan' when > 1",
+      "readback": "under key 'colspan' when > 1",
       "enforcement": "report"
     },
     "fitText": {
