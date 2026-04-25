@@ -505,94 +505,7 @@ public partial class PowerPointHandler
         // when the extension changes. Cleans up the old part to avoid
         // storage bloat (mirrors picture path clean-up).
         var oleSetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/(?:ole|object|embed)\[(\d+)\]$");
-        if (oleSetMatch.Success)
-        {
-            var oleSlideIdx = int.Parse(oleSetMatch.Groups[1].Value);
-            var oleEntryIdx = int.Parse(oleSetMatch.Groups[2].Value);
-            var oleSlideParts = GetSlideParts().ToList();
-            if (oleSlideIdx < 1 || oleSlideIdx > oleSlideParts.Count)
-                throw new ArgumentException($"Slide {oleSlideIdx} not found (total: {oleSlideParts.Count})");
-            var oleSlidePart = oleSlideParts[oleSlideIdx - 1];
-            var oleShapeTree = GetSlide(oleSlidePart).CommonSlideData?.ShapeTree
-                ?? throw new ArgumentException("Slide has no shape tree");
-            var oleFrames = oleShapeTree.Elements<GraphicFrame>()
-                .Where(gf => gf.Descendants<DocumentFormat.OpenXml.Presentation.OleObject>().Any())
-                .ToList();
-            if (oleEntryIdx < 1 || oleEntryIdx > oleFrames.Count)
-                throw new ArgumentException($"OLE object {oleEntryIdx} not found (total: {oleFrames.Count})");
-            var oleFrame = oleFrames[oleEntryIdx - 1];
-            var oleEl = oleFrame.Descendants<DocumentFormat.OpenXml.Presentation.OleObject>().First();
-            var oleUnsupported = new List<string>();
-            foreach (var (key, value) in properties)
-            {
-                switch (key.ToLowerInvariant())
-                {
-                    case "path" or "src":
-                    {
-                        // Delete old payload part and attach the new one.
-                        if (oleEl.Id?.Value is string oldRel && !string.IsNullOrEmpty(oldRel))
-                        {
-                            try { oleSlidePart.DeletePart(oldRel); } catch { }
-                        }
-                        var (newRel, _) = OfficeCli.Core.OleHelper.AddEmbeddedPart(oleSlidePart, value, _filePath);
-                        oleEl.Id = newRel;
-                        // Auto-refresh progId from the new extension unless
-                        // the caller explicitly pinned one in the same call.
-                        if (!properties.ContainsKey("progId") && !properties.ContainsKey("progid"))
-                        {
-                            var autoProgId = OfficeCli.Core.OleHelper.DetectProgId(value);
-                            OfficeCli.Core.OleHelper.ValidateProgId(autoProgId);
-                            oleEl.ProgId = autoProgId;
-                        }
-                        break;
-                    }
-                    case "progid":
-                        OfficeCli.Core.OleHelper.ValidateProgId(value);
-                        oleEl.ProgId = value;
-                        break;
-                    case "name":
-                        oleEl.Name = value;
-                        break;
-                    case "display":
-                    {
-                        // Strict: only "icon" or "content" are accepted —
-                        // see OleHelper.NormalizeOleDisplay.
-                        var oleDisp = OfficeCli.Core.OleHelper.NormalizeOleDisplay(value);
-                        oleEl.ShowAsIcon = oleDisp != "content";
-                        break;
-                    }
-                    case "x" or "y" or "width" or "height":
-                    {
-                        var xfrm = oleFrame.Transform ?? (oleFrame.Transform = new Transform());
-                        var off = xfrm.Offset ?? (xfrm.Offset = new Drawing.Offset { X = 0, Y = 0 });
-                        var ext = xfrm.Extents ?? (xfrm.Extents = new Drawing.Extents { Cx = 0, Cy = 0 });
-                        var emu = ParseEmu(value);
-                        var k = key.ToLowerInvariant();
-                        // CONSISTENCY(ole-nonnegative-size): width/height are
-                        // OOXML positive-sized types (ST_PositiveCoordinate).
-                        // Silently storing a negative EMU breaks the shape
-                        // frame and opens unpredictably in PowerPoint. Reject
-                        // it explicitly; x/y may legitimately be negative
-                        // (off-slide anchors) so they pass through.
-                        if ((k == "width" || k == "height") && emu < 0)
-                            throw new ArgumentException($"{k} must be non-negative");
-                        switch (k)
-                        {
-                            case "x": off.X = emu; break;
-                            case "y": off.Y = emu; break;
-                            case "width": ext.Cx = emu; break;
-                            case "height": ext.Cy = emu; break;
-                        }
-                        break;
-                    }
-                    default:
-                        oleUnsupported.Add(key);
-                        break;
-                }
-            }
-            GetSlide(oleSlidePart).Save();
-            return oleUnsupported;
-        }
+        if (oleSetMatch.Success) return SetOleByPath(oleSetMatch, properties);
 
         var picSetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/(?:picture|pic)\[(\d+)\]$");
         if (picSetMatch.Success)
@@ -1996,6 +1909,95 @@ public partial class PowerPointHandler
         var unsupported = SetRunOrShapeProperties(properties, allRuns, shape, slidePart);
         GetSlide(slidePart).Save();
         return unsupported;
+    }
+
+    private List<string> SetOleByPath(Match oleSetMatch, Dictionary<string, string> properties)
+    {
+        var oleSlideIdx = int.Parse(oleSetMatch.Groups[1].Value);
+        var oleEntryIdx = int.Parse(oleSetMatch.Groups[2].Value);
+        var oleSlideParts = GetSlideParts().ToList();
+        if (oleSlideIdx < 1 || oleSlideIdx > oleSlideParts.Count)
+            throw new ArgumentException($"Slide {oleSlideIdx} not found (total: {oleSlideParts.Count})");
+        var oleSlidePart = oleSlideParts[oleSlideIdx - 1];
+        var oleShapeTree = GetSlide(oleSlidePart).CommonSlideData?.ShapeTree
+            ?? throw new ArgumentException("Slide has no shape tree");
+        var oleFrames = oleShapeTree.Elements<GraphicFrame>()
+            .Where(gf => gf.Descendants<DocumentFormat.OpenXml.Presentation.OleObject>().Any())
+            .ToList();
+        if (oleEntryIdx < 1 || oleEntryIdx > oleFrames.Count)
+            throw new ArgumentException($"OLE object {oleEntryIdx} not found (total: {oleFrames.Count})");
+        var oleFrame = oleFrames[oleEntryIdx - 1];
+        var oleEl = oleFrame.Descendants<DocumentFormat.OpenXml.Presentation.OleObject>().First();
+        var oleUnsupported = new List<string>();
+        foreach (var (key, value) in properties)
+        {
+            switch (key.ToLowerInvariant())
+            {
+                case "path" or "src":
+                {
+                    // Delete old payload part and attach the new one.
+                    if (oleEl.Id?.Value is string oldRel && !string.IsNullOrEmpty(oldRel))
+                    {
+                        try { oleSlidePart.DeletePart(oldRel); } catch { }
+                    }
+                    var (newRel, _) = OfficeCli.Core.OleHelper.AddEmbeddedPart(oleSlidePart, value, _filePath);
+                    oleEl.Id = newRel;
+                    // Auto-refresh progId from the new extension unless
+                    // the caller explicitly pinned one in the same call.
+                    if (!properties.ContainsKey("progId") && !properties.ContainsKey("progid"))
+                    {
+                        var autoProgId = OfficeCli.Core.OleHelper.DetectProgId(value);
+                        OfficeCli.Core.OleHelper.ValidateProgId(autoProgId);
+                        oleEl.ProgId = autoProgId;
+                    }
+                    break;
+                }
+                case "progid":
+                    OfficeCli.Core.OleHelper.ValidateProgId(value);
+                    oleEl.ProgId = value;
+                    break;
+                case "name":
+                    oleEl.Name = value;
+                    break;
+                case "display":
+                {
+                    // Strict: only "icon" or "content" are accepted —
+                    // see OleHelper.NormalizeOleDisplay.
+                    var oleDisp = OfficeCli.Core.OleHelper.NormalizeOleDisplay(value);
+                    oleEl.ShowAsIcon = oleDisp != "content";
+                    break;
+                }
+                case "x" or "y" or "width" or "height":
+                {
+                    var xfrm = oleFrame.Transform ?? (oleFrame.Transform = new Transform());
+                    var off = xfrm.Offset ?? (xfrm.Offset = new Drawing.Offset { X = 0, Y = 0 });
+                    var ext = xfrm.Extents ?? (xfrm.Extents = new Drawing.Extents { Cx = 0, Cy = 0 });
+                    var emu = ParseEmu(value);
+                    var k = key.ToLowerInvariant();
+                    // CONSISTENCY(ole-nonnegative-size): width/height are
+                    // OOXML positive-sized types (ST_PositiveCoordinate).
+                    // Silently storing a negative EMU breaks the shape
+                    // frame and opens unpredictably in PowerPoint. Reject
+                    // it explicitly; x/y may legitimately be negative
+                    // (off-slide anchors) so they pass through.
+                    if ((k == "width" || k == "height") && emu < 0)
+                        throw new ArgumentException($"{k} must be non-negative");
+                    switch (k)
+                    {
+                        case "x": off.X = emu; break;
+                        case "y": off.Y = emu; break;
+                        case "width": ext.Cx = emu; break;
+                        case "height": ext.Cy = emu; break;
+                    }
+                    break;
+                }
+                default:
+                    oleUnsupported.Add(key);
+                    break;
+            }
+        }
+        GetSlide(oleSlidePart).Save();
+        return oleUnsupported;
     }
 
     private List<string> SetMediaByPath(Match mediaSetMatch, Dictionary<string, string> properties)
