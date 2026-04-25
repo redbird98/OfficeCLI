@@ -512,14 +512,35 @@ internal class ExcelStyleManager
         }
         string name = fontProps.GetValueOrDefault("name",
             baseFont.FontName?.Val?.Value ?? OfficeDefaultFonts.MinorLatin);
-        string? color = fontProps.TryGetValue("color", out var cVal)
-            ? NormalizeColor(cVal) : baseFont.Color?.Rgb?.Value;
+        // CONSISTENCY(scheme-color): font.color accepts scheme names
+        // ("accent1"-"accent6", "lt1"/"dk1", "hlink", etc.) per CLAUDE.md.
+        // When matched, store as <color theme="N"/> instead of rgb.
+        string? color;
+        uint? colorTheme = null;
+        if (fontProps.TryGetValue("color", out var cVal))
+        {
+            var schemeIdx = OfficeCli.Handlers.ExcelHandler.ExcelSchemeColorNameToThemeIndex(cVal);
+            if (schemeIdx.HasValue)
+            {
+                color = null;
+                colorTheme = schemeIdx.Value;
+            }
+            else
+            {
+                color = NormalizeColor(cVal);
+            }
+        }
+        else
+        {
+            color = baseFont.Color?.Rgb?.Value;
+            colorTheme = baseFont.Color?.Theme?.Value;
+        }
 
         // Search for existing match
         int idx = 0;
         foreach (var f in fonts.Elements<Font>())
         {
-            if (FontMatches(f, bold, italic, strike, underline, vertAlign, size, name, color))
+            if (FontMatches(f, bold, italic, strike, underline, vertAlign, size, name, color, colorTheme))
                 return (uint)idx;
             idx++;
         }
@@ -546,7 +567,9 @@ internal class ExcelStyleManager
             });
         }
         newFont.Append(new FontSize { Val = size });
-        if (color != null)
+        if (colorTheme.HasValue)
+            newFont.Append(new Color { Theme = (UInt32Value)colorTheme.Value });
+        else if (color != null)
             newFont.Append(new Color { Rgb = color });
         newFont.Append(new FontName { Val = name });
 
@@ -557,7 +580,7 @@ internal class ExcelStyleManager
     }
 
     private static bool FontMatches(Font font, bool bold, bool italic, bool strike,
-        string? underline, string? vertAlign, double size, string name, string? color)
+        string? underline, string? vertAlign, double size, string name, string? color, uint? colorTheme = null)
     {
         if ((font.Bold != null) != bold) return false;
         if ((font.Italic != null) != italic) return false;
@@ -579,11 +602,22 @@ internal class ExcelStyleManager
         if (!string.Equals(font.FontName?.Val?.Value, name, StringComparison.OrdinalIgnoreCase)) return false;
 
         var fontColor = font.Color?.Rgb?.Value;
-        if (color != null)
+        var fontColorTheme = font.Color?.Theme?.Value;
+        if (colorTheme.HasValue)
+        {
+            if (fontColorTheme != colorTheme.Value) return false;
+            if (fontColor != null) return false;
+        }
+        else if (color != null)
         {
             if (!string.Equals(fontColor, color, StringComparison.OrdinalIgnoreCase)) return false;
+            if (fontColorTheme != null) return false;
         }
-        else if (fontColor != null) return false;
+        else
+        {
+            if (fontColor != null) return false;
+            if (fontColorTheme != null) return false;
+        }
 
         return true;
     }
