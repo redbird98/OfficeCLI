@@ -1506,10 +1506,24 @@ public partial class WordHandler
             var font = rProps.RunFonts?.Ascii?.Value ?? rProps.RunFonts?.HighAnsi?.Value;
             if (!string.IsNullOrEmpty(font)) return font;
         }
-        // Fall back to document default font
+        // Fall back to document default font, then theme MinorFont, then
+        // the Office default. The theme step matters for modern Office docs
+        // (e.g. Aptos) where styles.xml omits an explicit ascii font but
+        // theme1.xml's fontScheme defines it.
         var defFont = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles
             ?.DocDefaults?.RunPropertiesDefault?.RunPropertiesBaseStyle?.RunFonts?.Ascii?.Value;
-        return defFont ?? "Calibri";
+        return defFont ?? GetThemeMinorLatinFont() ?? OfficeDefaultFonts.MinorLatin;
+    }
+
+    /// <summary>Read theme1.xml's <c>a:fontScheme/a:minorFont/a:latin/@typeface</c>.</summary>
+    private string? GetThemeMinorLatinFont()
+    {
+        try
+        {
+            return _doc.MainDocumentPart?.ThemePart?.Theme?
+                .ThemeElements?.FontScheme?.MinorFont?.LatinFont?.Typeface?.Value;
+        }
+        catch (System.Xml.XmlException) { return null; }
     }
 
     private string? ResolveStyleFontSize(string styleId)

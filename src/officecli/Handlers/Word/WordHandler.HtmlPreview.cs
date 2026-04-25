@@ -1003,7 +1003,7 @@ public partial class WordHandler
             };
         }
 
-        return new DocDef(font ?? "Calibri", sizePt, lineH, color, gridLinePitchPt, spaceAfterPt, defaultAlign);
+        return new DocDef(font ?? GetThemeMinorLatinFont() ?? OfficeDefaultFonts.MinorLatin, sizePt, lineH, color, gridLinePitchPt, spaceAfterPt, defaultAlign);
     }
 
     /// <summary>Collect all distinct font names from document body, styles, and theme.</summary>

@@ -883,7 +883,7 @@ public partial class WordHandler
         // VML watermarks accept named colors (silver, red, etc.) or hex — don't sanitize
         var wmColor = properties.TryGetValue("color", out var wmcVal)
             ? wmcVal.TrimStart('#') : "silver";
-        var wmFont = properties.GetValueOrDefault("font", "Calibri");
+        var wmFont = properties.GetValueOrDefault("font", OfficeDefaultFonts.MinorLatin);
         var wmSize = properties.GetValueOrDefault("size", "1pt");
         if (!wmSize.EndsWith("pt")) wmSize += "pt";
         var wmRotation = properties.GetValueOrDefault("rotation", "315");

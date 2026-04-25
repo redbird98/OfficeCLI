@@ -450,7 +450,7 @@ internal class ExcelStyleManager
         if (fonts == null)
         {
             fonts = new Fonts(
-                new Font(new FontSize { Val = 11 }, new FontName { Val = "Calibri" })
+                new Font(new FontSize { Val = 11 }, new FontName { Val = OfficeDefaultFonts.MinorLatin })
             ) { Count = 1 };
             // Insert after NumberingFormats if present, otherwise at start
             var numFmts = stylesheet.NumberingFormats;
@@ -500,7 +500,7 @@ internal class ExcelStyleManager
             size = baseFont.FontSize?.Val?.Value ?? 11;
         }
         string name = fontProps.GetValueOrDefault("name",
-            baseFont.FontName?.Val?.Value ?? "Calibri");
+            baseFont.FontName?.Val?.Value ?? OfficeDefaultFonts.MinorLatin);
         string? color = fontProps.TryGetValue("color", out var cVal)
             ? NormalizeColor(cVal) : baseFont.Color?.Rgb?.Value;
 
@@ -954,7 +954,7 @@ internal class ExcelStyleManager
         return new Stylesheet(
             new NumberingFormats() { Count = 0 },
             new Fonts(
-                new Font(new FontSize { Val = 11 }, new FontName { Val = "Calibri" })
+                new Font(new FontSize { Val = 11 }, new FontName { Val = OfficeDefaultFonts.MinorLatin })
             ) { Count = 1 },
             new Fills(
                 new Fill(new PatternFill { PatternType = PatternValues.None }),

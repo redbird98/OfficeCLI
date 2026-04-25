@@ -137,12 +137,12 @@ public static class BlankDocCreator
                 ) { Name = "Office" },
                 new DocumentFormat.OpenXml.Drawing.FontScheme(
                     new DocumentFormat.OpenXml.Drawing.MajorFont(
-                        new DocumentFormat.OpenXml.Drawing.LatinFont { Typeface = "Calibri Light" },
+                        new DocumentFormat.OpenXml.Drawing.LatinFont { Typeface = OfficeDefaultFonts.MajorLatin },
                         new DocumentFormat.OpenXml.Drawing.EastAsianFont { Typeface = "" },
                         new DocumentFormat.OpenXml.Drawing.ComplexScriptFont { Typeface = "" }
                     ),
                     new DocumentFormat.OpenXml.Drawing.MinorFont(
-                        new DocumentFormat.OpenXml.Drawing.LatinFont { Typeface = "Calibri" },
+                        new DocumentFormat.OpenXml.Drawing.LatinFont { Typeface = OfficeDefaultFonts.MinorLatin },
                         new DocumentFormat.OpenXml.Drawing.EastAsianFont { Typeface = "" },
                         new DocumentFormat.OpenXml.Drawing.ComplexScriptFont { Typeface = "" }
                     )
