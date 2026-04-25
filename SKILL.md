@@ -41,16 +41,28 @@ If `officecli` is still not found after first install, open a new terminal and r
 
 ## Help System (IMPORTANT)
 
-**When unsure about property names, value formats, or command syntax, ALWAYS run help instead of guessing.** One help query is faster than guess-fail-retry loops.
+**When unsure about property names, value formats, or command syntax, ALWAYS run help instead of guessing.** One help query beats guess-fail-retry loops.
 
-**Three-layer navigation** — start from the deepest level you know:
+**Unified surface** — `officecli help` ≡ `officecli --help`, and `officecli <cmd> --help` ≡ `officecli help <cmd>`. Pick whichever reads naturally; output is identical.
+
+**Progressive drill-in** (CLI):
 ```bash
-officecli pptx set              # All settable elements and their properties
-officecli pptx set shape        # Shape properties in detail
-officecli pptx set shape.fill   # Specific property format and examples
+officecli help                                  # All commands + global options + schema entry points
+officecli help docx                             # List all docx elements
+officecli help docx paragraph                   # Full schema: properties, aliases, examples, readbacks
+officecli help docx set paragraph               # Verb-filtered: only props usable with `set`
+officecli help docx paragraph --json            # Structured schema (machine-readable)
+officecli help <cmd>                            # --help for any subcommand (move/swap/batch/mcp/...)
 ```
 
-Replace `pptx` with `docx` or `xlsx`. Commands: `view`, `get`, `query`, `set`, `add`, `raw`.
+Format aliases: `word`→`docx`, `excel`→`xlsx`, `ppt`/`powerpoint`→`pptx`. Verbs: `add`, `set`, `get`, `query`, `remove`.
+
+**Via MCP** — same content, same structure (single source: `schemas/help/*.json`):
+```json
+{"command": "help"}                                          // list formats
+{"command": "help", "format": "docx"}                        // list elements
+{"command": "help", "format": "docx", "type": "paragraph"}   // full element schema
+```
 
 ---
 
