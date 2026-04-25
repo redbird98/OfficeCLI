@@ -270,7 +270,13 @@ public partial class WordHandler
         var ciProps = new Dictionary<string, string>(properties, StringComparer.OrdinalIgnoreCase);
         var ffType = ciProps.GetValueOrDefault("formfieldtype",
             ciProps.GetValueOrDefault("type", "text")).ToLowerInvariant();
-        var name = ciProps.GetValueOrDefault("name", $"ff_{Guid.NewGuid():N}"[..12]);
+        // Treat explicit name="" the same as missing name: auto-generate.
+        // Empty bookmark names are addressable-invalid (predicate validator
+        // rejects bare empty values), and the validator below would crash
+        // on name[0] if we let "" through.
+        var name = ciProps.GetValueOrDefault("name", "");
+        if (string.IsNullOrEmpty(name))
+            name = $"ff_{Guid.NewGuid():N}"[..12];
         if (name.Any(c => c == '/' || c == '[' || c == ']'))
             throw new ArgumentException(
                 $"Form field name '{name}' contains path-special characters " +
