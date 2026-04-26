@@ -525,23 +525,21 @@ public partial class WordHandler
     {
         var unsupported = new List<string>();
         var styleId = styleSetMatch.Groups[1].Value;
-        var stylesPart = _doc.MainDocumentPart?.StyleDefinitionsPart
-            ?? _doc.MainDocumentPart!.AddNewPart<DocumentFormat.OpenXml.Packaging.StyleDefinitionsPart>();
-        if (stylesPart.Styles == null) stylesPart.Styles = new Styles();
-        var styles = stylesPart.Styles;
-        var style = styles.Elements<Style>().FirstOrDefault(s =>
+        var stylesPart = _doc.MainDocumentPart?.StyleDefinitionsPart;
+        var style = stylesPart?.Styles?.Elements<Style>().FirstOrDefault(s =>
             s.StyleId?.Value == styleId || s.StyleName?.Val?.Value == styleId);
         if (style == null)
         {
-            var isBuiltIn = styleId is "Normal" or "Heading1" or "Heading2" or "Heading3" or "Heading4"
-                or "Heading5" or "Heading6" or "Heading7" or "Heading8" or "Heading9"
-                or "Title" or "Subtitle" or "Quote" or "IntenseQuote" or "ListParagraph"
-                or "NoSpacing" or "TOCHeading";
-            style = new Style { Type = StyleValues.Paragraph, StyleId = styleId };
-            if (!isBuiltIn) style.CustomStyle = true;
-            style.AppendChild(new StyleName { Val = styleId });
-            styles.AppendChild(style);
+            // CONSISTENCY(set-no-create): Set never creates top-level elements,
+            // matching every other Set path (/body/p[N], /chart[N], /section[N],
+            // /header[N], ...). Auto-creating styles forced an arbitrary
+            // type=paragraph default and made `--prop type=` ambiguous (Add
+            // owns type; Set has no business inferring it). Force users
+            // through Add, where type is an explicit, validated parameter.
+            throw new ArgumentException(
+                $"Style '{styleId}' not found. Use `add /styles --type style --prop id={styleId} --prop name=... --prop type=paragraph|character` first.");
         }
+        var styles = stylesPart!.Styles!;
 
         foreach (var (key, value) in properties)
         {
