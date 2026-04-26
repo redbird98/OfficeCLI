@@ -822,7 +822,8 @@ internal static partial class ChartHelper
                 case "plotarea.x" or "plotarea.y" or "plotarea.w" or "plotarea.h":
                 {
                     if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out var layoutVal))
+                        System.Globalization.CultureInfo.InvariantCulture, out var layoutVal)
+                        || !double.IsFinite(layoutVal))
                     { unsupported.Add(key); break; }
                     var plotArea3 = chart.GetFirstChild<C.PlotArea>();
                     if (plotArea3 == null) { unsupported.Add(key); break; }
@@ -833,7 +834,8 @@ internal static partial class ChartHelper
                 case "title.x" or "title.y" or "title.w" or "title.h":
                 {
                     if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out var layoutVal))
+                        System.Globalization.CultureInfo.InvariantCulture, out var layoutVal)
+                        || !double.IsFinite(layoutVal))
                     { unsupported.Add(key); break; }
                     var titleEl = chart.GetFirstChild<C.Title>();
                     if (titleEl == null) { unsupported.Add(key); break; }
@@ -843,8 +845,11 @@ internal static partial class ChartHelper
 
                 case "legend.x" or "legend.y" or "legend.w" or "legend.h":
                 {
+                    // Reject NaN/Infinity — double.TryParse accepts "NaN"/"Infinity"
+                    // and the resulting <c:x val="NaN"/> XML breaks Excel.
                     if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out var layoutVal))
+                        System.Globalization.CultureInfo.InvariantCulture, out var layoutVal)
+                        || !double.IsFinite(layoutVal))
                     { unsupported.Add(key); break; }
                     var legendEl = chart.GetFirstChild<C.Legend>();
                     if (legendEl == null) { unsupported.Add(key); break; }
@@ -855,7 +860,8 @@ internal static partial class ChartHelper
                 case "trendlinelabel.x" or "trendlinelabel.y" or "trendlinelabel.w" or "trendlinelabel.h":
                 {
                     if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out var layoutVal))
+                        System.Globalization.CultureInfo.InvariantCulture, out var layoutVal)
+                        || !double.IsFinite(layoutVal))
                     { unsupported.Add(key); break; }
                     var plotArea4 = chart.GetFirstChild<C.PlotArea>();
                     var trendlineLbl = plotArea4?.Descendants<C.TrendlineLabel>().FirstOrDefault();
@@ -867,7 +873,8 @@ internal static partial class ChartHelper
                 case "displayunitslabel.x" or "displayunitslabel.y" or "displayunitslabel.w" or "displayunitslabel.h":
                 {
                     if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out var layoutVal))
+                        System.Globalization.CultureInfo.InvariantCulture, out var layoutVal)
+                        || !double.IsFinite(layoutVal))
                     { unsupported.Add(key); break; }
                     var dispUnitsLbl = chart.Descendants<C.DisplayUnitsLabel>().FirstOrDefault();
                     if (dispUnitsLbl == null) { unsupported.Add(key); break; }
