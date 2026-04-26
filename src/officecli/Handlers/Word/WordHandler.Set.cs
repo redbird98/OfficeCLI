@@ -450,24 +450,29 @@ public partial class WordHandler
                 indentH.Hanging = SpacingConverter.ParseWordSpacing(value).ToString();
                 indentH.FirstLine = null;
                 return true;
+            // Toggle props: always replace the element (don't `??=`) so an
+            // existing `<w:foo w:val="false"/>` written by a previous Set or
+            // by external tooling is correctly overridden when the new value
+            // is true. With `??=` the val=false sticks and the toggle never
+            // flips back to true (BUG-LT3).
             case "keepnext" or "keepwithnext":
-                if (IsTruthy(value)) pProps.KeepNext ??= new KeepNext();
+                if (IsTruthy(value)) pProps.KeepNext = new KeepNext();
                 else pProps.KeepNext = null;
                 return true;
             case "keeplines" or "keeptogether":
-                if (IsTruthy(value)) pProps.KeepLines ??= new KeepLines();
+                if (IsTruthy(value)) pProps.KeepLines = new KeepLines();
                 else pProps.KeepLines = null;
                 return true;
             case "pagebreakbefore":
-                if (IsTruthy(value)) pProps.PageBreakBefore ??= new PageBreakBefore();
+                if (IsTruthy(value)) pProps.PageBreakBefore = new PageBreakBefore();
                 else pProps.PageBreakBefore = null;
                 return true;
             case "widowcontrol" or "widoworphan":
-                if (IsTruthy(value)) pProps.WidowControl ??= new WidowControl();
+                if (IsTruthy(value)) pProps.WidowControl = new WidowControl();
                 else pProps.WidowControl = new WidowControl { Val = false };
                 return true;
             case "contextualspacing" or "contextualSpacing":
-                if (IsTruthy(value)) pProps.ContextualSpacing ??= new ContextualSpacing();
+                if (IsTruthy(value)) pProps.ContextualSpacing = new ContextualSpacing();
                 else pProps.ContextualSpacing = null;
                 return true;
             case "shading" or "shd":
