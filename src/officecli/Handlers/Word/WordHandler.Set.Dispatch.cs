@@ -652,6 +652,28 @@ public partial class WordHandler
                     else pPrWc.WidowControl = new WidowControl { Val = false };
                     break;
                 }
+                // Numbering linkage on the style itself (numPr inside style/pPr).
+                // Mirrors paragraph-level numId/ilvl in WordHandler.Set.cs and
+                // AddStyle's numPr support — paragraphs inheriting this style
+                // (via pStyle) will pick up numbering through ResolveNumPrFromStyle
+                // without needing their own numPr.
+                case "numId" or "numid":
+                {
+                    var pPrN = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
+                    var sNumPr = pPrN.NumberingProperties ?? (pPrN.NumberingProperties = new NumberingProperties());
+                    sNumPr.NumberingId = new NumberingId { Val = ParseHelpers.SafeParseInt(value, "numId") };
+                    break;
+                }
+                case "ilvl" or "numLevel" or "numlevel":
+                {
+                    var pPrN2 = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
+                    var sNumPr2 = pPrN2.NumberingProperties ?? (pPrN2.NumberingProperties = new NumberingProperties());
+                    var ilvl = ParseHelpers.SafeParseInt(value, "ilvl");
+                    if (ilvl < 0 || ilvl > 8)
+                        throw new ArgumentException($"ilvl must be in range 0..8 (got {ilvl}).");
+                    sNumPr2.NumberingLevelReference = new NumberingLevelReference { Val = ilvl };
+                    break;
+                }
                 case "pbdr.top" or "pbdr.bottom" or "pbdr.left" or "pbdr.right" or "pbdr.between" or "pbdr.bar" or "pbdr.all" or "pbdr":
                 case "border.all" or "border" or "border.top" or "border.bottom" or "border.left" or "border.right":
                 {

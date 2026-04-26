@@ -479,6 +479,36 @@ public partial class WordHandler
         }
         if (hasRPr) newStyle.AppendChild(styleRPr);
 
+        // Numbering linkage on the style itself (numPr inside StyleParagraphProperties).
+        // Lets paragraphs inherit list editing without setting numPr on each paragraph,
+        // which is the canonical pattern used by Heading1..9 in real templates.
+        // Mirrors WordHandler.Set.cs paragraph-level numId/ilvl handling.
+        bool hasStyleNumPr = (properties.TryGetValue("numId", out var sNumIdStr) || properties.TryGetValue("numid", out sNumIdStr))
+                          || (properties.TryGetValue("ilvl", out _) || properties.TryGetValue("numLevel", out _) || properties.TryGetValue("numlevel", out _));
+        if (hasStyleNumPr)
+        {
+            var pPrForNum = newStyle.StyleParagraphProperties ?? EnsureStyleParagraphProperties(newStyle);
+            var numPr = pPrForNum.NumberingProperties ?? (pPrForNum.NumberingProperties = new NumberingProperties());
+            if (!string.IsNullOrEmpty(sNumIdStr))
+            {
+                var nid = ParseHelpers.SafeParseInt(sNumIdStr, "numId");
+                if (nid < 0) throw new ArgumentException($"numId must be >= 0 (got {nid}).");
+                numPr.NumberingId = new NumberingId { Val = nid };
+            }
+            string? ilvlRaw = null;
+            if (properties.TryGetValue("ilvl", out var iRaw)
+                || properties.TryGetValue("numLevel", out iRaw)
+                || properties.TryGetValue("numlevel", out iRaw))
+                ilvlRaw = iRaw;
+            if (!string.IsNullOrEmpty(ilvlRaw))
+            {
+                var ilvl = ParseHelpers.SafeParseInt(ilvlRaw, "ilvl");
+                if (ilvl < 0 || ilvl > 8)
+                    throw new ArgumentException($"ilvl must be in range 0..8 (got {ilvl}).");
+                numPr.NumberingLevelReference = new NumberingLevelReference { Val = ilvl };
+            }
+        }
+
         // CONSISTENCY(add-set-symmetry): mirror SetStylePath's ApplyRunFormatting
         // + generic OOXML fallback so `add` accepts the same prop surface as
         // `set` for any single-Val style property. Without this sweep, props
@@ -491,6 +521,7 @@ public partial class WordHandler
             "alignment", "align", "spacebefore", "spaceBefore",
             "spaceafter", "spaceAfter", "font", "size", "bold", "italic", "color",
             "font.ascii", "font.hAnsi", "font.eastAsia", "font.cs",
+            "numId", "numid", "ilvl", "numLevel", "numlevel",
         };
         foreach (var (key, value) in properties)
         {
@@ -564,6 +595,206 @@ public partial class WordHandler
 
         var resultPath = $"/styles/{styleId}";
         return resultPath;
+    }
+
+    /// <summary>
+    /// Add a numbering instance (&lt;w:num&gt;) under /numbering. A num is a thin
+    /// pointer that references an existing &lt;w:abstractNum&gt; via abstractNumId.
+    ///
+    /// Mode B (current): requires --prop abstractNumId=N pointing at an existing
+    /// abstractNum. Other modes (auto-create abstractNum, lvlOverride) follow.
+    /// </summary>
+    private string AddNum(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
+    {
+        var mainPart = _doc.MainDocumentPart!;
+        var numberingPart = mainPart.NumberingDefinitionsPart
+            ?? mainPart.AddNewPart<NumberingDefinitionsPart>();
+        numberingPart.Numbering ??= new Numbering();
+        var numbering = numberingPart.Numbering;
+
+        // Three modes:
+        //   B/C: --prop abstractNumId=N (reuse existing template; optionally with start overrides)
+        //   A:   --prop format=... (no abstractNumId; auto-create a matching abstractNum)
+        //   neither: throw with guidance
+        bool hasAbsId = properties.TryGetValue("abstractNumId", out var absIdStr) && !string.IsNullOrEmpty(absIdStr);
+        bool hasFormat = properties.ContainsKey("format")
+                       || properties.ContainsKey("text")
+                       || properties.ContainsKey("indent")
+                       || properties.ContainsKey("type");
+        if (hasAbsId && hasFormat)
+            throw new ArgumentException(
+                "--prop abstractNumId conflicts with --prop format/text/indent/type. " +
+                "Either reuse an existing template (abstractNumId) or define a new one (format/text/indent/type), not both.");
+        if (!hasAbsId && !hasFormat)
+            throw new ArgumentException(
+                "--type num requires either --prop abstractNumId=N (reuse existing template) " +
+                "or --prop format=decimal|bullet|... (auto-create a matching abstractNum).");
+
+        int abstractNumId;
+        if (hasAbsId)
+        {
+            abstractNumId = ParseHelpers.SafeParseInt(absIdStr!, "abstractNumId");
+            // Reject pointers that would dangle — Word silently drops numbering
+            // when numId resolves to a missing abstractNum, which is a confusing
+            // failure mode to debug. Catch it at write time.
+            var abstractExists = numbering.Elements<AbstractNum>()
+                .Any(a => a.AbstractNumberId?.Value == abstractNumId);
+            if (!abstractExists)
+                throw new ArgumentException(
+                    $"abstractNumId={abstractNumId} not found in /numbering. " +
+                    "Create the abstractNum first, or pick an existing one via 'officecli word query <file> /numbering'.");
+        }
+        else
+        {
+            abstractNumId = CreateAbstractNumFromProps(numbering, properties);
+        }
+
+        // numId assignment: explicit collides → throw; otherwise max+1.
+        // Mirrors AddStyle's IdTaken pattern, but numId is int (not string)
+        // so there's no "auto-suffix" — just take next available.
+        int numId;
+        var explicitId = properties.ContainsKey("id");
+        if (explicitId)
+        {
+            numId = ParseHelpers.SafeParseInt(properties["id"], "id");
+            if (numId < 1)
+                throw new ArgumentException($"numId must be >= 1 (got {numId}). numId=0 is reserved as 'no numbering'.");
+            if (numbering.Elements<NumberingInstance>().Any(n => n.NumberID?.Value == numId))
+                throw new ArgumentException(
+                    $"numId {numId} already exists. Pick a unique --prop id, or omit --prop id for auto-assignment.");
+        }
+        else
+        {
+            numId = numbering.Elements<NumberingInstance>()
+                .Select(n => n.NumberID?.Value ?? 0).DefaultIfEmpty(0).Max() + 1;
+        }
+
+        // Schema requires AbstractNum elements before NumberingInstance elements.
+        // Append the new num at the end of the existing NumberingInstance run.
+        var newNum = new NumberingInstance { NumberID = numId };
+        newNum.AppendChild(new AbstractNumId { Val = abstractNumId });
+
+        // Mode C: per-level start overrides. `start` is shorthand for
+        // `startOverride.0`. `startOverride.N` (0..8) emits a <w:lvlOverride>
+        // for that level. Each override is a fresh sibling element — no
+        // collision logic needed since we're constructing a brand-new num.
+        var startOverrides = new SortedDictionary<int, int>();
+        if (properties.TryGetValue("start", out var startStr) && !string.IsNullOrEmpty(startStr))
+            startOverrides[0] = ParseHelpers.SafeParseInt(startStr, "start");
+        foreach (var kvp in properties)
+        {
+            const string prefix = "startOverride.";
+            if (!kvp.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+            var lvlStr = kvp.Key.Substring(prefix.Length);
+            var lvl = ParseHelpers.SafeParseInt(lvlStr, kvp.Key);
+            if (lvl < 0 || lvl > 8)
+                throw new ArgumentException($"{kvp.Key} level must be 0..8 (got {lvl}).");
+            startOverrides[lvl] = ParseHelpers.SafeParseInt(kvp.Value, kvp.Key);
+        }
+        foreach (var (lvl, startVal) in startOverrides)
+        {
+            var lvlOverride = new LevelOverride { LevelIndex = lvl };
+            lvlOverride.AppendChild(new StartOverrideNumberingValue { Val = startVal });
+            newNum.AppendChild(lvlOverride);
+        }
+
+        numbering.AppendChild(newNum);
+        numbering.Save();
+        return $"/numbering/num[@id={numId}]";
+    }
+
+    /// <summary>
+    /// Mode A helper: build an AbstractNum element from --prop format/text/indent/type
+    /// inputs and append it to the Numbering element in correct schema order
+    /// (AbstractNum before NumberingInstance). Returns the assigned abstractNumId.
+    ///
+    /// Level 0 uses the caller's format/text/indent. Levels 1..8 are auto-filled
+    /// with sensible cycling defaults (bullet glyph cycle for bullet format,
+    /// decimal/lowerLetter/lowerRoman cycle otherwise) — same convention as
+    /// the high-level liststyle path in WordHandler.StyleList.cs.
+    /// </summary>
+    private static int CreateAbstractNumFromProps(Numbering numbering, Dictionary<string, string> properties)
+    {
+        var formatRaw = properties.GetValueOrDefault("format", "decimal").ToLowerInvariant();
+        var isBullet = formatRaw is "bullet" or "unordered" or "ul";
+        var lvl0Format = formatRaw switch
+        {
+            "decimal" => NumberFormatValues.Decimal,
+            "bullet" or "unordered" or "ul" => NumberFormatValues.Bullet,
+            "lowerletter" or "loweralpha" => NumberFormatValues.LowerLetter,
+            "upperletter" or "upperalpha" => NumberFormatValues.UpperLetter,
+            "lowerroman" => NumberFormatValues.LowerRoman,
+            "upperroman" => NumberFormatValues.UpperRoman,
+            "ordinal" => NumberFormatValues.Ordinal,
+            "cardinaltext" => NumberFormatValues.CardinalText,
+            "ordinaltext" => NumberFormatValues.OrdinalText,
+            "chinesecounting" => NumberFormatValues.ChineseCounting,
+            "chineselegalsimplified" => NumberFormatValues.ChineseLegalSimplified,
+            "chinesecountingthousand" => NumberFormatValues.ChineseCountingThousand,
+            "ideographdigital" => NumberFormatValues.IdeographDigital,
+            "japanesecounting" => NumberFormatValues.JapaneseCounting,
+            "none" => NumberFormatValues.None,
+            _ => throw new ArgumentException($"Unknown numbering format '{formatRaw}'. Common values: decimal, bullet, lowerLetter, upperLetter, lowerRoman, upperRoman, chineseCounting.")
+        };
+        var lvl0Text = properties.GetValueOrDefault("text", isBullet ? "•" : "%1.");
+        var lvl0Indent = properties.TryGetValue("indent", out var indStr)
+            ? ParseHelpers.SafeParseInt(indStr, "indent")
+            : 720;
+        var multiLevelType = properties.GetValueOrDefault("type", "hybridMultilevel").ToLowerInvariant() switch
+        {
+            "hybridmultilevel" or "hybrid" => MultiLevelValues.HybridMultilevel,
+            "multilevel" or "multi" => MultiLevelValues.Multilevel,
+            "singlelevel" or "single" => MultiLevelValues.SingleLevel,
+            _ => throw new ArgumentException($"Unknown multiLevelType '{properties["type"]}'. Valid: hybridMultilevel, multilevel, singleLevel.")
+        };
+
+        var nextAbstractId = numbering.Elements<AbstractNum>()
+            .Select(a => a.AbstractNumberId?.Value ?? 0).DefaultIfEmpty(-1).Max() + 1;
+
+        var abstractNum = new AbstractNum { AbstractNumberId = nextAbstractId };
+        abstractNum.AppendChild(new MultiLevelType { Val = multiLevelType });
+
+        var bulletChars = new[] { "•", "◦", "▪" };
+        for (int lvl = 0; lvl < 9; lvl++)
+        {
+            var level = new Level { LevelIndex = lvl };
+            level.AppendChild(new StartNumberingValue { Val = 1 });
+            if (lvl == 0)
+            {
+                level.AppendChild(new NumberingFormat { Val = lvl0Format });
+                level.AppendChild(new LevelText { Val = lvl0Text });
+            }
+            else if (isBullet)
+            {
+                level.AppendChild(new NumberingFormat { Val = NumberFormatValues.Bullet });
+                level.AppendChild(new LevelText { Val = bulletChars[lvl % bulletChars.Length] });
+            }
+            else
+            {
+                var fmt = (lvl % 3) switch
+                {
+                    0 => NumberFormatValues.Decimal,
+                    1 => NumberFormatValues.LowerLetter,
+                    _ => NumberFormatValues.LowerRoman,
+                };
+                level.AppendChild(new NumberingFormat { Val = fmt });
+                level.AppendChild(new LevelText { Val = $"%{lvl + 1}." });
+            }
+            level.AppendChild(new LevelJustification { Val = LevelJustificationValues.Left });
+            level.AppendChild(new PreviousParagraphProperties(
+                new Indentation { Left = ((lvl == 0 ? lvl0Indent : (lvl + 1) * 720)).ToString(), Hanging = "360" }
+            ));
+            abstractNum.AppendChild(level);
+        }
+
+        // Schema requires AbstractNum before NumberingInstance.
+        var firstNumInstance = numbering.GetFirstChild<NumberingInstance>();
+        if (firstNumInstance != null)
+            numbering.InsertBefore(abstractNum, firstNumInstance);
+        else
+            numbering.AppendChild(abstractNum);
+
+        return nextAbstractId;
     }
 
     private string AddHeader(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)

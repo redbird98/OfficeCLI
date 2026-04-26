@@ -54,6 +54,13 @@ public partial class WordHandler
             stylesPart.Styles ??= new Styles();
             parent = stylesPart.Styles;
         }
+        else if (parentPath == "/numbering")
+        {
+            var numberingPart = _doc.MainDocumentPart!.NumberingDefinitionsPart
+                ?? _doc.MainDocumentPart.AddNewPart<NumberingDefinitionsPart>();
+            numberingPart.Numbering ??= new Numbering();
+            parent = numberingPart.Numbering;
+        }
         else if (TryResolveFootnoteOrEndnoteBody(parentPath, out var fnBody, out var canonicalPath))
         {
             // Route /footnote[@footnoteId=N] / /footnote[N] (and endnote
@@ -133,6 +140,7 @@ public partial class WordHandler
             "endnote" => AddEndnote(parent, parentPath, index, properties),
             "toc" or "tableofcontents" => AddToc(parent, parentPath, index, properties),
             "style" => AddStyle(parent, parentPath, index, properties),
+            "num" => AddNum(parent, parentPath, index, properties),
             "header" => AddHeader(parent, parentPath, index, properties),
             "footer" => AddFooter(parent, parentPath, index, properties),
             "field" or "pagenum" or "pagenumber" or "page" or "numpages" or "sectionpages" or "section"
@@ -346,6 +354,22 @@ public partial class WordHandler
         {
             throw new ArgumentException(
                 $"Cannot add 'style' under {parentPath}: styles belong under /styles.");
+        }
+
+        // Global: 'num' belongs only under /numbering. Mirrors the 'style'/'styles' pairing.
+        if (t == "num" && parent is not Numbering)
+        {
+            throw new ArgumentException(
+                $"Cannot add 'num' under {parentPath}: numbering instances belong under /numbering.");
+        }
+
+        // /numbering only accepts numbering definitions (num, abstractNum). Reject everything else
+        // so a stray --type p doesn't corrupt numbering.xml.
+        if (parent is Numbering)
+        {
+            if (t != "num" && t != "abstractnum")
+                throw new ArgumentException(
+                    $"Cannot add '{type}' under /numbering. /numbering only holds numbering definitions — use --type num (with --prop abstractNumId=N) or --type abstractNum.");
         }
 
         // 'tab' (tab stop) lives in a paragraph's pPr/tabs container, or in a
