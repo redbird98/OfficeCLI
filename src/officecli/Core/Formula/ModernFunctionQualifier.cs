@@ -207,18 +207,34 @@ public static class ModernFunctionQualifier
                 (i == 0 || !IsIdentPrev(formula[i - 1])))
             {
                 int start = i;
-                while (i < formula.Length && (char.IsLetterOrDigit(formula[i]) || formula[i] == '_' || formula[i] == '.'))
-                    i++;
-                if (i < formula.Length && formula[i] == '!')
+                // Greedy scan: include identifier chars and embedded spaces, as long
+                // as the run ultimately terminates at '!'. A bare sheet name with a
+                // space (e.g. `My Sheet!A1`) must be quoted as a whole, not split
+                // across the space.
+                int j = i;
+                while (j < formula.Length && (char.IsLetterOrDigit(formula[j]) || formula[j] == '_' || formula[j] == '.' || formula[j] == ' '))
+                    j++;
+                // Trim trailing spaces from the candidate name; they can't be part of
+                // a sheet ref unless followed by more name chars then '!'.
+                int end = j;
+                while (end > start && formula[end - 1] == ' ') end--;
+                if (end < formula.Length && formula[end] == '!' && end > start)
                 {
-                    var name = formula.Substring(start, i - start);
+                    var name = formula.Substring(start, end - start);
                     if (SheetNameNeedsQuoting(name))
                         sb.Append('\'').Append(name).Append('\'');
                     else
                         sb.Append(name);
+                    i = end;
                     continue;
                 }
-                sb.Append(formula, start, i - start);
+                // No '!' terminator: only consume the leading non-space identifier
+                // run (preserve old behavior for plain tokens / function calls).
+                int k = i;
+                while (k < formula.Length && (char.IsLetterOrDigit(formula[k]) || formula[k] == '_' || formula[k] == '.'))
+                    k++;
+                sb.Append(formula, start, k - start);
+                i = k;
                 continue;
             }
 
