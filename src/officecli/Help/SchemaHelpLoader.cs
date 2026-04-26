@@ -295,10 +295,10 @@ internal static class SchemaHelpLoader
         // are filtered upstream.
         "ind.", "shd.", "u.", "spacing.", "pbdr.",
         // Section-level: page size / margins / cols / type / etc.
-        "pgsz.", "pgmar.", "cols.",
+        "pgsz.", "pgmar.", "cols.", "docgrid.", "lnnumtype.",
         // Table / row / cell containers: borders, margins, height, etc.
         "tblborders.", "tblcellmar.", "tcborders.", "tcmar.", "trheight.",
-        "tcw.", "tblw.",
+        "tcw.", "tblw.", "tbllayout.", "tblpr.", "tblpprex.",
     };
 
     /// <summary>

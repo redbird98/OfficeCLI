@@ -143,6 +143,23 @@ public partial class WordHandler
             sectPr.AppendChild(lnType);
         }
 
+        // Dotted-key fallback for sectPr-level attrs not modeled by the
+        // hand-rolled blocks above (single-attr forms like docGrid.* or
+        // future schema additions). CONSISTENCY(add-set-symmetry).
+        // Skip the dotted curated keys that AddSection already consumes
+        // explicitly to avoid double application.
+        var sectionAlreadyConsumed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "columns.count", "columns.space",
+        };
+        foreach (var (key, value) in properties)
+        {
+            if (!key.Contains('.')) continue;
+            if (sectionAlreadyConsumed.Contains(key)) continue;
+            if (Core.TypedAttributeFallback.TrySet(sectPr, key, value)) continue;
+            LastAddUnsupportedProps.Add(key);
+        }
+
         sectPProps.AppendChild(sectPr);
         sectPara.AppendChild(sectPProps);
         InsertAtIndexOrAppend(parent, sectPara, index);
