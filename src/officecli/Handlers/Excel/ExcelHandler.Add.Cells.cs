@@ -34,11 +34,12 @@ public partial class ExcelHandler
             ValidateSheetName(name);
         if (sheets.Elements<Sheet>().Any(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase)))
         {
-            if (_initialSheetNames.Contains(name))
-            {
-                // Sheet existed when the file was opened — treat as idempotent no-op
-                return $"/{name}";
-            }
+            // Always reject — duplicate sheet names produce a workbook Excel
+            // refuses to open, and the previous "idempotent no-op when the
+            // sheet existed at open" branch silently masked the error
+            // (returned success without applying any of the user's
+            // properties such as tabColor / autoFilter / hidden). Mirror the
+            // post-open rejection so behavior is uniform.
             throw new ArgumentException($"A sheet named '{name}' already exists. Sheet names must be unique.");
         }
         var newWorksheetPart = workbookPart.AddNewPart<WorksheetPart>();
