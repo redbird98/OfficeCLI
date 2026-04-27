@@ -3,6 +3,7 @@
 
 using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
 using OfficeCli.Core;
 using Drawing = DocumentFormat.OpenXml.Drawing;
@@ -490,7 +491,39 @@ public partial class PowerPointHandler
         var shapeIdx = int.Parse(match.Groups[2].Value);
 
         var (slidePart, shape) = ResolveShape(slideIdx, shapeIdx);
+        return ApplyShapePropsCore(slidePart, shape, properties);
+    }
 
+    /// <summary>
+    /// Resolve a shape nested inside a group: /slide[N]/group[M]/shape[K].
+    /// CONSISTENCY(group-inner-shape): Get already supports this path via the
+    /// generic XML fallback; Set previously had no dispatch entry, leading to
+    /// "Element not found" even though Get could read the same path.
+    /// </summary>
+    private List<string> SetGroupInnerShapeByPath(Match match, Dictionary<string, string> properties)
+    {
+        var slideIdx = int.Parse(match.Groups[1].Value);
+        var grpIdx = int.Parse(match.Groups[2].Value);
+        var shapeIdx = int.Parse(match.Groups[3].Value);
+
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count)
+            throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts.Count})");
+        var slidePart = slideParts[slideIdx - 1];
+        var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree
+            ?? throw new ArgumentException("Slide has no shape tree");
+        var groups = shapeTree.Elements<GroupShape>().ToList();
+        if (grpIdx < 1 || grpIdx > groups.Count)
+            throw new ArgumentException($"Group {grpIdx} not found (total: {groups.Count})");
+        var grp = groups[grpIdx - 1];
+        var innerShapes = grp.Elements<Shape>().ToList();
+        if (shapeIdx < 1 || shapeIdx > innerShapes.Count)
+            throw new ArgumentException($"Shape {shapeIdx} not found in group {grpIdx} (total: {innerShapes.Count})");
+        return ApplyShapePropsCore(slidePart, innerShapes[shapeIdx - 1], properties);
+    }
+
+    private List<string> ApplyShapePropsCore(SlidePart slidePart, Shape shape, Dictionary<string, string> properties)
+    {
         // Handle z-order first (changes shape position in tree)
         var zOrderValue = properties.GetValueOrDefault("zorder")
             ?? properties.GetValueOrDefault("z-order")
@@ -544,5 +577,68 @@ public partial class PowerPointHandler
             shape.Parent?.ReplaceChild(shapeBackup, shape);
             throw;
         }
+    }
+
+    private List<string> SetShapeAnimationByPath(Match match, Dictionary<string, string> properties)
+    {
+        var slideIdx = int.Parse(match.Groups[1].Value);
+        var shapeIdx = int.Parse(match.Groups[2].Value);
+        var animIdx = int.Parse(match.Groups[3].Value);
+
+        var (slidePart, shape) = ResolveShape(slideIdx, shapeIdx);
+        var ctns = EnumerateShapeAnimationCTns(slidePart, shape);
+        if (animIdx < 1 || animIdx > ctns.Count)
+            throw new ArgumentException(
+                $"Animation {animIdx} not found on shape {shapeIdx} (total: {ctns.Count})");
+
+        // Read current animation properties via PopulateAnimationNode, then merge
+        // with user-provided overrides, then re-apply via the standard pipeline.
+        // Limitation: like Set on /slide/shape with animation=, this replaces ALL
+        // animations on the shape (the apply pipeline only knows how to add one).
+        // CONSISTENCY(animation-set): mirrors Add's animValue string assembly.
+        var existing = new DocumentNode { Path = "" };
+        PopulateAnimationNode(existing, ctns[animIdx - 1]);
+
+        string Get(string key, string? fallback = null)
+            => properties.TryGetValue(key, out var v)
+                ? v
+                : (existing.Format.TryGetValue(key, out var ev) ? ev?.ToString() ?? fallback ?? "" : fallback ?? "");
+
+        var effect = Get("effect", "fade");
+        var cls = Get("class", "entrance");
+        var duration = properties.TryGetValue("duration", out var dv) ? dv
+            : properties.TryGetValue("dur", out var dv2) ? dv2
+            : (existing.Format.TryGetValue("duration", out var ed) ? ed?.ToString() ?? "500" : "500");
+        var trigger = Get("trigger", "onclick");
+        var triggerPart = trigger.ToLowerInvariant() switch
+        {
+            "onclick" or "click" => "click",
+            "after" or "afterprevious" => "after",
+            "with" or "withprevious" => "with",
+            _ => throw new ArgumentException(
+                $"Invalid animation trigger: '{trigger}'. Valid values: onclick, click, after, afterprevious, with, withprevious.")
+        };
+
+        var animValue = $"{effect}-{cls}-{duration}-{triggerPart}";
+        string? Resolve(string key)
+            => properties.TryGetValue(key, out var pv) ? pv
+             : (existing.Format.TryGetValue(key, out var ev) ? ev?.ToString() : null);
+        var delayVal = Resolve("delay");
+        if (!string.IsNullOrEmpty(delayVal)) animValue += $"-delay={delayVal}";
+        var einVal = Resolve("easein");
+        if (!string.IsNullOrEmpty(einVal)) animValue += $"-easein={einVal}";
+        var eoutVal = Resolve("easeout");
+        if (!string.IsNullOrEmpty(eoutVal)) animValue += $"-easeout={eoutVal}";
+        if (properties.TryGetValue("easing", out var easing))
+            animValue += $"-easing={easing}";
+        if (properties.TryGetValue("direction", out var dir))
+            animValue += $"-{dir}";
+
+        var shapeId = shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
+        if (shapeId.HasValue)
+            RemoveShapeAnimations(slidePart.Slide!, shapeId.Value);
+        ApplyShapeAnimation(slidePart, shape, animValue);
+        GetSlide(slidePart).Save();
+        return [];
     }
 }

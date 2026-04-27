@@ -175,6 +175,10 @@ public partial class PowerPointHandler
         var notesSetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/notes$");
         if (notesSetMatch.Success) return SetNotesByPath(notesSetMatch, properties);
 
+        // Try animation path: /slide[N]/shape[M]/animation[A]
+        var animSetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/shape\[(\d+)\]/animation\[(\d+)\]$");
+        if (animSetMatch.Success) return SetShapeAnimationByPath(animSetMatch, properties);
+
         // Try run-level path: /slide[N]/shape[M]/run[K]
         var runMatch = Regex.Match(path, @"^/slide\[(\d+)\]/shape\[(\d+)\]/run\[(\d+)\]$");
         if (runMatch.Success) return SetShapeRunByPath(runMatch, properties);
@@ -248,6 +252,11 @@ public partial class PowerPointHandler
         // Try connector path: /slide[N]/connector[M] or /slide[N]/connection[M]
         var cxnMatch = Regex.Match(path, @"^/slide\[(\d+)\]/(?:connector|connection)\[(\d+)\]$");
         if (cxnMatch.Success) return SetConnectorByPath(cxnMatch, properties);
+
+        // Try group inner shape path: /slide[N]/group[M]/shape[K]
+        // CONSISTENCY(group-inner-shape): Get supports this; Set must too.
+        var grpInnerShapeMatch = Regex.Match(path, @"^/slide\[(\d+)\]/group\[(\d+)\]/shape\[(\d+)\]$");
+        if (grpInnerShapeMatch.Success) return SetGroupInnerShapeByPath(grpInnerShapeMatch, properties);
 
         // Try group path: /slide[N]/group[M]
         var grpMatch = Regex.Match(path, @"^/slide\[(\d+)\]/group\[(\d+)\]$");
