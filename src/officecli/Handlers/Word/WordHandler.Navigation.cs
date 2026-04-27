@@ -546,6 +546,14 @@ public partial class WordHandler
             "numbering" => _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering,
             "settings" => _doc.MainDocumentPart?.DocumentSettingsPart?.Settings,
             "comments" => _doc.MainDocumentPart?.WordprocessingCommentsPart?.Comments,
+            // /footnotes and /endnotes are container aliases so that
+            // /footnotes/footnote[N] and /endnotes/endnote[N] work as
+            // documented in the help text. The Nth user note is also
+            // selectable directly via /footnote[N] (positional) or
+            // /footnote[@footnoteId=N] (id-based) — those paths bypass
+            // this switch via the `current == null` block below.
+            "footnotes" => _doc.MainDocumentPart?.FootnotesPart?.Footnotes,
+            "endnotes" => _doc.MainDocumentPart?.EndnotesPart?.Endnotes,
             _ => null
         };
 
@@ -690,6 +698,16 @@ public partial class WordHandler
                             string.Equals(s.StyleId?.Value, seg.Name, StringComparison.Ordinal)
                             || string.Equals(s.StyleName?.Val?.Value, seg.Name, StringComparison.Ordinal))
                            .Cast<OpenXmlElement>(),
+                    // CONSISTENCY(footnotes-container): /footnotes/footnote[N]
+                    // enumerates user footnotes only (id > 0), matching what
+                    // `query footnote` returns and the positional /footnote[N]
+                    // routing used by Add. The schema's separator/continuation
+                    // entries (id=-1, id=0) are excluded so positional indexes
+                    // line up across paths.
+                    "footnote" when current is Footnotes fns
+                        => fns.Elements<Footnote>().Where(f => f.Id?.Value > 0).Cast<OpenXmlElement>(),
+                    "endnote" when current is Endnotes ens
+                        => ens.Elements<Endnote>().Where(e => e.Id?.Value > 0).Cast<OpenXmlElement>(),
                     _ => current.ChildElements.Where(e => e.LocalName == seg.Name).Cast<OpenXmlElement>()
                 };
             }
@@ -829,6 +847,27 @@ public partial class WordHandler
             var bkText = GetBookmarkText(bkStart);
             if (!string.IsNullOrEmpty(bkText))
                 node.Text = bkText;
+            return node;
+        }
+
+        if (element is Footnote fnEl)
+        {
+            node.Type = "footnote";
+            // Strip the reference-mark leading space (CONSISTENCY with Query
+            // get-by-id and `query footnote`). Without this branch the
+            // generic InnerText fallback below would return " fn-text".
+            node.Text = GetFootnoteText(fnEl);
+            if (fnEl.Id?.Value != null) node.Format["id"] = fnEl.Id.Value;
+            if (fnEl.Type?.Value != null) node.Format["type"] = fnEl.Type.InnerText;
+            return node;
+        }
+
+        if (element is Endnote enEl)
+        {
+            node.Type = "endnote";
+            node.Text = GetFootnoteText(enEl);
+            if (enEl.Id?.Value != null) node.Format["id"] = enEl.Id.Value;
+            if (enEl.Type?.Value != null) node.Format["type"] = enEl.Type.InnerText;
             return node;
         }
 
