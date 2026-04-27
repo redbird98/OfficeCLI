@@ -1439,6 +1439,13 @@ public partial class PowerPointHandler
         if (runTexts.Count == 0) return 0;
 
         var fullText = string.Concat(runTexts.Select(rt => rt.TextElement.Text));
+        // CONSISTENCY(regex-backref-expand): mirror Word ProcessFindInParagraph.
+        var matchObjs = isRegex
+            ? System.Text.RegularExpressions.Regex.Matches(fullText, pattern)
+                .Cast<System.Text.RegularExpressions.Match>()
+                .Where(m => m.Length > 0)
+                .ToList()
+            : null;
         var matches = FindMatchRanges(fullText, pattern, isRegex);
         if (matches.Count == 0) return 0;
 
@@ -1449,6 +1456,13 @@ public partial class PowerPointHandler
 
             if (replace != null)
             {
+                // Expand backrefs via Match.Result so lookarounds keep their context.
+                string effectiveReplace = replace;
+                if (isRegex && matchObjs != null && i < matchObjs.Count)
+                {
+                    effectiveReplace = matchObjs[i].Result(replace);
+                }
+
                 // Replace text in affected runs
                 var currentRunTexts = BuildPptRunTexts(para);
                 bool first = true;
@@ -1463,7 +1477,7 @@ public partial class PowerPointHandler
 
                     if (first)
                     {
-                        rt.TextElement.Text = textStr[..localStart] + replace + textStr[localEnd..];
+                        rt.TextElement.Text = textStr[..localStart] + effectiveReplace + textStr[localEnd..];
                         first = false;
                     }
                     else
@@ -1472,9 +1486,9 @@ public partial class PowerPointHandler
                     }
                 }
 
-                if (formatProps != null && formatProps.Count > 0 && replace.Length > 0)
+                if (formatProps != null && formatProps.Count > 0 && effectiveReplace.Length > 0)
                 {
-                    var replacedEnd = matchStart + replace.Length;
+                    var replacedEnd = matchStart + effectiveReplace.Length;
                     var targetRuns = SplitPptRunsAtRange(para, matchStart, replacedEnd);
                     foreach (var run in targetRuns)
                         foreach (var (key, value) in formatProps)
