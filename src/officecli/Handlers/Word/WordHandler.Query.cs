@@ -1430,6 +1430,7 @@ public partial class WordHandler
                 or "footnote" or "endnote"
                 or "field" or "formfield" or "editable"
                 or "table" or "tbl"
+                or "row" or "tr" or "cell" or "tc"
                 or "toc" or "tableofcontents"
                 or "style" or "styles"
                 or "watermark"
@@ -1937,6 +1938,69 @@ public partial class WordHandler
                 }
                 if (!matchAttrs) continue;
                 results.Add(node);
+            }
+            return results;
+        }
+
+        // BUG-R34-02: row / cell queries (canonical names + tr/tc internal aliases).
+        // Walks every body-level table emitting one node per row or per cell. Type field
+        // is canonical "row" / "cell" (matches ElementToNode + Get readback in
+        // WordHandler.Navigation.cs ~line 1300). Path uses internal `tr[]/tc[]` segments
+        // for round-trip with Get.
+        if (parsed.ChildSelector == null &&
+            parsed.Element is "row" or "tr" or "cell" or "tc")
+        {
+            bool wantRow = parsed.Element is "row" or "tr";
+            int tblIdxRC = 0;
+            foreach (var tbl in body.Elements<DocumentFormat.OpenXml.Wordprocessing.Table>())
+            {
+                tblIdxRC++;
+                int rowIdxRC = 0;
+                foreach (var row in tbl.Elements<TableRow>())
+                {
+                    rowIdxRC++;
+                    if (wantRow)
+                    {
+                        var rowPath = $"/body/tbl[{tblIdxRC}]/tr[{rowIdxRC}]";
+                        var rowNode = ElementToNode(row, rowPath, 0);
+                        if (parsed.ContainsText != null
+                            && !(rowNode.Text?.Contains(parsed.ContainsText, StringComparison.OrdinalIgnoreCase) ?? false))
+                            continue;
+                        bool ok = true;
+                        foreach (var (attrKey, rawVal) in parsed.Attributes)
+                        {
+                            bool negate = rawVal.StartsWith("!");
+                            var aval = negate ? rawVal[1..] : rawVal;
+                            var has = rowNode.Format.TryGetValue(attrKey, out var fv);
+                            bool m = has && string.Equals(fv?.ToString(), aval, StringComparison.OrdinalIgnoreCase);
+                            if (negate ? m : !m) { ok = false; break; }
+                        }
+                        if (ok) results.Add(rowNode);
+                    }
+                    else
+                    {
+                        int cellIdxRC = 0;
+                        foreach (var cell in row.Elements<TableCell>())
+                        {
+                            cellIdxRC++;
+                            var cellPath = $"/body/tbl[{tblIdxRC}]/tr[{rowIdxRC}]/tc[{cellIdxRC}]";
+                            var cellNode = ElementToNode(cell, cellPath, 0);
+                            if (parsed.ContainsText != null
+                                && !(cellNode.Text?.Contains(parsed.ContainsText, StringComparison.OrdinalIgnoreCase) ?? false))
+                                continue;
+                            bool ok = true;
+                            foreach (var (attrKey, rawVal) in parsed.Attributes)
+                            {
+                                bool negate = rawVal.StartsWith("!");
+                                var aval = negate ? rawVal[1..] : rawVal;
+                                var has = cellNode.Format.TryGetValue(attrKey, out var fv);
+                                bool m = has && string.Equals(fv?.ToString(), aval, StringComparison.OrdinalIgnoreCase);
+                                if (negate ? m : !m) { ok = false; break; }
+                            }
+                            if (ok) results.Add(cellNode);
+                        }
+                    }
+                }
             }
             return results;
         }
