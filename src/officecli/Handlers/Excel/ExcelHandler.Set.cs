@@ -537,6 +537,24 @@ public partial class ExcelHandler
                             .ToList().ForEach(h => h.Remove());
                         if (hyperlinksEl != null && !hyperlinksEl.HasChildren)
                             hyperlinksEl.Remove();
+                        // Symmetric to H3 above: when removing a hyperlink,
+                        // also drop the implicit Hyperlink cellStyle that
+                        // Add/Set installed (blue + underline). User-assigned
+                        // explicit styles are preserved — we only revert
+                        // StyleIndex values that match the Hyperlink xf.
+                        if (cell.StyleIndex != null && cell.StyleIndex.Value != 0)
+                        {
+                            var wbPart = _doc.WorkbookPart;
+                            if (wbPart != null)
+                            {
+                                var styleManager = new ExcelStyleManager(wbPart);
+                                if (styleManager.IsHyperlinkCellStyleXf(cell.StyleIndex.Value))
+                                {
+                                    cell.StyleIndex = null;
+                                    _dirtyStylesheet = true;
+                                }
+                            }
+                        }
                     }
                     else
                     {

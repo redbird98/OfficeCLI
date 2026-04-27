@@ -364,6 +364,28 @@ internal class ExcelStyleManager
     ///
     /// Returns the cellXfs index to assign to the cell's StyleIndex.
     /// </summary>
+    /// <summary>
+    /// Returns true when <paramref name="cellXfIndex"/> points at a cellXfs
+    /// entry that mirrors the built-in Hyperlink cellStyle (BuiltinId=8).
+    /// Used by Set link=none to undo the implicit Hyperlink style applied
+    /// when the link was added; user-assigned explicit styles are not
+    /// matched and remain untouched.
+    /// </summary>
+    public bool IsHyperlinkCellStyleXf(uint cellXfIndex)
+    {
+        var stylesheet = _workbookPart.WorkbookStylesPart?.Stylesheet;
+        if (stylesheet == null) return false;
+        var cellStyles = stylesheet.CellStyles;
+        var hlStyle = cellStyles?.Elements<CellStyle>()
+            .FirstOrDefault(cs => cs.BuiltinId?.Value == 8u);
+        if (hlStyle?.FormatId?.Value == null) return false;
+        var styleXfId = hlStyle.FormatId.Value;
+        var cellFormats = stylesheet.CellFormats;
+        if (cellFormats == null) return false;
+        var xf = cellFormats.Elements<CellFormat>().ElementAtOrDefault((int)cellXfIndex);
+        return xf?.FormatId?.Value == styleXfId;
+    }
+
     public uint EnsureHyperlinkCellStyle()
     {
         var stylesheet = EnsureStylesheet();
