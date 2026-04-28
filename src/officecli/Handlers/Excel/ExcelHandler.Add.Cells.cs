@@ -322,157 +322,7 @@ public partial class ExcelHandler
             if (cellType.Equals("richtext", StringComparison.OrdinalIgnoreCase) ||
                 cellType.Equals("rich", StringComparison.OrdinalIgnoreCase))
             {
-                // Build a SharedString rich text entry from run1=text:prop=val, run2=text, etc.
-                var wbPart = _doc.WorkbookPart
-                    ?? throw new InvalidOperationException("Workbook not found");
-                var sstPart = wbPart.GetPartsOfType<SharedStringTablePart>().FirstOrDefault()
-                    ?? wbPart.AddNewPart<SharedStringTablePart>();
-                SharedStringTable sst;
-                if (sstPart.SharedStringTable != null)
-                    sst = sstPart.SharedStringTable;
-                else
-                {
-                    sst = new SharedStringTable();
-                    sstPart.SharedStringTable = sst;
-                }
-
-                var ssi = new SharedStringItem();
-
-                // Gather runs from either: (a) runs=<JSON array> or
-                // (b) legacy run1=, run2=, ... mini-spec syntax.
-                // CE1 fix: `runs=[{"text":"Hello","bold":true,...},...]`
-                // is now the preferred, documented form.
-                var gatheredRuns = new List<(string text, Dictionary<string, string> props)>();
-                if (properties.TryGetValue("runs", out var runsJson) && !string.IsNullOrWhiteSpace(runsJson))
-                {
-                    try
-                    {
-                        using var jdoc = System.Text.Json.JsonDocument.Parse(runsJson);
-                        if (jdoc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
-                            throw new ArgumentException("'runs' must be a JSON array of run objects.");
-                        foreach (var el in jdoc.RootElement.EnumerateArray())
-                        {
-                            if (el.ValueKind != System.Text.Json.JsonValueKind.Object)
-                                throw new ArgumentException("Each run in 'runs' must be a JSON object.");
-                            string text = "";
-                            var pd = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                            foreach (var p in el.EnumerateObject())
-                            {
-                                var sv = p.Value.ValueKind switch
-                                {
-                                    System.Text.Json.JsonValueKind.True => "true",
-                                    System.Text.Json.JsonValueKind.False => "false",
-                                    System.Text.Json.JsonValueKind.Null => "",
-                                    System.Text.Json.JsonValueKind.Number => p.Value.GetRawText(),
-                                    _ => p.Value.GetString() ?? ""
-                                };
-                                if (p.NameEquals("text")) text = sv;
-                                else pd[p.Name] = sv;
-                            }
-                            gatheredRuns.Add((text, pd));
-                        }
-                    }
-                    catch (System.Text.Json.JsonException jex)
-                    {
-                        throw new ArgumentException($"Invalid JSON for 'runs': {jex.Message}");
-                    }
-                }
-                else
-                {
-                    // Legacy path: run1=text:prop=val;prop=val, run2=...
-                    var runKeys = properties.Keys
-                        .Where(k => k.StartsWith("run", StringComparison.OrdinalIgnoreCase) && k.Length > 3 &&
-                                    int.TryParse(k.AsSpan(3), out _))
-                        .OrderBy(k => int.Parse(k.AsSpan(3).ToString()))
-                        .ToList();
-                    foreach (var runKey in runKeys)
-                    {
-                        var runVal = properties[runKey];
-                        var colonIdx = runVal.IndexOf(':');
-                        string runText;
-                        string[] runProps;
-                        if (colonIdx >= 0)
-                        {
-                            runText = runVal[..colonIdx];
-                            runProps = runVal[(colonIdx + 1)..].Split(';');
-                        }
-                        else
-                        {
-                            runText = runVal;
-                            runProps = [];
-                        }
-                        var pd = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                        foreach (var prop in runProps)
-                        {
-                            var eqIdx = prop.IndexOf('=');
-                            if (eqIdx < 0) continue;
-                            pd[prop[..eqIdx].Trim()] = prop[(eqIdx + 1)..].Trim();
-                        }
-                        gatheredRuns.Add((runText, pd));
-                    }
-                }
-
-                foreach (var (runText, pd) in gatheredRuns)
-                {
-                    var run = new Run();
-                    var rp = new RunProperties();
-                    foreach (var kv in pd)
-                    {
-                        var pKey = kv.Key.ToLowerInvariant();
-                        var pVal = kv.Value;
-                        switch (pKey)
-                        {
-                            case "bold" when ParseHelpers.IsTruthy(pVal): rp.AppendChild(new Bold()); break;
-                            case "italic" when ParseHelpers.IsTruthy(pVal): rp.AppendChild(new Italic()); break;
-                            case "strike" when ParseHelpers.IsTruthy(pVal): rp.AppendChild(new Strike()); break;
-                            case "underline":
-                            {
-                                var ul = new Underline();
-                                if (pVal.Equals("double", StringComparison.OrdinalIgnoreCase)) ul.Val = UnderlineValues.Double;
-                                rp.AppendChild(ul);
-                                break;
-                            }
-                            case "superscript" when ParseHelpers.IsTruthy(pVal):
-                                rp.AppendChild(new VerticalTextAlignment { Val = VerticalAlignmentRunValues.Superscript });
-                                break;
-                            case "subscript" when ParseHelpers.IsTruthy(pVal):
-                                rp.AppendChild(new VerticalTextAlignment { Val = VerticalAlignmentRunValues.Subscript });
-                                break;
-                            case "size" or "fontsize":
-                                if (double.TryParse(pVal.TrimEnd('p', 't'), out var sz))
-                                    rp.AppendChild(new FontSize { Val = sz });
-                                break;
-                            case "color":
-                                rp.AppendChild(new Color { Rgb = new HexBinaryValue(ParseHelpers.NormalizeArgbColor(pVal)) });
-                                break;
-                            case "font" or "fontname" or "name":
-                                rp.AppendChild(new RunFont { Val = pVal });
-                                break;
-                        }
-                    }
-                    if (rp.HasChildren)
-                    {
-                        ReorderRunProperties(rp);
-                        run.AppendChild(rp);
-                    }
-                    run.AppendChild(new Text(runText) { Space = SpaceProcessingModeValues.Preserve });
-                    ssi.AppendChild(run);
-                }
-
-                if (!ssi.HasChildren)
-                {
-                    // No runs defined, fall back to plain text
-                    var textVal = cell.CellValue?.Text ?? "";
-                    ssi.AppendChild(new Text(textVal) { Space = SpaceProcessingModeValues.Preserve });
-                }
-
-                sst.AppendChild(ssi);
-                sst.Count = (uint)sst.Elements<SharedStringItem>().Count();
-                sst.UniqueCount = sst.Count;
-
-                var newIdx = sst.Elements<SharedStringItem>().Count() - 1;
-                cell.CellValue = new CellValue(newIdx.ToString());
-                cell.DataType = new EnumValue<CellValues>(CellValues.SharedString);
+                ApplyRichTextToCell(cell, properties);
             }
             else
             {
@@ -962,6 +812,160 @@ public partial class ExcelHandler
         var cbBrkIdx = colBreaks.Elements<Break>().ToList()
             .FindIndex(b => b.Id?.Value == cbColIdx) + 1;
         return $"/{cbSheetName}/colbreak[{cbBrkIdx}]";
+    }
+
+    /// <summary>
+    /// Build a SharedString rich-text entry for <paramref name="cell"/> from
+    /// `runs=<JSON array>` or legacy `run1=text:prop=val;…` syntax. Reused by
+    /// Add (when the user passes type=richtext) and by Set (so type=richtext
+    /// is symmetric — see CONSISTENCY(cell-type-parity)).
+    /// </summary>
+    private void ApplyRichTextToCell(Cell cell, Dictionary<string, string> properties)
+    {
+        var wbPart = _doc.WorkbookPart
+            ?? throw new InvalidOperationException("Workbook not found");
+        var sstPart = wbPart.GetPartsOfType<SharedStringTablePart>().FirstOrDefault()
+            ?? wbPart.AddNewPart<SharedStringTablePart>();
+        SharedStringTable sst;
+        if (sstPart.SharedStringTable != null)
+            sst = sstPart.SharedStringTable;
+        else
+        {
+            sst = new SharedStringTable();
+            sstPart.SharedStringTable = sst;
+        }
+
+        var ssi = new SharedStringItem();
+
+        var gatheredRuns = new List<(string text, Dictionary<string, string> props)>();
+        if (properties.TryGetValue("runs", out var runsJson) && !string.IsNullOrWhiteSpace(runsJson))
+        {
+            try
+            {
+                using var jdoc = System.Text.Json.JsonDocument.Parse(runsJson);
+                if (jdoc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
+                    throw new ArgumentException("'runs' must be a JSON array of run objects.");
+                foreach (var el in jdoc.RootElement.EnumerateArray())
+                {
+                    if (el.ValueKind != System.Text.Json.JsonValueKind.Object)
+                        throw new ArgumentException("Each run in 'runs' must be a JSON object.");
+                    string text = "";
+                    var pd = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var p in el.EnumerateObject())
+                    {
+                        var sv = p.Value.ValueKind switch
+                        {
+                            System.Text.Json.JsonValueKind.True => "true",
+                            System.Text.Json.JsonValueKind.False => "false",
+                            System.Text.Json.JsonValueKind.Null => "",
+                            System.Text.Json.JsonValueKind.Number => p.Value.GetRawText(),
+                            _ => p.Value.GetString() ?? ""
+                        };
+                        if (p.NameEquals("text")) text = sv;
+                        else pd[p.Name] = sv;
+                    }
+                    gatheredRuns.Add((text, pd));
+                }
+            }
+            catch (System.Text.Json.JsonException jex)
+            {
+                throw new ArgumentException($"Invalid JSON for 'runs': {jex.Message}");
+            }
+        }
+        else
+        {
+            var runKeys = properties.Keys
+                .Where(k => k.StartsWith("run", StringComparison.OrdinalIgnoreCase) && k.Length > 3 &&
+                            int.TryParse(k.AsSpan(3), out _))
+                .OrderBy(k => int.Parse(k.AsSpan(3).ToString()))
+                .ToList();
+            foreach (var runKey in runKeys)
+            {
+                var runVal = properties[runKey];
+                var colonIdx = runVal.IndexOf(':');
+                string runText;
+                string[] runProps;
+                if (colonIdx >= 0)
+                {
+                    runText = runVal[..colonIdx];
+                    runProps = runVal[(colonIdx + 1)..].Split(';');
+                }
+                else
+                {
+                    runText = runVal;
+                    runProps = [];
+                }
+                var pd = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var prop in runProps)
+                {
+                    var eqIdx = prop.IndexOf('=');
+                    if (eqIdx < 0) continue;
+                    pd[prop[..eqIdx].Trim()] = prop[(eqIdx + 1)..].Trim();
+                }
+                gatheredRuns.Add((runText, pd));
+            }
+        }
+
+        foreach (var (runText, pd) in gatheredRuns)
+        {
+            var run = new Run();
+            var rp = new RunProperties();
+            foreach (var kv in pd)
+            {
+                var pKey = kv.Key.ToLowerInvariant();
+                var pVal = kv.Value;
+                switch (pKey)
+                {
+                    case "bold" when ParseHelpers.IsTruthy(pVal): rp.AppendChild(new Bold()); break;
+                    case "italic" when ParseHelpers.IsTruthy(pVal): rp.AppendChild(new Italic()); break;
+                    case "strike" when ParseHelpers.IsTruthy(pVal): rp.AppendChild(new Strike()); break;
+                    case "underline":
+                    {
+                        var ul = new Underline();
+                        if (pVal.Equals("double", StringComparison.OrdinalIgnoreCase)) ul.Val = UnderlineValues.Double;
+                        rp.AppendChild(ul);
+                        break;
+                    }
+                    case "superscript" when ParseHelpers.IsTruthy(pVal):
+                        rp.AppendChild(new VerticalTextAlignment { Val = VerticalAlignmentRunValues.Superscript });
+                        break;
+                    case "subscript" when ParseHelpers.IsTruthy(pVal):
+                        rp.AppendChild(new VerticalTextAlignment { Val = VerticalAlignmentRunValues.Subscript });
+                        break;
+                    case "size" or "fontsize":
+                        if (double.TryParse(pVal.TrimEnd('p', 't'), out var sz))
+                            rp.AppendChild(new FontSize { Val = sz });
+                        break;
+                    case "color":
+                        rp.AppendChild(new Color { Rgb = new HexBinaryValue(ParseHelpers.NormalizeArgbColor(pVal)) });
+                        break;
+                    case "font" or "fontname" or "name":
+                        rp.AppendChild(new RunFont { Val = pVal });
+                        break;
+                }
+            }
+            if (rp.HasChildren)
+            {
+                ReorderRunProperties(rp);
+                run.AppendChild(rp);
+            }
+            run.AppendChild(new Text(runText) { Space = SpaceProcessingModeValues.Preserve });
+            ssi.AppendChild(run);
+        }
+
+        if (!ssi.HasChildren)
+        {
+            var textVal = cell.CellValue?.Text ?? "";
+            ssi.AppendChild(new Text(textVal) { Space = SpaceProcessingModeValues.Preserve });
+        }
+
+        sst.AppendChild(ssi);
+        sst.Count = (uint)sst.Elements<SharedStringItem>().Count();
+        sst.UniqueCount = sst.Count;
+
+        var newIdx = sst.Elements<SharedStringItem>().Count() - 1;
+        cell.CellValue = new CellValue(newIdx.ToString());
+        cell.DataType = new EnumValue<CellValues>(CellValues.SharedString);
     }
 
 }

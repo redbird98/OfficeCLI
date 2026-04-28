@@ -503,6 +503,16 @@ public partial class ExcelHandler
                     }
                     break;
                 case "type":
+                    // CONSISTENCY(cell-type-parity): Add accepts type=richtext;
+                    // Set must too. Delegates to ApplyRichTextToCell which builds
+                    // a SharedString rich-text entry from `runs=<json>` (or the
+                    // legacy run1=… mini-spec).
+                    if (value.Equals("richtext", StringComparison.OrdinalIgnoreCase) ||
+                        value.Equals("rich", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ApplyRichTextToCell(cell, properties);
+                        break;
+                    }
                     cell.DataType = value.ToLowerInvariant() switch
                     {
                         "string" or "str" => new EnumValue<CellValues>(CellValues.String),
@@ -511,7 +521,7 @@ public partial class ExcelHandler
                         "date" => null, // Dates are stored as numbers; format is applied via numberformat below
                         // CONSISTENCY(cell-type-parity): accept `error`/`err` as in Add.
                         "error" or "err" => new EnumValue<CellValues>(CellValues.Error),
-                        _ => throw new ArgumentException($"Invalid cell 'type' value '{value}'. Valid types: string, number, boolean, date, error.")
+                        _ => throw new ArgumentException($"Invalid cell 'type' value '{value}'. Valid types: string, number, boolean, date, error, richtext.")
                     };
                     // Convert cell value for boolean type
                     if (value.ToLowerInvariant() is "boolean" or "bool" && cell.CellValue != null)
