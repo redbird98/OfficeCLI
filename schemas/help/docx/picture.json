@@ -47,6 +47,15 @@
       "examples": ["--prop fallback=/path/to/fallback.png"],
       "readback": "n/a (SVG-only)",
       "enforcement": "report"
+    },
+    "alt": {
+      "type": "string",
+      "description": "alternative text (DocProperties.Description). Defaults to the source file name on add. Aliases: alttext, description.",
+      "aliases": ["alttext", "description"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop alt=\"Company logo\""],
+      "readback": "string",
+      "enforcement": "report"
     }
   }
 }
