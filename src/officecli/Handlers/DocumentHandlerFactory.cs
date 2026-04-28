@@ -20,6 +20,20 @@ public static class DocumentHandlerFactory
                 Help = "officecli create <path> --type docx|xlsx|pptx"
             };
 
+        // CONSISTENCY(corrupt-file-rejection): a 0-byte file is silently
+        // accepted by Open XML SDK 3.x in read-write mode (it materialises an
+        // empty Package), but the resulting handler returns a fake root node
+        // with no parts. CLI commands that follow then report success and
+        // exit 0 even though the document is unusable. Reject the file
+        // up-front so the same file_not_found / corrupt_file UX applies that
+        // direct-mode (read-only) Open already gave for 0-byte files.
+        if (new FileInfo(filePath).Length == 0)
+            throw new CliException($"Cannot open {Path.GetFileName(filePath)}: file is 0 bytes (not a valid Office document).")
+            {
+                Code = "corrupt_file",
+                Suggestion = "Recreate the file with: officecli create <path>"
+            };
+
         var ext = Path.GetExtension(filePath).ToLowerInvariant();
         try
         {
