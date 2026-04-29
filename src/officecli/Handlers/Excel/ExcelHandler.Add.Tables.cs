@@ -401,7 +401,11 @@ public partial class ExcelHandler
 
         SaveWorksheet(dvWorksheet);
         var dvIndex = dvs.Elements<DataValidation>().ToList().IndexOf(dv) + 1;
-        return $"/{dvSheetName}/validation[{dvIndex}]";
+        // CONSISTENCY(path-segment-naming): the path segment must match the
+        // type name the caller used in `add` (`dataValidation`). The legacy
+        // `/validation[N]` form remains accepted by Get / Set / Remove as an
+        // alias for back-compat (R7-bt-6).
+        return $"/{dvSheetName}/dataValidation[{dvIndex}]";
     }
 
     private string AddAutoFilter(string parentPath, string type, InsertPosition? position, Dictionary<string, string> properties)

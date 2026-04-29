@@ -346,8 +346,9 @@ public partial class ExcelHandler
             };
         }
 
-        // Validation path: /Sheet1/validation[N]
-        var validationMatch = Regex.Match(cellRef, @"^validation\[(\d+)\]$", RegexOptions.IgnoreCase);
+        // Validation path: /Sheet1/dataValidation[N] (canonical) or
+        // /Sheet1/validation[N] (legacy alias, R7-bt-6 CONSISTENCY)
+        var validationMatch = Regex.Match(cellRef, @"^(?:dataValidation|validation)\[(\d+)\]$", RegexOptions.IgnoreCase);
         if (validationMatch.Success)
         {
             var dvIdx = int.Parse(validationMatch.Groups[1].Value);

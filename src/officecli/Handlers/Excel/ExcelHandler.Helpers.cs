@@ -2138,10 +2138,10 @@ public partial class ExcelHandler
         var sqref = dv.SequenceOfReferences?.InnerText ?? "";
         var node = new DocumentNode
         {
-            Path = $"/{sheetName}/validation[{index}]",
-            Type = "validation",
+            Path = $"/{sheetName}/dataValidation[{index}]",
+            Type = "dataValidation",
             Text = sqref,
-            Preview = $"validation[{index}] ({sqref})"
+            Preview = $"dataValidation[{index}] ({sqref})"
         };
 
         // CONSISTENCY(canonical-key): schema canonical key is 'ref', not 'sqref'.

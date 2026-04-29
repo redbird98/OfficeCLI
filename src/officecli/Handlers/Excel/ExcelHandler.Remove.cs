@@ -523,8 +523,9 @@ public partial class ExcelHandler
             return null;
         }
 
-        // validation[N] — remove data validation
-        var validationRemoveMatch = Regex.Match(cellRef, @"^validation\[(\d+)\]$", RegexOptions.IgnoreCase);
+        // dataValidation[N] (canonical) / validation[N] (legacy alias) —
+        // remove data validation. R7-bt-6 CONSISTENCY(path-segment-naming).
+        var validationRemoveMatch = Regex.Match(cellRef, @"^(?:dataValidation|validation)\[(\d+)\]$", RegexOptions.IgnoreCase);
         if (validationRemoveMatch.Success)
         {
             var dvIdx = int.Parse(validationRemoveMatch.Groups[1].Value);

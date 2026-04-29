@@ -124,8 +124,9 @@ public partial class ExcelHandler
                 $"Cell reference '{cellRef.Replace("\n", "\\n").Replace("\r", "\\r")}' contains invalid control characters. " +
                 $"Expected a clean cell address like 'A1' or 'B2'.");
 
-        // Handle /SheetName/validation[N]
-        var validationSetMatch = Regex.Match(cellRef, @"^validation\[(\d+)\]$", RegexOptions.IgnoreCase);
+        // Handle /SheetName/dataValidation[N] (canonical) and
+        // /SheetName/validation[N] (legacy alias, R7-bt-6 CONSISTENCY)
+        var validationSetMatch = Regex.Match(cellRef, @"^(?:dataValidation|validation)\[(\d+)\]$", RegexOptions.IgnoreCase);
         if (validationSetMatch.Success) return SetValidationByPath(validationSetMatch, worksheet, properties);
 
         // Handle /SheetName/ole[N]
