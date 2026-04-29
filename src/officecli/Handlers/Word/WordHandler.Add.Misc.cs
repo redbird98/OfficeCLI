@@ -32,12 +32,18 @@ public partial class WordHandler
             .Select(c => int.TryParse(c.Id?.Value, out var id) ? id : 0)
             .DefaultIfEmpty(0).Max() + 1).ToString();
 
-        commentsPart.Comments.AppendChild(new Comment(
+        var commentEl = new Comment(
             new Paragraph(new Run(new Text(commentText) { Space = SpaceProcessingModeValues.Preserve })))
         {
             Id = commentId, Author = author, Initials = initials,
             Date = properties.TryGetValue("date", out var ds) ? DateTime.Parse(ds) : DateTime.UtcNow
-        });
+        };
+        commentsPart.Comments.AppendChild(commentEl);
+        // Apply paragraph-level / run-level format keys (direction, font, size, etc.)
+        // Mirrors R2-2 footnote/header fix — the same vocabulary should work
+        // on comment bodies as on footnote/endnote bodies.
+        var _commentUnsupported = new List<string>();
+        ApplyCommentFormatKeys(commentEl, properties, _commentUnsupported);
         commentsPart.Comments.Save();
 
         var rangeStart = new CommentRangeStart { Id = commentId };

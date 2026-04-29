@@ -530,6 +530,44 @@ public partial class WordHandler
         if (markRPr.ChildElements.Count == 0) markRPr.Remove();
     }
 
+    /// <summary>
+    /// Apply paragraph-level and run-level format keys to a comment body.
+    /// Skips text/author/initials/date (handled separately by the caller)
+    /// and silently consumes keys that ApplyParagraphLevelProperty or
+    /// ApplyRunFormatting accept. Anything left over is reported as
+    /// unsupported. Mirrors ApplyFootnoteEndnoteFormatKeys.
+    /// </summary>
+    private void ApplyCommentFormatKeys(
+        Comment comment,
+        Dictionary<string, string> properties,
+        List<string> unsupported)
+    {
+        var firstPara = comment.Descendants<Paragraph>().FirstOrDefault();
+        if (firstPara == null) return;
+        var pProps = firstPara.ParagraphProperties ?? firstPara.PrependChild(new ParagraphProperties());
+        var contentRuns = comment.Descendants<Run>().ToList();
+        var markRPr = pProps.ParagraphMarkRunProperties ?? pProps.AppendChild(new ParagraphMarkRunProperties());
+        foreach (var (key, value) in properties)
+        {
+            var lk = key.ToLowerInvariant();
+            if (lk == "text" || lk == "author" || lk == "initials" || lk == "date") continue;
+            if (ApplyParagraphLevelProperty(pProps, key, value)) continue;
+            bool runApplied = false;
+            foreach (var run in contentRuns)
+            {
+                if (ApplyRunFormatting(EnsureRunProperties(run), key, value))
+                    runApplied = true;
+            }
+            if (runApplied)
+            {
+                ApplyRunFormatting(markRPr, key, value);
+                continue;
+            }
+            unsupported.Add(key);
+        }
+        if (markRPr.ChildElements.Count == 0) markRPr.Remove();
+    }
+
     private List<string> SetEndnotePath(System.Text.RegularExpressions.Match enSetMatch, Dictionary<string, string> properties)
     {
         var unsupported = new List<string>();

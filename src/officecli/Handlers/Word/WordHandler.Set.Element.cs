@@ -62,6 +62,8 @@ public partial class WordHandler
     private List<string> SetElementComment(Comment comment, Dictionary<string, string> properties)
     {
         var unsupported = new List<string>();
+        // Handle text/author/initials/date inline; everything else routes
+        // through ApplyCommentFormatKeys (mirrors footnote/endnote fix).
         foreach (var (key, value) in properties)
         {
             switch (key.ToLowerInvariant())
@@ -84,11 +86,9 @@ public partial class WordHandler
                 case "date":
                     comment.Date = DateTime.Parse(value);
                     break;
-                default:
-                    unsupported.Add(key);
-                    break;
             }
         }
+        ApplyCommentFormatKeys(comment, properties, unsupported);
         _doc.MainDocumentPart?.WordprocessingCommentsPart?.Comments?.Save();
         return unsupported;
     }
