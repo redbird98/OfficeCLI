@@ -2024,6 +2024,21 @@ internal static partial class ChartHelper
                         foreach (var axisTxPr in plotAreaRtl.Descendants<C.TextProperties>().ToList())
                             StampLvl1Rtl(axisTxPr, rtlOn);
                     }
+                    // Legend is a *sibling* of plotArea (direct child of c:chart),
+                    // not a descendant — walk its c:txPr explicitly.
+                    var legendRtl = chart.GetFirstChild<C.Legend>();
+                    if (legendRtl != null)
+                    {
+                        foreach (var legTxPr in legendRtl.Descendants<C.TextProperties>().ToList())
+                            StampLvl1Rtl(legTxPr, rtlOn);
+                    }
+                    // Chart-level c:dLbls (sibling of plotArea on certain chart types).
+                    var chartDLblsRtl = chart.GetFirstChild<C.DataLabels>();
+                    if (chartDLblsRtl != null)
+                    {
+                        foreach (var dlTxPr in chartDLblsRtl.Descendants<C.TextProperties>().ToList())
+                            StampLvl1Rtl(dlTxPr, rtlOn);
+                    }
                     // Title rich text: walk c:title/c:tx/c:rich a:lstStyle a:lvl1pPr.
                     var titleEl = chart.GetFirstChild<C.Title>();
                     var titleRich = titleEl?.ChartText?.RichText;
