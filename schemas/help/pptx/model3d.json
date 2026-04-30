@@ -29,7 +29,7 @@
       "aliases": ["left"],
       "add": true, "set": true, "get": true,
       "examples": ["--prop x=2cm"],
-      "readback": "unit-qualified length",
+      "readback": "length in cm (e.g. \"2cm\")",
       "enforcement": "report"
     },
     "y": {
@@ -37,21 +37,21 @@
       "aliases": ["top"],
       "add": true, "set": true, "get": true,
       "examples": ["--prop y=2cm"],
-      "readback": "unit-qualified length",
+      "readback": "length in cm (e.g. \"2cm\")",
       "enforcement": "report"
     },
     "width": {
       "type": "length",
       "add": true, "set": true, "get": true,
       "examples": ["--prop width=10cm"],
-      "readback": "unit-qualified length",
+      "readback": "length in cm (e.g. \"2cm\")",
       "enforcement": "report"
     },
     "height": {
       "type": "length",
       "add": true, "set": true, "get": true,
       "examples": ["--prop height=10cm"],
-      "readback": "unit-qualified length",
+      "readback": "length in cm (e.g. \"2cm\")",
       "enforcement": "report"
     }
   }

@@ -56,12 +56,12 @@
       "enforcement": "report"
     },
     "advanceTime": {
-      "type": "length",
-      "description": "auto-advance time in seconds/ms.",
+      "type": "number",
+      "description": "auto-advance time in milliseconds (integer). e.g. 5000 = 5 seconds.",
       "aliases": ["advancetime"],
       "add": true, "set": true, "get": true,
-      "examples": ["--prop advanceTime=5"],
-      "readback": "time descriptor",
+      "examples": ["--prop advanceTime=5000"],
+      "readback": "milliseconds (integer)",
       "enforcement": "report"
     },
     "advanceClick": {

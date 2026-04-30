@@ -42,8 +42,8 @@
       "enforcement": "report"
     },
     "duration": {
-      "type": "length",
-      "description": "Animation duration in milliseconds (integer).",
+      "type": "number",
+      "description": "Animation duration in milliseconds (integer, e.g. 500 = 0.5s).",
       "aliases": ["dur"],
       "add": true, "set": true, "get": true,
       "examples": ["--prop duration=500", "--prop dur=2000"],
@@ -51,8 +51,8 @@
       "enforcement": "report"
     },
     "delay": {
-      "type": "length",
-      "description": "Delay before starting in milliseconds (integer).",
+      "type": "number",
+      "description": "Delay before starting in milliseconds (integer, e.g. 500 = 0.5s).",
       "add": true, "set": true, "get": true,
       "examples": ["--prop delay=200"],
       "readback": "delay in milliseconds",
