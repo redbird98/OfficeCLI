@@ -151,6 +151,65 @@ internal static class SkillInstaller
         return InstallSkillToAll(skillName);
     }
 
+    /// <summary>
+    /// Install a specific skill by name to a single agent target.
+    /// Accepts either order: (skill, agent) or (agent, skill) — skill names and
+    /// agent aliases don't overlap so the order is auto-detected.
+    /// Called as: officecli skills install morph-ppt hermes  /  officecli skills install hermes morph-ppt
+    /// Skips agent detection — installs even if the agent's home dir is missing,
+    /// matching the legacy `officecli skills &lt;agent&gt;` behavior.
+    /// </summary>
+    public static HashSet<string> InstallSkillToAgentTarget(string firstArg, string secondArg)
+    {
+        var installed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Auto-detect token order
+        string? skillName = null;
+        string? agentKey = null;
+        if (SkillMap.ContainsKey(firstArg))
+        {
+            skillName = firstArg;
+            agentKey = secondArg;
+        }
+        else if (SkillMap.ContainsKey(secondArg))
+        {
+            skillName = secondArg;
+            agentKey = firstArg;
+        }
+
+        if (skillName is null)
+        {
+            Console.Error.WriteLine($"Unknown skill in: {firstArg} {secondArg}");
+            Console.Error.WriteLine($"Available skills: {string.Join(", ", SkillMap.Keys.OrderBy(k => k))}");
+            return installed;
+        }
+
+        var key = agentKey!.ToLowerInvariant();
+        var folder = SkillMap[skillName];
+
+        var tool = Tools.FirstOrDefault(t => t.Aliases.Contains(key));
+        if (tool.Aliases is null)
+        {
+            Console.Error.WriteLine($"Unknown agent: {agentKey}");
+            Console.Error.WriteLine("Supported: claude, copilot, codex, cursor, windsurf, minimax, opencode, openclaw, nanobot, zeroclaw, hermes");
+            return installed;
+        }
+
+        var files = GetEmbeddedSkillFiles(folder);
+        if (files.Count == 0)
+        {
+            Console.Error.WriteLine($"  No embedded files found for skill '{skillName}'");
+            return installed;
+        }
+
+        var skillDir = Path.Combine(Home, tool.SkillDir, folder);
+        InstallSkillFiles(tool.DisplayName, skillDir, files);
+        foreach (var alias in tool.Aliases)
+            installed.Add(alias);
+
+        return installed;
+    }
+
     // ─── Base SKILL.md installation ───────────────────────────
 
     private static HashSet<string> InstallBaseToAll()

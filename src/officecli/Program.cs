@@ -110,6 +110,13 @@ if (args.Length >= 1 && args[0] == "skills")
         var result = OfficeCli.Core.SkillInstaller.InstallSkill(args[2]);
         return result.Count > 0 ? 0 : 1;
     }
+    if (args.Length == 4 && args[1] == "install")
+    {
+        // officecli skills install <skill> <agent>  OR  <agent> <skill>
+        // Token order is auto-detected — skill names and agent aliases don't overlap.
+        var result = OfficeCli.Core.SkillInstaller.InstallSkillToAgentTarget(args[2], args[3]);
+        return result.Count > 0 ? 0 : 1;
+    }
     if (args.Length == 2)
     {
         // Legacy: officecli skills claude → base SKILL.md to specific agent.

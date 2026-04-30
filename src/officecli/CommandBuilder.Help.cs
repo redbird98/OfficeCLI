@@ -53,6 +53,7 @@ static partial class CommandBuilder
                 "Usage:",
                 "  officecli skills install                Install base SKILL.md to all detected agents",
                 "  officecli skills install <skill-name>   Install a specific skill to all detected agents",
+                "  officecli skills install <skill-name> <agent>  Install a specific skill to a single agent (either order works)",
                 "  officecli skills <agent>                Install base SKILL.md to a specific agent",
                 "  officecli skills list                   List all available skills",
                 "",
