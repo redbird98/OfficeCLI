@@ -178,6 +178,14 @@ public partial class PowerPointHandler
             var minorLatin = fontScheme?.MinorFont?.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value;
             if (!string.IsNullOrEmpty(majorLatin)) node.Format["headingFont"] = majorLatin;
             if (!string.IsNullOrEmpty(minorLatin)) node.Format["bodyFont"] = minorLatin;
+            var majorEa = fontScheme?.MajorFont?.GetFirstChild<Drawing.EastAsianFont>()?.Typeface?.Value;
+            var minorEa = fontScheme?.MinorFont?.GetFirstChild<Drawing.EastAsianFont>()?.Typeface?.Value;
+            var majorCs = fontScheme?.MajorFont?.GetFirstChild<Drawing.ComplexScriptFont>()?.Typeface?.Value;
+            var minorCs = fontScheme?.MinorFont?.GetFirstChild<Drawing.ComplexScriptFont>()?.Typeface?.Value;
+            if (!string.IsNullOrEmpty(majorEa)) node.Format["headingFont.ea"] = majorEa;
+            if (!string.IsNullOrEmpty(minorEa)) node.Format["bodyFont.ea"] = minorEa;
+            if (!string.IsNullOrEmpty(majorCs)) node.Format["headingFont.cs"] = majorCs;
+            if (!string.IsNullOrEmpty(minorCs)) node.Format["bodyFont.cs"] = minorCs;
             if (scheme.Name?.Value != null) node.Format["name"] = scheme.Name.Value;
         }
 
@@ -228,6 +236,18 @@ public partial class PowerPointHandler
                 case "bodyfont" or "minorfont":
                     SetFontScheme(minorTypeface: value);
                     break;
+                case "headingfont.ea" or "majorfont.ea":
+                    SetFontScheme(majorEa: value);
+                    break;
+                case "headingfont.cs" or "majorfont.cs":
+                    SetFontScheme(majorCs: value);
+                    break;
+                case "bodyfont.ea" or "minorfont.ea":
+                    SetFontScheme(minorEa: value);
+                    break;
+                case "bodyfont.cs" or "minorfont.cs":
+                    SetFontScheme(minorCs: value);
+                    break;
                 default:
                     unsupported.Add(key);
                     break;
@@ -255,7 +275,10 @@ public partial class PowerPointHandler
             throw new ArgumentException($"Theme color must be a 6-character hex value (e.g. FF6B35), got: {value}");
     }
 
-    private void SetFontScheme(string? majorTypeface = null, string? minorTypeface = null)
+    private void SetFontScheme(
+        string? majorTypeface = null, string? minorTypeface = null,
+        string? majorEa = null, string? minorEa = null,
+        string? majorCs = null, string? minorCs = null)
     {
         var themePart = GetThemePart();
         if (themePart?.Theme?.ThemeElements?.FontScheme == null) return;
@@ -274,6 +297,34 @@ public partial class PowerPointHandler
             var latin = minorFont.GetFirstChild<Drawing.LatinFont>();
             if (latin != null) latin.Typeface = minorTypeface;
             else minorFont.PrependChild(new Drawing.LatinFont { Typeface = minorTypeface });
+        }
+        if (majorEa != null)
+        {
+            var majorFont = fontScheme.MajorFont ??= new Drawing.MajorFont();
+            var ea = majorFont.GetFirstChild<Drawing.EastAsianFont>();
+            if (ea != null) ea.Typeface = majorEa;
+            else majorFont.AppendChild(new Drawing.EastAsianFont { Typeface = majorEa });
+        }
+        if (minorEa != null)
+        {
+            var minorFont = fontScheme.MinorFont ??= new Drawing.MinorFont();
+            var ea = minorFont.GetFirstChild<Drawing.EastAsianFont>();
+            if (ea != null) ea.Typeface = minorEa;
+            else minorFont.AppendChild(new Drawing.EastAsianFont { Typeface = minorEa });
+        }
+        if (majorCs != null)
+        {
+            var majorFont = fontScheme.MajorFont ??= new Drawing.MajorFont();
+            var cs = majorFont.GetFirstChild<Drawing.ComplexScriptFont>();
+            if (cs != null) cs.Typeface = majorCs;
+            else majorFont.AppendChild(new Drawing.ComplexScriptFont { Typeface = majorCs });
+        }
+        if (minorCs != null)
+        {
+            var minorFont = fontScheme.MinorFont ??= new Drawing.MinorFont();
+            var cs = minorFont.GetFirstChild<Drawing.ComplexScriptFont>();
+            if (cs != null) cs.Typeface = minorCs;
+            else minorFont.AppendChild(new Drawing.ComplexScriptFont { Typeface = minorCs });
         }
     }
 

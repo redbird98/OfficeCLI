@@ -32,6 +32,38 @@
       "readback": "font name",
       "enforcement": "report"
     },
+    "headingFont.ea": {
+      "type": "string",
+      "description": "major (heading) East Asian typeface (CJK).",
+      "add": false, "set": true, "get": true,
+      "examples": ["--prop headingFont.ea=\"Yu Gothic\""],
+      "readback": "font name",
+      "enforcement": "report"
+    },
+    "headingFont.cs": {
+      "type": "string",
+      "description": "major (heading) Complex Script typeface (Arabic/Hebrew/Thai).",
+      "add": false, "set": true, "get": true,
+      "examples": ["--prop headingFont.cs=Arial"],
+      "readback": "font name",
+      "enforcement": "report"
+    },
+    "bodyFont.ea": {
+      "type": "string",
+      "description": "minor (body) East Asian typeface (CJK).",
+      "add": false, "set": true, "get": true,
+      "examples": ["--prop bodyFont.ea=\"Yu Gothic\""],
+      "readback": "font name",
+      "enforcement": "report"
+    },
+    "bodyFont.cs": {
+      "type": "string",
+      "description": "minor (body) Complex Script typeface (Arabic/Hebrew/Thai).",
+      "add": false, "set": true, "get": true,
+      "examples": ["--prop bodyFont.cs=\"Times New Roman\""],
+      "readback": "font name",
+      "enforcement": "report"
+    },
     "accent1": {
       "type": "color",
       "add": false, "set": true, "get": true,
