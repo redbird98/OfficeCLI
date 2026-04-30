@@ -284,6 +284,26 @@ public partial class PowerPointHandler
         if (themePart?.Theme?.ThemeElements?.FontScheme == null) return;
         var fontScheme = themePart.Theme.ThemeElements.FontScheme;
 
+        // Normalize clear sentinels: "", "none", "default" all mean
+        // "remove this slot so it inherits the theme default". Match the
+        // existing empty-string behavior project-wide instead of writing
+        // 'none' / 'default' verbatim as a typeface name.
+        static string? NormalizeTypeface(string? s)
+        {
+            if (s is null) return null;
+            if (string.IsNullOrEmpty(s)) return string.Empty;
+            return s.Equals("none", StringComparison.OrdinalIgnoreCase)
+                || s.Equals("default", StringComparison.OrdinalIgnoreCase)
+                ? string.Empty
+                : s;
+        }
+        majorTypeface = NormalizeTypeface(majorTypeface);
+        minorTypeface = NormalizeTypeface(minorTypeface);
+        majorEa = NormalizeTypeface(majorEa);
+        minorEa = NormalizeTypeface(minorEa);
+        majorCs = NormalizeTypeface(majorCs);
+        minorCs = NormalizeTypeface(minorCs);
+
         if (majorTypeface != null)
         {
             var majorFont = fontScheme.MajorFont ??= new Drawing.MajorFont();
