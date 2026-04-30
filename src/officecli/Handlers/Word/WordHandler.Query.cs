@@ -1678,6 +1678,7 @@ public partial class WordHandler
                 or "style" or "styles"
                 or "watermark"
                 or "revision" or "change" or "trackchange"
+                or "trackedchange" or "trackedchanges"
                 or "media"
                 or "hyperlink"
                 or "section"
@@ -1984,7 +1985,8 @@ public partial class WordHandler
 
         // Handle revision / track changes query
         bool isRevisionSelector = parsed.ChildSelector == null &&
-            (parsed.Element is "revision" or "change" or "trackchange");
+            (parsed.Element is "revision" or "change" or "trackchange"
+                or "trackedchange" or "trackedchanges");
         if (isRevisionSelector)
         {
             int revIdx = 0;
