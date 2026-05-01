@@ -46,6 +46,10 @@
       "examples": ["--prop anchor=B2:F7"],
       "readback": "anchor descriptor",
       "enforcement": "report"
-    }
+    },
+    "fileSize":    { "type":"number", "add":false, "set":false, "get":true, "description":"embedded payload bytes.", "readback":"integer byte count", "enforcement":"report" },
+    "contentType": { "type":"string", "add":false, "set":false, "get":true, "description":"MIME type of the embedded part.", "readback":"MIME type string", "enforcement":"report" },
+    "objectType":  { "type":"string", "add":false, "set":false, "get":true, "description":"OLE object type marker (always 'ole').", "readback":"literal string 'ole'", "enforcement":"report" },
+    "shapeId":     { "type":"number", "add":false, "set":false, "get":true, "description":"VML shape id of the OLE container (xlsx legacy drawing).", "readback":"integer shape id", "enforcement":"report" }
   }
 }

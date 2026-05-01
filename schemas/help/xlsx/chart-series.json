@@ -94,6 +94,10 @@
     "dataLabels.separator": { "type":"string", "add":false, "set":false, "get":true, "description":"per-series data label separator string readback.", "readback":"separator string", "enforcement":"report" },
     "dataLabels.numFmt":    { "type":"string", "add":false, "set":false, "get":true, "description":"per-series data label number format readback.", "readback":"format code", "enforcement":"report" },
     "invertIfNeg":          { "type":"bool",   "add":false, "set":false, "get":true, "description":"invert color for negative values (per-series readback).", "readback":"true | false", "enforcement":"report" },
-    "errBars":              { "type":"string", "add":false, "set":false, "get":true, "description":"error bar value type token (e.g. cust, fixedVal, stdDev).", "readback":"OOXML errValType token", "enforcement":"report" }
+    "errBars":              { "type":"string", "add":false, "set":false, "get":true, "description":"error bar value type token (e.g. cust, fixedVal, stdDev).", "readback":"OOXML errValType token", "enforcement":"report" },
+    "categoriesRef":   { "type":"string", "add":false, "set":false, "get":true, "description":"A1 cell range backing the category labels.", "readback":"A1 range string", "enforcement":"report" },
+    "nameRef":         { "type":"string", "add":false, "set":false, "get":true, "description":"A1 cell reference backing the series name.", "readback":"A1 cell reference", "enforcement":"report" },
+    "secondaryAxis":   { "type":"bool",   "add":false, "set":false, "get":true, "description":"true when the chart has more than one value axis (this series uses the secondary).", "readback":"true | false", "enforcement":"report" },
+    "scatterStyle":    { "type":"string", "add":false, "set":false, "get":true, "description":"scatter sub-style (line/lineMarker/marker/smooth/smoothMarker/none).", "readback":"OOXML scatterStyle token", "enforcement":"report" }
   }
 }

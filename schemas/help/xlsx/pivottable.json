@@ -332,6 +332,8 @@
       "description": "comma-separated names of fields with collapsed items.",
       "readback": "comma-separated field names",
       "enforcement": "report"
-    }
+    },
+    "axisAsDataField":   { "type":"bool",   "add":false, "set":false, "get":true, "description":"comma-separated names of fields acting as data field on axis.", "readback":"comma-separated field names", "enforcement":"report" },
+    "sortByField":       { "type":"string", "add":false, "set":false, "get":true, "description":"comma-separated 'field:direction' sort tuples.", "readback":"comma-separated sort tuples", "enforcement":"report" }
   }
 }

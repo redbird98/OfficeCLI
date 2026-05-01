@@ -33,6 +33,8 @@
     "axisTitle":       { "type":"string", "add":false, "set":false, "get":true, "description":"value-axis title readback (chart-level convenience; axis-by-role uses 'title').", "readback":"title string", "enforcement":"report" },
     "axisFont":        { "type":"string", "add":false, "set":false, "get":true, "description":"axis text font readback.", "readback":"font name string", "enforcement":"report" },
     "axisOrientation": { "type":"string", "add":false, "set":false, "get":true, "description":"axis scaling orientation (e.g. maxMin when reversed).", "readback":"orientation token", "enforcement":"report" },
-    "axisNumFmt":      { "type":"string", "add":false, "set":false, "get":true, "description":"axis number format string.", "readback":"format code", "enforcement":"report" }
+    "axisNumFmt":      { "type":"string", "add":false, "set":false, "get":true, "description":"axis number format string.", "readback":"format code", "enforcement":"report" },
+    "tickLabelSkip":   { "type":"number", "add":false, "set":false, "get":true, "description":"category axis label skip interval (>1 means tick labels are sparser).", "readback":"integer interval", "enforcement":"report" },
+    "labelOffset":     { "type":"number", "add":false, "set":false, "get":true, "description":"category axis label offset (% of default 100).", "readback":"integer percentage", "enforcement":"report" }
   }
 }

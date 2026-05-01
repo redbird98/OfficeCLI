@@ -248,6 +248,8 @@
       "add": true, "set": true,
       "examples": ["--prop cropBottom=10"],
       "enforcement": "report"
-    }
+    },
+    "fileSize":    { "type":"number", "add":false, "set":false, "get":true, "description":"embedded image bytes.", "readback":"integer byte count", "enforcement":"report" },
+    "contentType": { "type":"string", "add":false, "set":false, "get":true, "description":"MIME type (e.g. image/png).", "readback":"MIME type string", "enforcement":"report" }
   }
 }
