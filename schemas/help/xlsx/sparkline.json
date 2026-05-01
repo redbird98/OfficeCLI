@@ -21,7 +21,7 @@
       "description": "sparkline chart kind. 'stacked'/'winloss' both map to OOXML stacked.",
       "add": true, "set": true, "get": true,
       "examples": ["--prop type=line"],
-      "readback": "sparkline type",
+      "readback": "\"line\", \"column\", or \"winLoss\" (OOXML stacked maps back as \"winLoss\")",
       "enforcement": "report"
     },
     "dataRange": {

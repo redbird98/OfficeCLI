@@ -55,7 +55,7 @@
     },
     "underline": {
       "type": "enum",
-      "values": ["single", "double", "dotted", "dashed", "wavy", "none"],
+      "values": ["single", "double", "dotted", "dash", "wavy", "none"],
       "add": true, "set": true, "get": true,
       "examples": ["--prop underline=single"],
       "readback": "underline style",

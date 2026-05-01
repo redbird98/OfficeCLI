@@ -299,7 +299,7 @@
     "valign": {
       "type": "enum",
       "description": "vertical alignment of text within shape.",
-      "values": ["top", "middle", "bottom", "ctr"],
+      "values": ["top", "middle", "center", "bottom"],
       "add": true, "set": true, "get": true,
       "examples": ["--prop valign=middle"],
       "readback": "vertical alignment",
