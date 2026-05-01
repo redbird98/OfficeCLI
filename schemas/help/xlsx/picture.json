@@ -17,11 +17,11 @@
   "properties": {
     "src": {
       "type": "string",
-      "description": "image source — file path, HTTP(S) URL, or data URI (data:image/png;base64,...).",
+      "description": "image source — file path, HTTP(S) URL, or data URI (data:image/png;base64,...). Add/set-only input; the image is embedded as an ImagePart and not round-tripped, so Get does NOT surface this key.",
       "aliases": ["path"],
-      "add": true, "set": true, "get": true,
+      "add": true, "set": true, "get": false,
       "examples": ["--prop src=/path/to/image.png"],
-      "readback": "image rel id",
+      "readback": "add/set-only input; Get does not surface this key.",
       "enforcement": "report"
     },
     "x": {

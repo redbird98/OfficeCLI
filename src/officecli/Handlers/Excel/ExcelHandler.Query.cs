@@ -665,6 +665,10 @@ public partial class ExcelHandler
             if (chartAnchorRange != null)
                 chartNode.Format["anchor"] = chartAnchorRange;
 
+            // CONSISTENCY(ole-width-units): also surface x/y/width/height in cm,
+            // matching the schema's add/set vocabulary so round-trip works.
+            PopulateChartPositionFormat(drawingsPart, chartIdx, chartNode);
+
             if (chartInfo.IsExtended)
             {
                 var cxChartSpace = chartInfo.ExtendedPart!.ChartSpace!;

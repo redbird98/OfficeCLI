@@ -93,10 +93,12 @@ public partial class ExcelHandler
         }
         else
         {
-            fromCol = properties.TryGetValue("x", out var xStr) ? ParseHelpers.SafeParseInt(xStr, "x") : 0;
-            fromRow = properties.TryGetValue("y", out var yStr) ? ParseHelpers.SafeParseInt(yStr, "y") : 0;
-            toCol = properties.TryGetValue("width", out var wStr) ? fromCol + ParseHelpers.SafeParseInt(wStr, "width") : fromCol + 8;
-            toRow = properties.TryGetValue("height", out var hStr) ? fromRow + ParseHelpers.SafeParseInt(hStr, "height") : fromRow + 15;
+            // CONSISTENCY(ole-width-units): accept cm/in/pt/EMU on chart x/y/width/height
+            // (matches schema doc + OLE/picture/shape Add). Plain ints stay cell-count.
+            fromCol = properties.TryGetValue("x", out var xStr) ? ParseAnchorOrigin(xStr, "x") : 0;
+            fromRow = properties.TryGetValue("y", out var yStr) ? ParseAnchorOrigin(yStr, "y") : 0;
+            toCol = properties.TryGetValue("width", out var wStr) ? fromCol + ParseAnchorDimension(wStr, "width") : fromCol + 8;
+            toRow = properties.TryGetValue("height", out var hStr) ? fromRow + ParseAnchorDimension(hStr, "height") : fromRow + 15;
         }
 
         // Extended chart types (cx:chart) — funnel, treemap, sunburst, boxWhisker, histogram

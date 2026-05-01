@@ -17,10 +17,11 @@
   "properties": {
     "src": {
       "type": "string",
+      "description": "embedded payload source — file path, accepted on add/set only. Get does NOT surface this key; the embedded relationship id is exposed under a separate Format[\"relId\"] key (see note).",
       "aliases": ["path"],
-      "add": true, "set": true, "get": true,
+      "add": true, "set": true, "get": false,
       "examples": ["--prop src=/path/to/data.docx"],
-      "readback": "object rel id",
+      "readback": "add/set-only input; not echoed by Get. Use Format[\"relId\"] to inspect the embedded relationship.",
       "enforcement": "report"
     },
     "progId": {

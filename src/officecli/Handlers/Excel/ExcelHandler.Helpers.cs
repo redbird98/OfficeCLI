@@ -3179,6 +3179,51 @@ public partial class ExcelHandler
         return $"{IndexToColumnName(fc + 1)}{fr + 1}:{IndexToColumnName(tc + 1)}{tr + 1}";
     }
 
+    /// <summary>
+    /// Read the N-th chart's TwoCellAnchor into FormatEmu strings for the
+    /// caller's Format dict (x / y / width / height in cm). Mirrors the
+    /// OLE/picture readback so add/set/get round-trip in the same vocabulary
+    /// as the schema doc. CONSISTENCY(ole-width-units).
+    /// </summary>
+    private static void PopulateChartPositionFormat(
+        DrawingsPart drawingsPart, int chartIdx, DocumentNode chartNode)
+    {
+        if (drawingsPart.WorksheetDrawing == null) return;
+        var chartFrames = drawingsPart.WorksheetDrawing
+            .Descendants<XDR.GraphicFrame>()
+            .Where(gf => gf.Descendants<C.ChartReference>().Any() || IsExtendedChartFrame(gf))
+            .ToList();
+        if (chartIdx < 1 || chartIdx > chartFrames.Count) return;
+        var gf = chartFrames[chartIdx - 1];
+        if (gf.Parent is not XDR.TwoCellAnchor anchor) return;
+        var fromM = anchor.FromMarker;
+        var toM = anchor.ToMarker;
+        if (fromM == null || toM == null) return;
+        int fromCol = 0, fromRow = 0, toCol = 0, toRow = 0;
+        long fromColOff = 0, fromRowOff = 0, toColOff = 0, toRowOff = 0;
+        int.TryParse(fromM.GetFirstChild<XDR.ColumnId>()?.Text ?? "0", out fromCol);
+        int.TryParse(fromM.GetFirstChild<XDR.RowId>()?.Text ?? "0", out fromRow);
+        int.TryParse(toM.GetFirstChild<XDR.ColumnId>()?.Text ?? "0", out toCol);
+        int.TryParse(toM.GetFirstChild<XDR.RowId>()?.Text ?? "0", out toRow);
+        long.TryParse(fromM.GetFirstChild<XDR.ColumnOffset>()?.Text ?? "0", out fromColOff);
+        long.TryParse(fromM.GetFirstChild<XDR.RowOffset>()?.Text ?? "0", out fromRowOff);
+        long.TryParse(toM.GetFirstChild<XDR.ColumnOffset>()?.Text ?? "0", out toColOff);
+        long.TryParse(toM.GetFirstChild<XDR.RowOffset>()?.Text ?? "0", out toRowOff);
+
+        long xEmu = (long)fromCol * EmuPerColApprox + fromColOff;
+        long yEmu = (long)fromRow * EmuPerRowApprox + fromRowOff;
+        long widthEmu = Math.Max(0, (long)(toCol - fromCol)) * EmuPerColApprox + (toColOff - fromColOff);
+        long heightEmu = Math.Max(0, (long)(toRow - fromRow)) * EmuPerRowApprox + (toRowOff - fromRowOff);
+        if (xEmu < 0) xEmu = 0;
+        if (yEmu < 0) yEmu = 0;
+        if (widthEmu < 0) widthEmu = 0;
+        if (heightEmu < 0) heightEmu = 0;
+        chartNode.Format["x"] = OfficeCli.Core.EmuConverter.FormatEmu(xEmu);
+        chartNode.Format["y"] = OfficeCli.Core.EmuConverter.FormatEmu(yEmu);
+        chartNode.Format["width"] = OfficeCli.Core.EmuConverter.FormatEmu(widthEmu);
+        chartNode.Format["height"] = OfficeCli.Core.EmuConverter.FormatEmu(heightEmu);
+    }
+
     private static List<string> ApplyChartPositionSet(
         DrawingsPart drawingsPart, int chartIdx, Dictionary<string, string> properties)
     {
@@ -3206,9 +3251,14 @@ public partial class ExcelHandler
         // ---- Position (x, y) → FromMarker cell indices ----
         // `x` = column index (0-based), `y` = row index (0-based). Integer
         // only — sub-cell offset is not supported here (matches chart Add).
+        // CONSISTENCY(ole-width-units): accept cm/in/pt/EMU via ParseAnchorOrigin
+        // (mirrors chart Add). Plain int stays cell-count.
         if (properties.TryGetValue("x", out var xStr))
         {
-            if (int.TryParse(xStr, out var newFromCol) && newFromCol >= 0)
+            int newFromCol = -1;
+            try { newFromCol = ParseAnchorOrigin(xStr, "x"); }
+            catch { /* fall through to unsupported */ }
+            if (newFromCol >= 0)
             {
                 var fromColChild = fromM.GetFirstChild<XDR.ColumnId>();
                 var oldFromCol = int.TryParse(fromColChild?.Text ?? "0", out var ofc) ? ofc : 0;
@@ -3226,7 +3276,10 @@ public partial class ExcelHandler
 
         if (properties.TryGetValue("y", out var yStr))
         {
-            if (int.TryParse(yStr, out var newFromRow) && newFromRow >= 0)
+            int newFromRow = -1;
+            try { newFromRow = ParseAnchorOrigin(yStr, "y"); }
+            catch { /* fall through to unsupported */ }
+            if (newFromRow >= 0)
             {
                 var fromRowChild = fromM.GetFirstChild<XDR.RowId>();
                 var oldFromRow = int.TryParse(fromRowChild?.Text ?? "0", out var ofr) ? ofr : 0;
