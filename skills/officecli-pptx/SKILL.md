@@ -305,7 +305,7 @@ officecli add "$FILE" /slide[2] --type shape --prop name=Title --prop text="Key 
   --prop font=Georgia --prop size=36 --prop bold=true --prop color=1E2761 --prop fill=none
 ```
 
-Positioning is explicit — no layout engine, you own the grid math. `--prop preset=` picks geometry (`rect`, `roundRect`, `ellipse`, `triangle`, `arrow`, `star5`, ...); custom `M...Z` paths are NOT supported at the high-level prop layer (use preset or raw-set `a:custGeom`). **Name shapes at creation** (`--prop name=HeroTitle`) and address later with `"/slide[N]/shape[@name=HeroTitle]"` — positional `/shape[3]` breaks after any z-order / remove.
+Positioning is explicit — no layout engine, you own the grid math. `--prop preset=` picks geometry (`rect`, `roundRect`, `ellipse`, `triangle`, `arrow`, `star5`, ...); custom `M...Z` paths are not supported — pick a preset. **Name shapes at creation** (`--prop name=HeroTitle`) and address later with `"/slide[N]/shape[@name=HeroTitle]"` — positional `/shape[3]` breaks after any z-order / remove.
 
 > **ID semantics.** IDs are assigned per-XML-element, not per-`add`-command. Paragraphs and runs consume IDs too — so the 4 IDs returned by 4 `add shape` calls are NOT guaranteed to be sequential (child paragraphs ate some). After a rebuild or remove-then-add, re-`get --depth 1` before referencing IDs. **Prefer `@name=` over `@id=`** — names are stable across all structural ops.
 
@@ -357,21 +357,16 @@ Confirm with `officecli query "$FILE" 'picture:no-alt'` — must be empty before
 
 ### Connectors (LEAD — flowcharts / decision trees first-class)
 
-Draws a line between two shapes or free coordinates. CLI-native props: `shape`, `from`, `to`, `x`, `y`, `width`, `height`, `color`, `headEnd`, `tailEnd` (values: `triangle|arrow|stealth|diamond|oval|none`). `line=`, `lineWidth=`, `lineDash=` are UNSUPPORTED — use raw-set `a:ln` for custom line styling.
+Draws a line between two shapes or free coordinates. CLI-native props: `shape`, `from`, `to`, `x`, `y`, `width`, `height`, `color`, `headEnd`, `tailEnd` (values: `triangle|arrow|stealth|diamond|oval|none`).
 
 - `shape` enum: short form `straight | elbow | curve`, or storage form `straightConnector1 | bentConnector3 | curvedConnector3 | line`. `bentConnector2` / `curvedConnector2` are rejected.
 - `from=`/`to=` accept the same shape-ref forms as the rest of the CLI: bare integer (shape ID), `/slide[N]/shape[M]` (positional), `/slide[N]/shape[@id=M]`, or `/slide[N]/shape[@name=Foo]`.
-- Arrowheads via `--prop tailEnd=triangle` (or `headEnd=` for reverse direction) — **requires CLI 1.0.63+**. On older 1.0.60–1.0.62 the `tailEnd=` / `headEnd=` props were UNSUPPORTED on connector; fall back to raw-set `<a:tailEnd type="triangle" w="med" len="med"/>` on `/connector[@id=ID]/spPr/ln`. Accepted values: `triangle | arrow | stealth | diamond | oval | none` (plus `closed`/`open`/`circle`, parsed by `ParseLineEndType`). For custom arrow size `w`/`len` on any version, use raw-set.
+- Arrowheads via `--prop tailEnd=triangle` (or `headEnd=` for reverse direction). Accepted values: `triangle | arrow | stealth | diamond | oval | none` (plus `closed`/`open`/`circle`).
 
 ```bash
 officecli add "$FILE" /slide[5] --type connector \
   --prop "from=/slide[5]/shape[@name=BoxA]" --prop "to=/slide[5]/shape[@name=BoxB]" \
   --prop shape=elbow --prop color=333333 --prop tailEnd=triangle
-
-# Optional — raw-set for custom arrow size (w=med, len=med):
-# CONN_ID=$(officecli query "$FILE" 'connector' --json | jq -r '.data.results[-1].format.id')
-# officecli raw-set "$FILE" "/slide[5]/connector[@id=$CONN_ID]/spPr/ln" \
-#   --action append --xml '<a:tailEnd type="triangle" w="med" len="med"/>'
 ```
 
 **Every flow connector needs an arrowhead.** Without one, `bentConnector3` renders as a directionless line. Use `--prop tailEnd=triangle` on the connector add or set. `preset=rightArrow` overlay only works for horizontal flows; diamonds / decision trees with diverging edges need `tailEnd=`.
