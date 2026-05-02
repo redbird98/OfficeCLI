@@ -31,6 +31,11 @@ static partial class CommandBuilder
     /// </summary>
     internal static bool WriteEarlyDispatchUsage(string name, TextWriter writer)
     {
+        // `skill` is the singular alias of `skills` (Program.cs accepts both as
+        // the early-dispatch token). Normalize here so `officecli skill --help`
+        // and `officecli help skill` resolve to the same usage block.
+        if (string.Equals(name, "skill", StringComparison.OrdinalIgnoreCase))
+            name = "skills";
         if (!EarlyDispatchHelp.TryGetValue(name, out var lines)) return false;
         foreach (var line in lines) writer.WriteLine(line);
         return true;
@@ -297,7 +302,8 @@ static partial class CommandBuilder
         if (!SchemaHelpLoader.IsKnownFormat(format)
             && verb == null
             && (element == null || HelpVerbs.Contains(format, StringComparer.OrdinalIgnoreCase)
-                || EarlyDispatchHelp.ContainsKey(format)))
+                || EarlyDispatchHelp.ContainsKey(format)
+                || string.Equals(format, "skill", StringComparison.OrdinalIgnoreCase)))
         {
             if (WriteEarlyDispatchUsage(format, Console.Out))
                 return 0;
