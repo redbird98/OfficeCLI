@@ -26,9 +26,9 @@
       "set": true,
       "get": true,
       "examples": [
-        "--prop style=TableStyleMedium2",
-        "--prop style=medium1",
-        "--prop style=TableGrid"
+        "--prop style=medium2",
+        "--prop style=light1",
+        "--prop style=dark1"
       ],
       "readback": "style name when resolvable, else GUID",
       "enforcement": "strict"

@@ -311,7 +311,7 @@
         "imagefill"
       ],
       "add": true,
-      "set": false,
+      "set": true,
       "get": true,
       "examples": [
         "--prop image=/path/to/photo.png"

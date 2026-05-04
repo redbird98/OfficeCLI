@@ -22,6 +22,18 @@
     "_shared/picture.pptx-xlsx"
   ],
   "properties": {
+    "crop": {
+      "type": "string",
+      "description": "Crop in percent (0-100). 1 value = symmetric, 2 values = vertical,horizontal, 4 values = left,top,right,bottom. Excel reads but does not write crops — overrides shared base which marks add/set true (pptx-only writability).",
+      "add": false,
+      "set": false,
+      "get": true,
+      "examples": [
+        "--prop crop=10"
+      ],
+      "readback": "comma-separated percentages (left,top,right,bottom)",
+      "enforcement": "report"
+    },
     "title": {
       "type": "string",
       "description": "OOXML @title attribute on cNvPr (distinct from alt).",

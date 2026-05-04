@@ -12,10 +12,10 @@
       "set": true,
       "get": false,
       "examples": [
+        "--prop border.all=\"single;1pt;FF0000\"",
         "--prop border.all=\"1pt solid FF0000\"",
         "--prop border=\"single;1pt;000000\"",
-        "--prop border.all=none",
-        "--prop border.all=\"single;4;FF0000\""
+        "--prop border.all=none"
       ],
       "enforcement": "report"
     },
@@ -26,6 +26,7 @@
       "set": true,
       "get": false,
       "examples": [
+        "--prop border.bottom=\"single;2pt;000000\"",
         "--prop border.bottom=\"2pt solid 000000\"",
         "--prop border.bottom=\"double;6;0000FF\""
       ],
@@ -42,8 +43,8 @@
       "set": true,
       "get": false,
       "examples": [
-        "--prop border.horizontal=\"1pt solid CCCCCC\"",
-        "--prop border.horizontal=\"single;4;CCCCCC\""
+        "--prop border.horizontal=\"single;1pt;CCCCCC\"",
+        "--prop border.horizontal=\"1pt solid CCCCCC\""
       ],
       "enforcement": "report"
     },
@@ -54,8 +55,8 @@
       "set": true,
       "get": false,
       "examples": [
-        "--prop border.left=\"1pt solid 808080\"",
-        "--prop border.left=\"single;4\""
+        "--prop border.left=\"single;1pt;808080\"",
+        "--prop border.left=\"1pt solid 808080\""
       ],
       "enforcement": "report"
     },
@@ -66,8 +67,8 @@
       "set": true,
       "get": false,
       "examples": [
-        "--prop border.right=\"1pt solid 808080\"",
-        "--prop border.right=\"single;4\""
+        "--prop border.right=\"single;1pt;808080\"",
+        "--prop border.right=\"1pt solid 808080\""
       ],
       "enforcement": "report"
     },
@@ -78,8 +79,8 @@
       "set": true,
       "get": false,
       "examples": [
-        "--prop border.top=\"2pt solid 000000\"",
-        "--prop border.top=\"single;4;000000\""
+        "--prop border.top=\"single;2pt;000000\"",
+        "--prop border.top=\"2pt solid 000000\""
       ],
       "enforcement": "report"
     },
@@ -94,8 +95,8 @@
       "set": true,
       "get": false,
       "examples": [
-        "--prop border.vertical=\"1pt solid CCCCCC\"",
-        "--prop border.vertical=\"single;4;CCCCCC\""
+        "--prop border.vertical=\"single;1pt;CCCCCC\"",
+        "--prop border.vertical=\"1pt solid CCCCCC\""
       ],
       "enforcement": "report"
     },

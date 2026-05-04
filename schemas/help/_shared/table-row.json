@@ -8,12 +8,12 @@
       "description": "override column count for the new row (defaults to table grid column count).",
       "add": true,
       "set": false,
-      "get": true,
+      "get": false,
       "examples": [
         "--prop cols=4",
         "--prop cols=3"
       ],
-      "readback": "n/a (structural)",
+      "readback": "n/a (structural — cell count surfaces via DocumentNode.Children, not Format)",
       "enforcement": "strict"
     },
     "height": {
