@@ -271,9 +271,13 @@ public static class McpServer
         var width = ArgInt("screenshot_width", 1600);
         var height = ArgInt("screenshot_height", 1200);
         var grid = ArgInt("grid", 0);
+        var renderMode = (Arg("render") is { Length: > 0 } rm ? rm : "auto").ToLowerInvariant();
+        if (renderMode is not ("auto" or "native" or "html"))
+            throw new ArgumentException($"Invalid render value: {renderMode}. Valid: auto, native, html");
 
         using var handler = DocumentHandlerFactory.Open(file);
         string? html = null;
+        byte[]? directPng = null;
         if (handler is Handlers.PowerPointHandler ppt)
         {
             var pStart = start ?? 1;
@@ -288,32 +292,76 @@ public static class McpServer
             // cropped by the viewport. Caller can pass start=N to override.
             var pageFilter = (start ?? 1).ToString();
             if (end is int e && e >= (start ?? 1)) pageFilter = $"{start ?? 1}-{e}";
-            html = wh.ViewAsHtml(pageFilter);
+            if (renderMode != "html" && OperatingSystem.IsWindows())
+            {
+                try { directPng = OfficeCli.Core.WordPdfBackend.Render(file, pageFilter); } catch { directPng = null; }
+            }
+            if (renderMode == "native" && directPng == null)
+                throw new ArgumentException("render=native requires Windows with Microsoft Word installed.");
+            if (directPng == null) html = wh.ViewAsHtml(pageFilter);
         }
 
-        if (html == null)
+        if (html == null && directPng == null)
             throw new ArgumentException("Screenshot mode is only supported for .pptx, .xlsx, and .docx files.");
 
         var stem = Path.GetFileNameWithoutExtension(file);
-        var tmpHtml = Path.Combine(Path.GetTempPath(), $"officecli_preview_{stem}_{Guid.NewGuid():N}.html");
-        File.WriteAllText(tmpHtml, html);
         var pngPath = Path.Combine(Path.GetTempPath(), $"officecli_screenshot_{stem}_{Guid.NewGuid():N}.png");
-        var r = OfficeCli.Core.HtmlScreenshot.Capture(tmpHtml, pngPath, width, height);
-        try { File.Delete(tmpHtml); } catch { /* ignore */ }
-        if (!r.Ok)
-            throw new InvalidOperationException(
-                "No headless browser available. Install Chrome/Edge/Chromium or Firefox, "
-                + "or `pip install playwright && playwright install chromium`."
-                + (r.Error != null ? $" Last error: {r.Error}" : ""));
+        string backendName;
+        if (directPng != null)
+        {
+            File.WriteAllBytes(pngPath, directPng);
+            backendName = "word";
+        }
+        else
+        {
+            var tmpHtml = Path.Combine(Path.GetTempPath(), $"officecli_preview_{stem}_{Guid.NewGuid():N}.html");
+            File.WriteAllText(tmpHtml, html!);
+            var r = OfficeCli.Core.HtmlScreenshot.Capture(tmpHtml, pngPath, width, height);
+            try { File.Delete(tmpHtml); } catch { /* ignore */ }
+            if (!r.Ok)
+                throw new InvalidOperationException(
+                    "No headless browser available. Install Chrome/Edge/Chromium or Firefox, "
+                    + "or `pip install playwright && playwright install chromium`."
+                    + (r.Error != null ? $" Last error: {r.Error}" : ""));
+            backendName = r.Backend;
+        }
 
         var bytes = File.ReadAllBytes(pngPath);
         var b64 = Convert.ToBase64String(bytes);
-        var caption = $"Screenshot saved to {pngPath} ({bytes.Length} bytes, backend: {r.Backend}).";
+        string pagesNote = "";
+        if (handler is Handlers.PowerPointHandler pptp)
+            pagesNote = $" Slides: {pptp.GetSlideCount()}.";
+        var caption = $"Screenshot saved to {pngPath} ({bytes.Length} bytes, backend: {backendName}).{pagesNote}";
         return new[]
         {
             new McpContent("text", Text: caption),
             new McpContent("image", Data: b64, MimeType: "image/png"),
         };
+    }
+
+    private static string StatsWithOptionalPageCount(IDocumentHandler handler, JsonElement args, string file)
+    {
+        var stats = handler.ViewAsStats();
+        var wantPages = args.ValueKind == JsonValueKind.Object
+            && args.TryGetProperty("page_count", out var pcv)
+            && (pcv.ValueKind == JsonValueKind.True || (pcv.ValueKind == JsonValueKind.String && pcv.GetString() == "true"));
+        if (!wantPages || handler is not Handlers.WordHandler wh) return stats;
+        int? pages = null;
+        if (OperatingSystem.IsWindows())
+        {
+            try { pages = Core.WordPdfBackend.GetPageCount(file); } catch { pages = null; }
+        }
+        if (pages == null)
+        {
+            var tmpHtml = Path.Combine(Path.GetTempPath(), $"officecli_pc_{Path.GetFileNameWithoutExtension(file)}_{Guid.NewGuid():N}.html");
+            try
+            {
+                File.WriteAllText(tmpHtml, wh.ViewAsHtml(null));
+                pages = Core.HtmlScreenshot.GetPageCountFromDom(tmpHtml);
+            }
+            finally { try { File.Delete(tmpHtml); } catch { } }
+        }
+        return pages.HasValue ? $"Pages: {pages}\n" + stats : stats;
     }
 
     private static string ExecuteTool(string name, JsonElement args)
@@ -359,7 +407,7 @@ public static class McpServer
                     "text" or "t" => handler.ViewAsText(start, end, maxLines, null),
                     "annotated" or "a" => handler.ViewAsAnnotated(start, end, maxLines, null),
                     "outline" or "o" => handler.ViewAsOutline(),
-                    "stats" or "s" => handler.ViewAsStats(),
+                    "stats" or "s" => StatsWithOptionalPageCount(handler, args, file),
                     "issues" or "i" => OutputFormatter.FormatIssues(handler.ViewAsIssues(null, null), OutputFormat.Json),
                     "forms" or "f" => handler is Handlers.WordHandler wfh
                         ? wfh.ViewAsFormsJson().ToJsonString(OutputFormatter.PublicJsonOptions)

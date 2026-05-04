@@ -490,7 +490,31 @@ public partial class WordHandler
         sb.AppendLine(@"
   function paginate(){
     var pages=document.querySelectorAll('.page');
-    for(var pi=0;pi<pages.length;pi++){
+    // Sync mode + page filter: bail once pages beyond max-requested exist
+    // and pages 1..maxReq are stable. Avoids paginating 100-page docs to
+    // completion when only the first few were asked for.
+    var loopLim=pages.length;
+    if(window._wpSync&&window._requestedPages&&window._requestedPages.length){
+      var mxR=Math.max.apply(null,window._requestedPages);
+      loopLim=Math.min(pages.length,mxR+1);
+      if(pages.length>mxR){
+        var settled=true;
+        for(var sk=0;sk<mxR;sk++){
+          var sp=pages[sk];var sb_=sp.querySelector('.page-body');
+          if(!sb_)continue;
+          var sf=sb_.querySelector('.footnotes');var sfH=sf?sf.offsetHeight:0;
+          var sch=0;
+          Array.from(sb_.children).forEach(function(c){
+            if(c.classList.contains('footnotes'))return;
+            var bt=c.offsetTop+c.offsetHeight-sb_.offsetTop;
+            if(bt>sch)sch=bt;
+          });
+          if(sch>maxBodyH-sfH+2){settled=false;break;}
+        }
+        if(settled){positionFootnotes();wrapFloats();applyLineNumbers();applyPageFilter();return;}
+      }
+    }
+    for(var pi=0;pi<loopLim;pi++){
       var page=pages[pi];
       var body=page.querySelector('.page-body');
       if(!body)continue;
@@ -609,9 +633,15 @@ public partial class WordHandler
     // another split when it has more than one visible child — otherwise the
     // single element is irreducible and we would recurse forever.
     var again=false;
-    document.querySelectorAll('.page').forEach(function(p){
+    var rcAll=document.querySelectorAll('.page');
+    var rcLim=rcAll.length;
+    if(window._wpSync&&window._requestedPages&&window._requestedPages.length){
+      rcLim=Math.min(rcAll.length,Math.max.apply(null,window._requestedPages)+1);
+    }
+    for(var rci=0;rci<rcLim;rci++){
+      var p=rcAll[rci];
       var b=p.querySelector('.page-body');
-      if(!b)return;
+      if(!b)continue;
       var f=b.querySelector('.footnotes');
       var fh=f?f.offsetHeight:0;
       var ch=0;
@@ -622,9 +652,10 @@ public partial class WordHandler
         if(bt>ch)ch=bt;
         if(c.offsetHeight>0)visibleCount++;
       });
-      if(ch>maxBodyH-fh+2 && visibleCount>1)again=true;
-    });
-    if(again)setTimeout(paginate,0);
+      if(ch>maxBodyH-fh+2 && visibleCount>1){again=true;break;}
+    }
+    if(again){if(window._wpSync)paginate();else setTimeout(paginate,0);}
+    else if(window._wpSync){positionFootnotes();wrapFloats();applyLineNumbers();applyPageFilter();document.title='PAGES:'+document.querySelectorAll('.page').length;}
     else{setTimeout(positionFootnotes,0);setTimeout(wrapFloats,0);setTimeout(applyLineNumbers,0);setTimeout(applyPageFilter,0);setTimeout(function(){scalePages(false);},0);}
   }
   // #2 / #7b light approximation: a floating table whose CSS has float:*
@@ -805,7 +836,6 @@ public partial class WordHandler
     });
   }
   window._wordPaginate=function(){renderNewContent();setTimeout(paginate,0);};
-  setTimeout(paginate,100);
 ");
         // Responsive scaling: shrink pages to fit viewport (like PPT's scaleSlides)
         sb.AppendLine(@"  function scalePages(animate){
@@ -849,6 +879,17 @@ public partial class WordHandler
         // Pass requested pages to JS for post-pagination filtering
         if (requestedPages != null && requestedPages.Count > 0)
             sb.AppendLine($"  window._requestedPages=[{string.Join(",", requestedPages)}];");
+        sb.AppendLine(@"  var SCREENSHOT=location.hash.indexOf('screenshot')>=0;
+  window._wpSync=SCREENSHOT;
+  if(SCREENSHOT){
+    var rp=window._requestedPages;
+    if(rp&&rp.length===1&&rp[0]===1){
+      var first=document.querySelector('.page');
+      if(first){first.style.height=first.style.minHeight;first.style.overflow='hidden';}
+      document.querySelectorAll('.page-wrapper:not(:first-of-type)').forEach(function(w){w.style.display='none';});
+      positionFootnotes();wrapFloats();applyLineNumbers();
+    }else{paginate();}
+  }else{setTimeout(paginate,100);}");
         sb.AppendLine("}");
         sb.AppendLine("if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_wordInit);");
         sb.AppendLine("else _wordInit();");

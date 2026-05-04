@@ -15,9 +15,48 @@ internal static class HtmlScreenshot
 {
     public sealed record Result(bool Ok, string Backend, string? Error);
 
+    /// Run a chromium-family browser in dump-dom mode against the given HTML
+    /// and parse the document title for "PAGES:N". Caller's HTML must set the
+    /// title from JS after layout settles. Returns null if no browser is
+    /// available, the run timed out, or no marker was found.
+    public static int? GetPageCountFromDom(string htmlPath, int timeoutMs = 60000)
+    {
+        var url = new Uri(Path.GetFullPath(htmlPath)).AbsoluteUri + "#screenshot";
+        var bin = FindChrome();
+        if (bin == null) return null;
+        var args = new[]
+        {
+            "--headless=new",
+            "--disable-gpu",
+            "--no-sandbox",
+            "--virtual-time-budget=15000",
+            "--dump-dom",
+            url,
+        };
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = bin,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            foreach (var a in args) psi.ArgumentList.Add(a);
+            using var p = Process.Start(psi);
+            if (p == null) return null;
+            var stdout = p.StandardOutput.ReadToEnd();
+            if (!p.WaitForExit(timeoutMs)) { try { p.Kill(true); } catch { } return null; }
+            var m = System.Text.RegularExpressions.Regex.Match(stdout, @"<title>PAGES:(\d+)</title>");
+            return m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : null;
+        }
+        catch { return null; }
+    }
+
     public static Result Capture(string htmlPath, string outPath, int width = 1600, int height = 1200)
     {
-        var url = new Uri(Path.GetFullPath(htmlPath)).AbsoluteUri;
+        var url = new Uri(Path.GetFullPath(htmlPath)).AbsoluteUri + "#screenshot";
         outPath = Path.GetFullPath(outPath);
         var outDir = Path.GetDirectoryName(outPath);
         if (!string.IsNullOrEmpty(outDir)) Directory.CreateDirectory(outDir);

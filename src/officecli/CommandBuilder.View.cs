@@ -26,6 +26,8 @@ static partial class CommandBuilder
         var screenshotWidthOpt = new Option<int>("--screenshot-width") { Description = "Screenshot viewport width (default 1600)", DefaultValueFactory = _ => 1600 };
         var screenshotHeightOpt = new Option<int>("--screenshot-height") { Description = "Screenshot viewport height (default 1200)", DefaultValueFactory = _ => 1200 };
         var gridOpt = new Option<int>("--grid") { Description = "Tile slides into an N-column thumbnail grid (screenshot mode, pptx only; 0 = off)", DefaultValueFactory = _ => 0 };
+        var renderOpt = new Option<string>("--render") { Description = "Screenshot rendering path (docx only): auto (default; native on Windows w/ Word, html elsewhere), native (force OS-native, error if unavailable), html", DefaultValueFactory = _ => "auto" };
+        var withPagesOpt = new Option<bool>("--page-count") { Description = "stats mode (docx only): also report total page count via Word repagination (Win + Word required; slow on long docs)" };
 
         var viewCommand = new Command("view", "View document in different modes");
         viewCommand.Add(viewFileArg);
@@ -42,6 +44,8 @@ static partial class CommandBuilder
         viewCommand.Add(screenshotWidthOpt);
         viewCommand.Add(screenshotHeightOpt);
         viewCommand.Add(gridOpt);
+        viewCommand.Add(renderOpt);
+        viewCommand.Add(withPagesOpt);
         viewCommand.Add(jsonOption);
 
         viewCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
@@ -60,6 +64,10 @@ static partial class CommandBuilder
             var screenshotWidth = result.GetValue(screenshotWidthOpt);
             var screenshotHeight = result.GetValue(screenshotHeightOpt);
             var gridCols = result.GetValue(gridOpt);
+            var renderMode = (result.GetValue(renderOpt) ?? "auto").ToLowerInvariant();
+            if (renderMode is not ("auto" or "native" or "html"))
+                throw new OfficeCli.Core.CliException($"Invalid --render value: {renderMode}. Valid: auto, native, html") { Code = "invalid_render", ValidValues = ["auto", "native", "html"] };
+            var withPages = result.GetValue(withPagesOpt);
 
             // Try resident first
             if (TryResident(file.FullName, req =>
@@ -79,6 +87,8 @@ static partial class CommandBuilder
                 req.Args["screenshot-width"] = screenshotWidth.ToString();
                 req.Args["screenshot-height"] = screenshotHeight.ToString();
                 if (gridCols > 0) req.Args["grid"] = gridCols.ToString();
+                if (renderMode != "auto") req.Args["render"] = renderMode;
+                if (withPages) req.Args["page-count"] = "true";
             }, json) is {} rc) return rc;
 
             var format = json ? OutputFormat.Json : OutputFormat.Text;
@@ -157,6 +167,7 @@ static partial class CommandBuilder
                 // for pptx thumbnails. xlsx is naturally first-sheet via CSS
                 // `.sheet-content { display:none }` + `.active` on sheet 0.
                 string? html = null;
+                byte[]? directPng = null;
                 if (handler is OfficeCli.Handlers.PowerPointHandler pptHandler)
                 {
                     var effectiveFilter = pageFilter;
@@ -170,10 +181,18 @@ static partial class CommandBuilder
                 else if (handler is OfficeCli.Handlers.WordHandler wordHandler)
                 {
                     var effectiveFilter = string.IsNullOrEmpty(pageFilter) ? "1" : pageFilter;
-                    html = wordHandler.ViewAsHtml(effectiveFilter);
+                    if (renderMode != "html" && OperatingSystem.IsWindows())
+                    {
+                        try { directPng = OfficeCli.Core.WordPdfBackend.Render(file.FullName, effectiveFilter); }
+                        catch { directPng = null; }
+                    }
+                    if (renderMode == "native" && directPng == null)
+                        throw new OfficeCli.Core.CliException("--render native requires Windows with Microsoft Word installed.")
+                        { Code = "native_unavailable", Suggestion = "Use --render html or --render auto." };
+                    if (directPng == null) html = wordHandler.ViewAsHtml(effectiveFilter);
                 }
 
-                if (html == null)
+                if (html == null && directPng == null)
                 {
                     throw new OfficeCli.Core.CliException("Screenshot mode is only supported for .pptx, .xlsx, and .docx files.")
                     {
@@ -183,20 +202,29 @@ static partial class CommandBuilder
                     };
                 }
 
-                // SECURITY: random token in temp filename — same rationale as the html/--browser path.
-                var tmpHtml = Path.Combine(Path.GetTempPath(), $"officecli_preview_{Path.GetFileNameWithoutExtension(file.Name)}_{DateTime.Now:HHmmss}_{Guid.NewGuid():N}.html");
-                File.WriteAllText(tmpHtml, html);
                 var pngPath = outArg ?? Path.Combine(Path.GetTempPath(), $"officecli_screenshot_{Path.GetFileNameWithoutExtension(file.Name)}_{DateTime.Now:HHmmss}_{Guid.NewGuid():N}.png");
-                var r = OfficeCli.Core.HtmlScreenshot.Capture(tmpHtml, pngPath, screenshotWidth, screenshotHeight);
-                try { File.Delete(tmpHtml); } catch { /* ignore */ }
-                if (!r.Ok)
+                if (directPng != null)
                 {
-                    throw new OfficeCli.Core.CliException(
-                        "No headless browser available. Install Chrome/Edge/Chromium or Firefox, or `pip install playwright && playwright install chromium`."
-                        + (r.Error != null ? $" Last error: {r.Error}" : ""))
-                    { Code = "no_screenshot_backend" };
+                    File.WriteAllBytes(pngPath, directPng);
+                }
+                else
+                {
+                    // SECURITY: random token in temp filename — same rationale as the html/--browser path.
+                    var tmpHtml = Path.Combine(Path.GetTempPath(), $"officecli_preview_{Path.GetFileNameWithoutExtension(file.Name)}_{DateTime.Now:HHmmss}_{Guid.NewGuid():N}.html");
+                    File.WriteAllText(tmpHtml, html!);
+                    var r = OfficeCli.Core.HtmlScreenshot.Capture(tmpHtml, pngPath, screenshotWidth, screenshotHeight);
+                    try { File.Delete(tmpHtml); } catch { /* ignore */ }
+                    if (!r.Ok)
+                    {
+                        throw new OfficeCli.Core.CliException(
+                            "No headless browser available. Install Chrome/Edge/Chromium or Firefox, or `pip install playwright && playwright install chromium`."
+                            + (r.Error != null ? $" Last error: {r.Error}" : ""))
+                        { Code = "no_screenshot_backend" };
+                    }
                 }
                 Console.WriteLine(Path.GetFullPath(pngPath));
+                if (handler is OfficeCli.Handlers.PowerPointHandler pptCount)
+                    Console.Error.WriteLine($"[pages] total={pptCount.GetSlideCount()}");
                 if (browser)
                 {
                     try
@@ -276,12 +304,38 @@ static partial class CommandBuilder
                 return 0;
             }
 
+            int? withPagesValue = null;
+            if (withPages && (mode.ToLowerInvariant() is "stats" or "s") && handler is OfficeCli.Handlers.WordHandler wordHandlerForCount)
+            {
+                if (OperatingSystem.IsWindows())
+                {
+                    try { withPagesValue = OfficeCli.Core.WordPdfBackend.GetPageCount(file.FullName); } catch { withPagesValue = null; }
+                }
+                if (withPagesValue == null)
+                {
+                    var tmpHtml = Path.Combine(Path.GetTempPath(), $"officecli_pc_{Path.GetFileNameWithoutExtension(file.Name)}_{Guid.NewGuid():N}.html");
+                    try
+                    {
+                        File.WriteAllText(tmpHtml, wordHandlerForCount.ViewAsHtml(null));
+                        withPagesValue = OfficeCli.Core.HtmlScreenshot.GetPageCountFromDom(tmpHtml);
+                    }
+                    finally { try { File.Delete(tmpHtml); } catch { } }
+                }
+                if (withPagesValue == null)
+                    throw new OfficeCli.Core.CliException("--page-count: failed to get page count (Word backend and HTML fallback both unavailable).")
+                    { Code = "page_count_unavailable" };
+            }
+
             if (json)
             {
                 // Structured JSON output — no Content string wrapping
                 var modeKey = mode.ToLowerInvariant();
                 if (modeKey is "stats" or "s")
-                    Console.WriteLine(OutputFormatter.WrapEnvelope(handler.ViewAsStatsJson().ToJsonString(OutputFormatter.PublicJsonOptions)));
+                {
+                    var statsJson = handler.ViewAsStatsJson();
+                    if (withPagesValue.HasValue) statsJson["pages"] = withPagesValue.Value;
+                    Console.WriteLine(OutputFormatter.WrapEnvelope(statsJson.ToJsonString(OutputFormatter.PublicJsonOptions)));
+                }
                 else if (modeKey is "outline" or "o")
                     Console.WriteLine(OutputFormatter.WrapEnvelope(handler.ViewAsOutlineJson().ToJsonString(OutputFormatter.PublicJsonOptions)));
                 else if (modeKey is "text" or "t")
@@ -317,7 +371,9 @@ static partial class CommandBuilder
                     "text" or "t" => handler.ViewAsText(start, end, maxLines, cols),
                     "annotated" or "a" => handler.ViewAsAnnotated(start, end, maxLines, cols),
                     "outline" or "o" => handler.ViewAsOutline(),
-                    "stats" or "s" => handler.ViewAsStats(),
+                    "stats" or "s" => withPagesValue.HasValue
+                        ? $"Pages: {withPagesValue}\n" + handler.ViewAsStats()
+                        : handler.ViewAsStats(),
                     "issues" or "i" => OutputFormatter.FormatIssues(handler.ViewAsIssues(issueType, limit), OutputFormat.Text),
                     "forms" or "f" => handler is OfficeCli.Handlers.WordHandler wfh
                         ? wfh.ViewAsForms()

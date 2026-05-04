@@ -13,9 +13,10 @@ namespace OfficeCli;
 
 public class ResidentServer : IDisposable
 {
-    private readonly IDocumentHandler _handler;
+    private IDocumentHandler _handler;
     private readonly string _filePath;
     private readonly string _pipeName;
+    private readonly bool _editable;
     // Shutdown uses TWO independent CTSs so the ping pipe can outlive the
     // handler dispose. This establishes the critical invariant that
     // TryResident relies on:
@@ -111,6 +112,7 @@ public class ResidentServer : IDisposable
     {
         _filePath = Path.GetFullPath(filePath);
         _pipeName = GetPipeName(_filePath);
+        _editable = editable;
         _handler = DocumentHandlerFactory.Open(_filePath, editable);
     }
 
@@ -931,6 +933,7 @@ public class ResidentServer : IDisposable
         if (mode!.ToLowerInvariant() is "screenshot" or "p")
         {
             string? html = null;
+            byte[]? directPng = null;
             var gridCols = req.GetIntArg("grid") ?? 0;
             // CONSISTENCY(screenshot-default-first-page): mirror CommandBuilder.View.cs —
             // screenshot mode defaults to a single bounded visual unit (pptx → slide 1,
@@ -950,27 +953,49 @@ public class ResidentServer : IDisposable
             else if (_handler is OfficeCli.Handlers.WordHandler wordShotHandler)
             {
                 var effectiveFilter = string.IsNullOrEmpty(pageFilter) ? "1" : pageFilter;
-                html = wordShotHandler.ViewAsHtml(effectiveFilter);
+                var renderMode = (req.GetArgOrNull("render") ?? "auto").ToLowerInvariant();
+                if (renderMode != "html" && OperatingSystem.IsWindows())
+                {
+                    _handler.Dispose();
+                    try { directPng = OfficeCli.Core.WordPdfBackend.Render(_filePath, effectiveFilter); } catch { directPng = null; }
+                    _handler = OfficeCli.Handlers.DocumentHandlerFactory.Open(_filePath, _editable);
+                    wordShotHandler = (OfficeCli.Handlers.WordHandler)_handler;
+                }
+                if (renderMode == "native" && directPng == null)
+                {
+                    Console.Error.WriteLine("--render native requires Windows with Microsoft Word installed.");
+                    return;
+                }
+                if (directPng == null) html = wordShotHandler.ViewAsHtml(effectiveFilter);
             }
-            if (html == null)
+            if (html == null && directPng == null)
             {
                 Console.Error.WriteLine("Screenshot mode is only supported for .pptx, .xlsx, and .docx files.");
                 return;
             }
             var sw = req.GetIntArg("screenshot-width") ?? 1600;
             var sh = req.GetIntArg("screenshot-height") ?? 1200;
-            var tmpHtml = Path.Combine(Path.GetTempPath(), $"officecli_preview_{Path.GetFileNameWithoutExtension(_filePath)}_{DateTime.Now:HHmmss}_{Guid.NewGuid():N}.html");
-            File.WriteAllText(tmpHtml, html);
             var pngPath = req.GetArgOrNull("out") ?? Path.Combine(Path.GetTempPath(), $"officecli_screenshot_{Path.GetFileNameWithoutExtension(_filePath)}_{DateTime.Now:HHmmss}_{Guid.NewGuid():N}.png");
-            var rs = OfficeCli.Core.HtmlScreenshot.Capture(tmpHtml, pngPath, sw, sh);
-            try { File.Delete(tmpHtml); } catch { /* ignore */ }
-            if (!rs.Ok)
+            if (directPng != null)
             {
-                Console.Error.WriteLine("No headless browser available. Install Chrome/Edge/Chromium or Firefox, or `pip install playwright && playwright install chromium`."
-                    + (rs.Error != null ? $" Last error: {rs.Error}" : ""));
-                return;
+                File.WriteAllBytes(pngPath, directPng);
+            }
+            else
+            {
+                var tmpHtml = Path.Combine(Path.GetTempPath(), $"officecli_preview_{Path.GetFileNameWithoutExtension(_filePath)}_{DateTime.Now:HHmmss}_{Guid.NewGuid():N}.html");
+                File.WriteAllText(tmpHtml, html!);
+                var rs = OfficeCli.Core.HtmlScreenshot.Capture(tmpHtml, pngPath, sw, sh);
+                try { File.Delete(tmpHtml); } catch { /* ignore */ }
+                if (!rs.Ok)
+                {
+                    Console.Error.WriteLine("No headless browser available. Install Chrome/Edge/Chromium or Firefox, or `pip install playwright && playwright install chromium`."
+                        + (rs.Error != null ? $" Last error: {rs.Error}" : ""));
+                    return;
+                }
             }
             Console.WriteLine(Path.GetFullPath(pngPath));
+            if (_handler is OfficeCli.Handlers.PowerPointHandler pptCnt)
+                Console.Error.WriteLine($"[pages] total={pptCnt.GetSlideCount()}");
             if (req.GetArgOrNull("browser") == "true")
             {
                 try
@@ -1017,11 +1042,42 @@ public class ResidentServer : IDisposable
             return;
         }
 
+        int? pageCountValue = null;
+        if (req.GetArgOrNull("page-count") == "true" && (mode!.ToLowerInvariant() is "stats" or "s") && _handler is OfficeCli.Handlers.WordHandler whForCount)
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                _handler.Dispose();
+                try { pageCountValue = OfficeCli.Core.WordPdfBackend.GetPageCount(_filePath); } catch { pageCountValue = null; }
+                _handler = OfficeCli.Handlers.DocumentHandlerFactory.Open(_filePath, _editable);
+                whForCount = (OfficeCli.Handlers.WordHandler)_handler;
+            }
+            if (pageCountValue == null)
+            {
+                var tmpHtml = Path.Combine(Path.GetTempPath(), $"officecli_pc_{Path.GetFileNameWithoutExtension(_filePath)}_{Guid.NewGuid():N}.html");
+                try
+                {
+                    File.WriteAllText(tmpHtml, whForCount.ViewAsHtml(null));
+                    pageCountValue = OfficeCli.Core.HtmlScreenshot.GetPageCountFromDom(tmpHtml);
+                }
+                finally { try { File.Delete(tmpHtml); } catch { } }
+            }
+            if (pageCountValue == null)
+            {
+                Console.Error.WriteLine("--page-count: failed to get page count (Word backend and HTML fallback both unavailable).");
+                return;
+            }
+        }
+
         if (req.Json)
         {
             var modeKey = mode!.ToLowerInvariant();
             if (modeKey is "stats" or "s")
-                Console.WriteLine(_handler.ViewAsStatsJson().ToJsonString(OutputFormatter.PublicJsonOptions));
+            {
+                var statsJson = _handler.ViewAsStatsJson();
+                if (pageCountValue.HasValue) statsJson["pages"] = pageCountValue.Value;
+                Console.WriteLine(statsJson.ToJsonString(OutputFormatter.PublicJsonOptions));
+            }
             else if (modeKey is "outline" or "o")
                 Console.WriteLine(_handler.ViewAsOutlineJson().ToJsonString(OutputFormatter.PublicJsonOptions));
             else if (modeKey is "text" or "t")
@@ -1047,7 +1103,9 @@ public class ResidentServer : IDisposable
                 "text" or "t" => _handler.ViewAsText(start, end, maxLines, cols),
                 "annotated" or "a" => _handler.ViewAsAnnotated(start, end, maxLines, cols),
                 "outline" or "o" => _handler.ViewAsOutline(),
-                "stats" or "s" => _handler.ViewAsStats(),
+                "stats" or "s" => pageCountValue.HasValue
+                    ? $"Pages: {pageCountValue}\n" + _handler.ViewAsStats()
+                    : _handler.ViewAsStats(),
                 "issues" or "i" => OutputFormatter.FormatIssues(_handler.ViewAsIssues(issueType, limit), format),
                 "forms" or "f" => _handler is OfficeCli.Handlers.WordHandler wfh
                     ? wfh.ViewAsForms()
