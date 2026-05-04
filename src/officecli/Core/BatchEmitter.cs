@@ -556,7 +556,15 @@ public static class BatchEmitter
                     continue;
                 }
 
-                if (ctx != null && ctx.ChartCursor.Index < ctx.ChartSpecs.Count)
+                // Only consume a ChartSpec if the run is genuinely a chart.
+                // Picture-typed runs that aren't images can also be background
+                // images, OLE objects, SmartArt, watermark anchors, etc. —
+                // falling through unconditionally to chart consumption would
+                // misalign chart positions for every subsequent chart in the
+                // document (e.g. a Background anchor at p[1] would steal the
+                // chart spec belonging to a real chart further down).
+                if (ctx != null && word.IsChartRun(run.Path)
+                    && ctx.ChartCursor.Index < ctx.ChartSpecs.Count)
                 {
                     var spec = ctx.ChartSpecs[ctx.ChartCursor.Index];
                     ctx.ChartCursor.Index++;
@@ -570,8 +578,9 @@ public static class BatchEmitter
                     });
                     continue;
                 }
-                // Drawing without image part and no matching chart spec —
-                // unsupported anchor (OLE/SmartArt). Skip silently.
+                // Drawing without image part and not a chart — unsupported
+                // anchor (OLE/SmartArt/background image/watermark). Skip
+                // silently; round-trip is lossy on these for v0.5.
                 continue;
             }
 

@@ -47,6 +47,26 @@ public partial class WordHandler : IDocumentHandler
     /// `src=` prop and re-imported via <c>ImageSource.Resolve</c> on replay.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// Returns true if the run at <paramref name="runPath"/> wraps a chart
+    /// (c:chart inside a Drawing's graphicData). BatchEmitter uses this to
+    /// distinguish chart-bearing runs from picture/OLE/background runs that
+    /// also surface as type="picture" in Get — without this, an unsupported
+    /// drawing's failed image extraction would consume the next chart spec
+    /// and render at the wrong paragraph.
+    /// </summary>
+    public bool IsChartRun(string runPath)
+    {
+        var segments = ParsePath(runPath);
+        var element = NavigateToElement(segments);
+        if (element is not Run run) return false;
+        var drawing = run.GetFirstChild<DocumentFormat.OpenXml.Wordprocessing.Drawing>();
+        if (drawing == null) return false;
+        return drawing
+            .Descendants<DocumentFormat.OpenXml.Drawing.Charts.ChartReference>()
+            .Any();
+    }
+
     public (byte[] Bytes, string ContentType)? GetImageBinary(string runPath)
     {
         // Parse + navigate via the same machinery Get/Set use so paraId
