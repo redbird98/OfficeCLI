@@ -1541,22 +1541,21 @@ public partial class WordHandler
             // didn't consume. Symmetric with the Set-side TryCreateTypedChild
             // fallback in SetElementRun (WordHandler.Set.Element.cs).
             FillUnknownChildProps(run.RunProperties, node);
-            // Image properties if run contains a Drawing
+            // Image properties if run contains a Drawing.
+            // BUG-R5-T3: previously this branch wrote only id/name/alt/width/
+            // height/relId — wrap/hPosition/vPosition/hRelative/vRelative/
+            // behindText for floating pictures were silently dropped, which
+            // also broke dump→batch round-trip (BatchEmitter relies on Get).
+            // Reuse CreateImageNode (the canonical picture-node builder) and
+            // merge its Format bag into the run node.
             var runDrawing = run.GetFirstChild<Drawing>();
             if (runDrawing != null)
             {
-                node.Type = "picture";
-                var docProps = runDrawing.Descendants<DW.DocProperties>().FirstOrDefault();
-                if (docProps?.Id?.HasValue == true) node.Format["id"] = docProps.Id.Value;
-                if (docProps?.Name?.Value != null) node.Format["name"] = docProps.Name.Value;
-                if (docProps?.Description?.Value != null) node.Format["alt"] = docProps.Description.Value;
-                var extent = runDrawing.Descendants<DW.Extent>().FirstOrDefault();
-                if (extent?.Cx != null) node.Format["width"] = $"{extent.Cx.Value / 360000.0:F1}cm";
-                if (extent?.Cy != null) node.Format["height"] = $"{extent.Cy.Value / 360000.0:F1}cm";
-                // Expose the image part rel id so `get --save` can extract it.
-                var runBlip = runDrawing.Descendants<DocumentFormat.OpenXml.Drawing.Blip>().FirstOrDefault();
-                if (runBlip?.Embed?.Value != null)
-                    node.Format["relId"] = runBlip.Embed.Value;
+                var picNode = CreateImageNode(runDrawing, run, path);
+                node.Type = picNode.Type;
+                if (!string.IsNullOrEmpty(picNode.Text)) node.Text = picNode.Text;
+                foreach (var kv in picNode.Format)
+                    node.Format[kv.Key] = kv.Value;
             }
             // OLE object if run contains an EmbeddedObject. The underlying
             // logic is the same as CreateOleNode — reuse it so Get/Query
