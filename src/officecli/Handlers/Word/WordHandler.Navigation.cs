@@ -2292,7 +2292,14 @@ public partial class WordHandler
             if (depth > 0)
             {
                 int pIdx = 0, tblIdx = 0, mathParaIdx = 0, sdtIdx = 0;
-                foreach (var child in bodyNode.ChildElements)
+                // BUG-DUMP7-04: w:customXml body wrappers are non-structural —
+                // their inner paragraphs and tables should appear as direct
+                // body children (with shared p/tbl/sdt counters) so the
+                // wrapper itself is invisible to dump but its content
+                // round-trips. Recursively flatten any depth of customXml
+                // nesting. Without this, the wrapper fell to the generic
+                // else and its children were never enumerated.
+                void WalkBodyChild(OpenXmlElement child)
                 {
                     if (child.LocalName == "oMathPara" || child is M.Paragraph)
                     {
@@ -2323,12 +2330,19 @@ public partial class WordHandler
                         sdtIdx++;
                         node.Children.Add(ElementToNode(child, $"{path}/sdt[{sdtIdx}]", depth - 1));
                     }
+                    else if (child is CustomXmlBlock cxBlock)
+                    {
+                        foreach (var inner in cxBlock.ChildElements)
+                            WalkBodyChild(inner);
+                    }
                     else
                     {
                         // Non-structural (sectPr etc.) — keep localName naming
                         node.Children.Add(ElementToNode(child, $"{path}/{child.LocalName}[1]", depth - 1));
                     }
                 }
+                foreach (var child in bodyNode.ChildElements)
+                    WalkBodyChild(child);
             }
         }
         else
