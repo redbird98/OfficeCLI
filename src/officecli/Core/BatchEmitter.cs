@@ -1653,6 +1653,38 @@ public static class BatchEmitter
             borderFold[side] = cur;
         }
 
+        // CONSISTENCY(shading-fold): Get surfaces paragraph/run shading as
+        // shading.val + shading.fill + shading.color sub-keys (per OOXML
+        // attribute decomposition). AddText/AddParagraph accept only a
+        // single semicolon-encoded `shading=VAL;FILL[;COLOR]` value. Without
+        // folding, the sub-keys hit UNSUPPORTED on `add p` replay and the
+        // shading was lost. Fold into a single `shading` key.
+        string? shadingFolded = null;
+        bool shadingPresent = false;
+        {
+            string? sVal = null, sFill = null, sColor = null;
+            foreach (var (k, v) in raw)
+            {
+                if (v == null) continue;
+                if (string.Equals(k, "shading.val", StringComparison.OrdinalIgnoreCase)) sVal = v.ToString();
+                else if (string.Equals(k, "shading.fill", StringComparison.OrdinalIgnoreCase)) sFill = v.ToString();
+                else if (string.Equals(k, "shading.color", StringComparison.OrdinalIgnoreCase)) sColor = v.ToString();
+            }
+            if (sVal != null || sFill != null || sColor != null)
+            {
+                shadingPresent = true;
+                // AddText format: VAL;FILL[;COLOR]. Default val to "clear" when
+                // only fill is present (mirrors AddText's single-arg path).
+                var val = string.IsNullOrEmpty(sVal) ? "clear" : sVal;
+                if (!string.IsNullOrEmpty(sColor))
+                    shadingFolded = $"{val};{sFill ?? ""};{sColor}";
+                else if (!string.IsNullOrEmpty(sFill))
+                    shadingFolded = $"{val};{sFill}";
+                else
+                    shadingFolded = val;
+            }
+        }
+
         // CONSISTENCY(padding-fold): Get surfaces default cell margin as
         // `padding.top/bottom/left/right` on the table node (per-side OOXML
         // attribute decomposition). AddTable accepts only a single `padding`
@@ -1695,6 +1727,12 @@ public static class BatchEmitter
 
             // padding.* fold: drop sub-keys; emit single `padding` if uniform.
             if (paddingFoldable && key.StartsWith("padding.", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // shading.* fold: drop sub-keys; emit single `shading` below.
+            if (shadingPresent && key.StartsWith("shading.", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -1768,6 +1806,8 @@ public static class BatchEmitter
         }
         if (paddingFolded != null && !result.ContainsKey("padding"))
             result["padding"] = paddingFolded;
+        if (shadingFolded != null && !result.ContainsKey("shading"))
+            result["shading"] = shadingFolded;
         return result;
     }
 
