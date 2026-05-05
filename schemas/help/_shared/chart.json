@@ -226,10 +226,10 @@
     },
     "chartFill": {
       "type": "color",
-      "add": false,
-      "set": false,
+      "add": true,
+      "set": true,
       "get": true,
-      "description": "chart-level fill color readback.",
+      "description": "chart-level fill color (accepts #RRGGBB, named colors, or scheme names).",
       "readback": "#RRGGBB or color descriptor",
       "enforcement": "report"
     },
@@ -1280,34 +1280,34 @@
     },
     "title.bold": {
       "type": "bool",
-      "add": false,
-      "set": false,
+      "add": true,
+      "set": true,
       "get": true,
-      "description": "title bold flag (readback only)",
+      "description": "title bold flag.",
       "readback": "true | false"
     },
     "title.color": {
       "type": "color",
-      "add": false,
-      "set": false,
+      "add": true,
+      "set": true,
       "get": true,
-      "description": "title font color (readback only, #RRGGBB)",
+      "description": "title font color (#RRGGBB, named, or scheme color).",
       "readback": "#RRGGBB"
     },
     "title.font": {
       "type": "string",
-      "add": false,
-      "set": false,
+      "add": true,
+      "set": true,
       "get": true,
-      "description": "title font name (readback only)",
+      "description": "title font name.",
       "readback": "font name"
     },
     "title.size": {
       "type": "font-size",
-      "add": false,
-      "set": false,
+      "add": true,
+      "set": true,
       "get": true,
-      "description": "title font size (readback only, e.g. 14pt)",
+      "description": "title font size (e.g. 14 or 14pt).",
       "readback": "Npt"
     },
     "totalColor": {
