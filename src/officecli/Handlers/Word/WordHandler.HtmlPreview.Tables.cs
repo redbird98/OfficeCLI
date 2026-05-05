@@ -268,31 +268,37 @@ public partial class WordHandler
                     sb.Append($"<div style=\"height:{exactRowHeightPt:0.#}pt;max-height:{exactRowHeightPt:0.#}pt;overflow:hidden;display:flex;flex-direction:column;justify-content:{justify}\">");
                 }
 
-                // Render cell content — every paragraph (including empty ones)
-                // goes through the same path as body paragraphs: <div> wrapper
-                // with inline pPr CSS plus an &nbsp; placeholder for empties so
-                // the line box forms and renders the resolved line-height. Word
-                // and LibreOffice apply pPr to empty paragraphs identically to
-                // non-empty ones; the previous <br> fast-path silently dropped
-                // line-height + spaceBefore + spaceAfter for empty cell paragraphs.
-                foreach (var cellPara in cell.Elements<Paragraph>())
+                // Render cell content in XML order. OOXML lets paragraphs and
+                // nested tables interleave in a cell (typically: <w:tbl> then
+                // a trailing <w:p/> — required by spec for cells ending with a
+                // table). Iterating Paragraphs first then Tables would push the
+                // trailing empty paragraph above the nested table, displacing
+                // it ~one line down. Walk ChildElements directly to preserve
+                // document order. Every paragraph (including empty) goes
+                // through the same path as body paragraphs: <div> wrapper with
+                // inline pPr CSS plus an &nbsp; placeholder for empties so the
+                // line box forms and renders the resolved line-height.
+                foreach (var child in cell.ChildElements)
                 {
-                    var text = GetParagraphText(cellPara);
-                    var runs = GetAllRuns(cellPara);
-                    var pCss = GetParagraphInlineCss(cellPara);
-                    sb.Append("<div");
-                    if (!string.IsNullOrEmpty(pCss))
-                        sb.Append($" style=\"{pCss}\"");
-                    sb.Append(">");
-                    bool hasVisibleContent = runs.Count > 0 || !string.IsNullOrWhiteSpace(text);
-                    RenderParagraphContentHtml(sb, cellPara);
-                    if (!hasVisibleContent) sb.Append("&nbsp;");
-                    sb.Append("</div>");
+                    if (child is Paragraph cellPara)
+                    {
+                        var text = GetParagraphText(cellPara);
+                        var runs = GetAllRuns(cellPara);
+                        var pCss = GetParagraphInlineCss(cellPara);
+                        sb.Append("<div");
+                        if (!string.IsNullOrEmpty(pCss))
+                            sb.Append($" style=\"{pCss}\"");
+                        sb.Append(">");
+                        bool hasVisibleContent = runs.Count > 0 || !string.IsNullOrWhiteSpace(text);
+                        RenderParagraphContentHtml(sb, cellPara);
+                        if (!hasVisibleContent) sb.Append("&nbsp;");
+                        sb.Append("</div>");
+                    }
+                    else if (child is Table nestedTable)
+                    {
+                        RenderTableHtml(sb, nestedTable);
+                    }
                 }
-
-                // Render nested tables
-                foreach (var nestedTable in cell.Elements<Table>())
-                    RenderTableHtml(sb, nestedTable);
 
                 if (exactWrap) sb.Append("</div>");
                 sb.AppendLine($"</{tag}>");
