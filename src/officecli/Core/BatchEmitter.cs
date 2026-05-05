@@ -665,15 +665,69 @@ public static class BatchEmitter
             // appends a fresh paragraph at /body/p[targetIndex]; emit each
             // text-bearing run as `add r` against that paragraph.
             var carrierRuns = (pNode.Children ?? new List<DocumentNode>())
-                .Where(c => (c.Type == "run" || c.Type == "r") && !string.IsNullOrEmpty(c.Text))
+                .Where(c =>
+                {
+                    if (c.Type != "run" && c.Type != "r") return false;
+                    // BUG-DUMP5-08: footnote/endnote reference runs carry no
+                    // visible Text — they're empty <w:r> elements with
+                    // rStyle=FootnoteReference + <w:footnoteReference w:id=…/>.
+                    // The plain "non-empty Text" filter excluded them and the
+                    // footnote anchor on a section-break carrier paragraph
+                    // was silently dropped on dump. Include rStyle-bearing
+                    // note refs so the typed footnote-emit branch below sees
+                    // them.
+                    if (!string.IsNullOrEmpty(c.Text)) return true;
+                    if (c.Format.TryGetValue("rStyle", out var rsv)
+                        && rsv != null
+                        && (string.Equals(rsv.ToString(), "FootnoteReference", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(rsv.ToString(), "EndnoteReference", StringComparison.OrdinalIgnoreCase)))
+                        return true;
+                    return false;
+                })
                 .ToList();
             if (carrierRuns.Count > 0)
             {
                 var carrierPath = $"/body/p[{targetIndex}]";
                 foreach (var run in carrierRuns)
                 {
+                    // Dispatch footnote/endnote refs through the same typed
+                    // branch the multi-run paragraph path uses, so the
+                    // pre-resolved note body text rides along on a
+                    // `add footnote/endnote` row instead of a `add r`
+                    // (which has no consumer for `rStyle=FootnoteReference`
+                    // by itself and would lose the note entirely).
+                    var rStyle = run.Format.TryGetValue("rStyle", out var rs) ? rs?.ToString() : null;
+                    if (ctx != null && rStyle == "FootnoteReference")
+                    {
+                        var noteText = ctx.FootnoteCursor.Index < ctx.FootnoteTexts.Count
+                            ? ctx.FootnoteTexts[ctx.FootnoteCursor.Index] : "";
+                        ctx.FootnoteCursor.Index++;
+                        items.Add(new BatchItem
+                        {
+                            Command = "add",
+                            Parent = carrierPath,
+                            Type = "footnote",
+                            Props = new() { ["text"] = noteText }
+                        });
+                        continue;
+                    }
+                    if (ctx != null && rStyle == "EndnoteReference")
+                    {
+                        var noteText = ctx.EndnoteCursor.Index < ctx.EndnoteTexts.Count
+                            ? ctx.EndnoteTexts[ctx.EndnoteCursor.Index] : "";
+                        ctx.EndnoteCursor.Index++;
+                        items.Add(new BatchItem
+                        {
+                            Command = "add",
+                            Parent = carrierPath,
+                            Type = "endnote",
+                            Props = new() { ["text"] = noteText }
+                        });
+                        continue;
+                    }
                     var rProps = FilterEmittableProps(run.Format);
-                    rProps["text"] = run.Text!;
+                    if (!string.IsNullOrEmpty(run.Text))
+                        rProps["text"] = run.Text!;
                     items.Add(new BatchItem
                     {
                         Command = "add",
