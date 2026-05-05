@@ -2139,6 +2139,27 @@ public partial class WordHandler
                 node.Format["subscript"] = true;
             if (run.RunProperties?.Spacing?.Val?.HasValue == true)
                 node.Format["charSpacing"] = $"{run.RunProperties.Spacing.Val.Value / 20.0:0.##}pt";
+            // BUG-DUMP22-08: <w:bdr/> (character border) is multi-attribute
+            // (val + sz + color + space) so the long-tail FillUnknownChildProps
+            // skipped it (attrCount > 1), leaving only the surface bare key
+            // with no sub-attrs. Emit the colon-encoded compound form that
+            // ApplyRunFormatting consumes on replay so dump round-trips
+            // preserve size and color.
+            var rBdr = run.RunProperties?.GetFirstChild<Border>();
+            if (rBdr?.Val?.HasValue == true)
+            {
+                var bdrStyle = rBdr.Val!.InnerText;
+                var bdrSize = rBdr.Size?.Value;
+                var bdrColor = rBdr.Color?.Value;
+                var bdrSpace = rBdr.Space?.Value;
+                node.Format["bdr"] = string.Join(';', new[]
+                {
+                    bdrStyle,
+                    bdrSize?.ToString() ?? "",
+                    string.IsNullOrEmpty(bdrColor) ? "" : ParseHelpers.FormatHexColor(bdrColor),
+                    bdrSpace?.ToString() ?? "0"
+                });
+            }
             if (run.RunProperties?.Shading != null)
             {
                 // BUG-DUMP22-01/02: surface val/fill/color sub-keys instead of
@@ -3141,6 +3162,11 @@ public partial class WordHandler
         "highlight", "caps", "smallCaps", "dstrike", "vanish",
         "outline", "shadow", "emboss", "imprint", "noProof", "rtl",
         "vertAlign", "spacing", "shd",
+        // BUG-DUMP22-08: <w:bdr/> is multi-attribute (val+sz+color+space).
+        // Curated reader emits the colon-encoded compound form; suppress
+        // the long-tail fallback so the bare `bdr=single` name doesn't
+        // co-emit alongside the canonical encoded value.
+        "bdr",
         // BUG-DUMP10-01: <w:eastAsianLayout/> is a multi-attribute element
         // surfaced by the curated reader as eastAsianLayout.vert / .combine
         // dotted keys. Skip the long-tail fallback so it doesn't double-emit
