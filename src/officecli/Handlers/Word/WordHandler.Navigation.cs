@@ -2955,6 +2955,12 @@ public partial class WordHandler
             // Vertical merge
             if (tcPr.VerticalMerge != null)
                 node.Format["vmerge"] = tcPr.VerticalMerge.Val?.Value == MergedCellValues.Restart ? "restart" : "continue";
+            // Horizontal merge — same toggle pattern as vmerge: ST_Merge val=restart
+            // marks the leading cell of a horizontal span, bare <w:hMerge/> marks the
+            // continuation cells. Without this read block dump→batch silently dropped
+            // every horizontal span on round-trip.
+            if (tcPr.HorizontalMerge != null)
+                node.Format["hmerge"] = tcPr.HorizontalMerge.Val?.Value == MergedCellValues.Restart ? "restart" : "continue";
             // Grid span
             if (tcPr.GridSpan?.Val?.Value != null && tcPr.GridSpan.Val.Value > 1)
                 node.Format["colspan"] = tcPr.GridSpan.Val.Value;

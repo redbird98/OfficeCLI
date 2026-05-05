@@ -1344,6 +1344,13 @@ public partial class WordHandler
                         ? new VerticalMerge { Val = MergedCellValues.Restart }
                         : new VerticalMerge();
                     break;
+                case "hmerge":
+                    // Mirrors vmerge: ST_Merge schema only defines "restart" —
+                    // continuation is bare <w:hMerge/>.
+                    tcPr.HorizontalMerge = value.ToLowerInvariant() == "restart"
+                        ? new HorizontalMerge { Val = MergedCellValues.Restart }
+                        : new HorizontalMerge();
+                    break;
                 case var k when k.StartsWith("border"):
                     ApplyCellBorders(tcPr, key, value);
                     break;
