@@ -18,23 +18,40 @@ public partial class WordHandler
     private string AddTable(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
         var table = new Table();
-        var tblProps = new TableProperties(
-            new TableBorders(
-                new TopBorder { Val = BorderValues.Single, Size = 4 },
-                new LeftBorder { Val = BorderValues.Single, Size = 4 },
-                new BottomBorder { Val = BorderValues.Single, Size = 4 },
-                new RightBorder { Val = BorderValues.Single, Size = 4 },
-                new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4 },
-                new InsideVerticalBorder { Val = BorderValues.Single, Size = 4 }
-            )
-        );
-        table.AppendChild(tblProps);
-
-        // Apply border properties from Add parameters
-        foreach (var (bk, bv) in properties)
+        // BUG-R7-03: Previously this always seeded all 6 borders (top/bottom/
+        // left/right/insideH/insideV) and then applied user props on top —
+        // which corrupted three-line tables (top+bottom only) on round-trip
+        // because dump emits only the user-set sides. When the caller passes
+        // ANY border.* prop, treat it as an explicit specification: start
+        // with an empty TableBorders and apply only the requested sides.
+        // Otherwise (no border props at all), keep the historical default
+        // grid look so bare `add table` still produces a visible table.
+        var hasExplicitBorders = properties.Keys.Any(k =>
+            k.StartsWith("border", StringComparison.OrdinalIgnoreCase));
+        TableProperties tblProps;
+        if (hasExplicitBorders)
         {
-            if (bk.StartsWith("border", StringComparison.OrdinalIgnoreCase))
-                ApplyTableBorders(tblProps, bk, bv);
+            tblProps = new TableProperties(new TableBorders());
+            table.AppendChild(tblProps);
+            foreach (var (bk, bv) in properties)
+            {
+                if (bk.StartsWith("border", StringComparison.OrdinalIgnoreCase))
+                    ApplyTableBorders(tblProps, bk, bv);
+            }
+        }
+        else
+        {
+            tblProps = new TableProperties(
+                new TableBorders(
+                    new TopBorder { Val = BorderValues.Single, Size = 4 },
+                    new LeftBorder { Val = BorderValues.Single, Size = 4 },
+                    new BottomBorder { Val = BorderValues.Single, Size = 4 },
+                    new RightBorder { Val = BorderValues.Single, Size = 4 },
+                    new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4 },
+                    new InsideVerticalBorder { Val = BorderValues.Single, Size = 4 }
+                )
+            );
+            table.AppendChild(tblProps);
         }
 
         // Parse data if provided: "H1,H2;R1C1,R1C2;R2C1,R2C2" or CSV file/URL/data-URI
