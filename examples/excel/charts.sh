@@ -5,7 +5,7 @@
 
 set -e
 
-XLSX="beautiful_charts.xlsx"
+XLSX="$(dirname "$0")/charts.xlsx"
 echo ""
 echo "=========================================="
 echo "Generating beautiful charts document: $XLSX"

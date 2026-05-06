@@ -5,7 +5,7 @@ set -e
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 MODELS="$DIR/models"
-OUT="$DIR/outputs/3d-sun.pptx"
+OUT="$DIR/3d-model.pptx"
 rm -f "$OUT"
 officecli create "$OUT"
 officecli open "$OUT"

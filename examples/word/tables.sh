@@ -7,15 +7,18 @@ set -e
 
 echo "Using CLI: officecli"
 
+DIR="$(dirname "$0")"
+
 ###############################################################################
 # 1. Word Complex Table Document
 ###############################################################################
-DOCX="complex_tables.docx"
+DOCX="$DIR/tables.docx"
 echo ""
 echo "=========================================="
 echo "Generating Word complex table document: $DOCX"
 echo "=========================================="
 
+rm -f "$DOCX"
 officecli create "$DOCX"
 officecli open "$DOCX"
 officecli add "$DOCX" /body --type paragraph --prop text="Complex Table Examples" --prop style=Heading1 --prop align=center
@@ -172,12 +175,13 @@ echo "  Done: Word document: $DOCX"
 ###############################################################################
 # 2. Excel Sales Report
 ###############################################################################
-XLSX="sales_report.xlsx"
+XLSX="$DIR/tables.xlsx"
 echo ""
 echo "=========================================="
 echo "Generating Excel sales report: $XLSX"
 echo "=========================================="
 
+rm -f "$XLSX"
 officecli create "$XLSX"
 officecli open "$XLSX"
 
@@ -277,12 +281,13 @@ echo "  Done: Excel document: $XLSX"
 ###############################################################################
 # 3. PowerPoint Data Report
 ###############################################################################
-PPTX="data_presentation.pptx"
+PPTX="$DIR/tables.pptx"
 echo ""
 echo "=========================================="
 echo "Generating PowerPoint data report: $PPTX"
 echo "=========================================="
 
+rm -f "$PPTX"
 officecli create "$PPTX"
 officecli open "$PPTX"
 

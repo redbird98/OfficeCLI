@@ -3,7 +3,7 @@
 # Usage: ./gen_formulas.sh [officecli path]
 
 CLI="${1:-officecli}"
-OUT="$(dirname "$0")/complex_formulas.docx"
+OUT="$(dirname "$0")/formulas.docx"
 
 rm -f "$OUT"
 $CLI create "$OUT"

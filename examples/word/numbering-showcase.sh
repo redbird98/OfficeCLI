@@ -13,7 +13,7 @@
 #   • Set on /numbering/abstractNum[@id=N]/level[L] after creation
 set -e
 
-DOCX="numbering-showcase.docx"
+DOCX="$(dirname "$0")/numbering-showcase.docx"
 echo "Building $DOCX ..."
 rm -f "$DOCX"
 officecli create "$DOCX"

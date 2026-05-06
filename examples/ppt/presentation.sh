@@ -3,7 +3,7 @@
 # Deep gradient backgrounds, geometric accents, clean typography
 set -e
 
-OUT="$(dirname "$0")/beautiful_presentation.pptx"
+OUT="$(dirname "$0")/presentation.pptx"
 rm -f "$OUT"
 officecli create "$OUT"
 officecli open "$OUT"

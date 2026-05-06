@@ -5,7 +5,7 @@
 
 set -e
 
-XLSX="charts_demo.xlsx"
+XLSX="$(dirname "$0")/charts-demo.xlsx"
 echo ""
 echo "=========================================="
 echo "Generating Excel chart showcase: $XLSX"

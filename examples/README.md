@@ -7,33 +7,27 @@ Comprehensive examples demonstrating OfficeCLI capabilities for Word, Excel, and
 ```
 examples/
 ├── README.md                          # This file
-├── word/                              # 📄 Word examples (3 scripts)
-│   ├── README.md
-│   ├── gen-formulas.sh
-│   ├── gen-complex-tables.sh
-│   ├── gen-complex-textbox.sh
-│   └── outputs/
-├── excel/                             # 📊 Excel examples (2 scripts)
-│   ├── README.md
-│   ├── gen-beautiful-charts.sh
-│   ├── gen-charts-demo.sh
-│   └── outputs/
-└── ppt/                               # 🎨 PowerPoint (3 scripts + 14 style templates)
-    ├── README.md
-    ├── gen-beautiful-pptx.sh
-    ├── gen-animations-pptx.sh
-    ├── gen-video-pptx.py
-    ├── outputs/
-    └── templates/                     # 14 Professional Style Templates ⭐
-        ├── README.md
-        └── styles/                    # (all with pre-generated PPTs)
-            ├── dark--*/               (14 dark styles)
-            ├── light--*/              (8 light styles)
-            ├── warm--*/               (5 warm styles)
-            ├── vivid--*/              (2 vivid styles)
-            ├── bw--*/                 (3 black & white)
-            └── mixed--*/              (1 mixed style)
+├── word/                              # 📄 Word examples
+│   ├── formulas.sh / formulas.docx
+│   ├── tables.sh / tables.docx
+│   ├── textbox.sh
+│   └── numbering-showcase.sh / numbering-showcase.docx
+├── excel/                             # 📊 Excel examples
+│   ├── charts.sh / charts.xlsx        # Master chart showcase
+│   ├── charts-demo.sh / charts-demo.xlsx
+│   ├── charts-<type>.py / .xlsx       # Per-type chart scripts
+│   │   (basic, advanced, extended, area, bar, boxwhisker,
+│   │    bubble, column, combo, histogram, line, pie, radar,
+│   │    scatter, stock, waterfall)
+│   └── pivot-tables.py / pivot-tables.xlsx
+└── ppt/                               # 🎨 PowerPoint examples
+    ├── presentation.{md,sh,pptx}
+    ├── animations.{md,sh,pptx}
+    ├── video.{md,py,pptx}
+    └── 3d-model.{md,sh,pptx}
 ```
+
+Each example follows the same trio: `<name>.md` (walkthrough), `<name>.sh`/`.py` (build script), `<name>.<ext>` (pre-generated output).
 
 ---
 
@@ -44,121 +38,49 @@ examples/
 **Word (.docx):**
 ```bash
 cd word
-bash gen-formulas.sh            # LaTeX math formulas
-bash gen-complex-tables.sh      # Styled tables
-bash gen-complex-textbox.sh     # Formatted text boxes
+bash formulas.sh             # LaTeX math formulas
+bash tables.sh               # Styled tables
+bash textbox.sh              # Formatted text boxes
+bash numbering-showcase.sh   # List/numbering styles
 ```
 
 **Excel (.xlsx):**
 ```bash
 cd excel
-bash gen-beautiful-charts.sh    # Professional charts
-bash gen-charts-demo.sh         # 14+ chart types
+bash charts.sh               # Master chart showcase
+bash charts-demo.sh          # 14+ chart types
+python charts-line.py        # Single-type example (any charts-<type>.py)
+python pivot-tables.py       # Pivot tables
 ```
 
 **PowerPoint (.pptx):**
 ```bash
 cd ppt
-bash gen-beautiful-pptx.sh      # Morph transitions
-bash gen-animations-pptx.sh     # Animation effects
-python gen-video-pptx.py        # Video embedding
+bash presentation.sh         # Morph transitions / full deck
+bash animations.sh           # Animation effects
+python video.py              # Video embedding
+bash 3d-model.sh             # 3D model embedding
 ```
-
-### Professional Style Templates
-
-```bash
-cd ppt/templates/styles/dark--investor-pitch
-# View pre-generated PPT
-open template.pptx
-
-# Or regenerate
-bash build.sh
-```
-
-👉 **[Browse all 35 styles →](ppt/templates/)** (all with pre-generated PPTs)
 
 ---
 
 ## 📚 Documentation by Type
 
 ### 📄 [Word Examples →](word/)
-**3 scripts demonstrating:**
 - Mathematical formulas (LaTeX)
-- Complex table creation
-- Text styling and formatting
-
-**Key Techniques:**
-- Paragraph and run manipulation
-- Table structure and styling
-- Font and color formatting
-- Document structure navigation
-
----
+- Complex tables
+- Text boxes and styling
+- Numbering / list showcases
 
 ### 📊 [Excel Examples →](excel/)
-**2 scripts demonstrating:**
-- Professional chart creation
-- Multiple chart types (14+)
-- Data visualization
-
-**Key Techniques:**
-- Cell value and formula manipulation
-- Chart creation and styling
-- Data range selection
-- Number formatting
-
----
+- Master and per-type chart scripts (line, bar, pie, scatter, stock, waterfall, …)
+- Pivot tables
+- Number formatting and styling
 
 ### 🎨 [PowerPoint Examples →](ppt/)
-**3 scripts + 35 professional style templates:**
-- Morph transitions
-- Animation effects
-- Video embedding
-- 35 design styles (15 ready-to-use)
-
-**Key Techniques:**
-- Slide creation and layout
-- Shape positioning and styling
-- Transitions and animations
-- Media embedding
-- Professional design patterns
-
-**Style Categories:**
-- 🌑 **Dark** (14) - Tech, corporate, futuristic
-- ☀️ **Light** (8) - Clean, professional, product showcases
-- 🧡 **Warm** (5) - Friendly, lifestyle, organic brands
-- 🌈 **Vivid** (2) - Energetic, youthful marketing
-- ⬛ **Black & White** (3) - Minimalist, sophisticated
-- 🎨 **Mixed** (1) - Bold architectural designs
-
----
-
-## 🎓 Learning Path
-
-### Beginner (Start Here)
-1. **Word** - [`gen-formulas.sh`](word/gen-formulas.sh)
-2. **Excel** - [`gen-charts-demo.sh`](excel/gen-charts-demo.sh)
-3. **PowerPoint** - Simple shape creation
-
-**Learn:** Basic commands, file structure, properties
-
----
-
-### Intermediate
-4. **Word** - [`gen-complex-tables.sh`](word/gen-complex-tables.sh)
-5. **Excel** - [`gen-beautiful-charts.sh`](excel/gen-beautiful-charts.sh)
-6. **PowerPoint** - [`gen-animations-pptx.sh`](ppt/gen-animations-pptx.sh)
-
-**Learn:** Batch operations, styling, advanced properties
-
----
-
-### Advanced
-7. **Style Templates** - Explore [professional styles](ppt/templates/)
-8. **PowerPoint** - [`gen-beautiful-pptx.sh`](ppt/gen-beautiful-pptx.sh)
-9. **Python Integration** - [`gen-video-pptx.py`](ppt/gen-video-pptx.py)
-
-**Learn:** Morph transitions, complex layouts, design patterns, automation
+- Slide / shape construction
+- Morph transitions and animations
+- Video and 3D model embedding
 
 ---
 
@@ -242,6 +164,9 @@ officecli set report.docx /body/p[1] --prop color=FF0000
 | `outline` | Structure | `officecli view file.docx outline` |
 | `stats` | Statistics | `officecli view file.docx stats` |
 | `issues` | Problems | `officecli view file.docx issues` |
+| `html` | HTML preview | `officecli view file.docx html` |
+| `svg` | SVG preview | `officecli view file.docx svg` |
+| `forms` | Form fields | `officecli view file.docx forms` |
 
 ---
 
@@ -258,11 +183,11 @@ officecli set report.docx /body/p[1] --prop color=FF0000
    officecli query data.xlsx "cell[formula~=SUM]" --json | jq
    ```
 
-3. **Check help for properties:**
+3. **Check help for properties** (schema reference is under the `help` verb):
    ```bash
-   officecli docx set paragraph
-   officecli xlsx set cell
-   officecli pptx set shape
+   officecli help docx set paragraph
+   officecli help xlsx set cell
+   officecli help pptx set shape
    ```
 
 4. **Validate after changes:**
@@ -270,24 +195,16 @@ officecli set report.docx /body/p[1] --prop color=FF0000
    officecli validate document.docx
    ```
 
-5. **Use resident mode for performance:**
+5. **Use resident mode for performance** (3+ operations on same file):
    ```bash
-   # For 3+ operations on same file
    officecli open file.pptx
    # ... multiple commands ...
    officecli close file.pptx
    ```
 
-6. **Batch for complex operations:**
-   - Single open/save cycle
-   - Atomic transactions
-   - Better performance
-
 ---
 
 ## 🤝 Contributing Examples
-
-Want to add an example? Follow this structure:
 
 1. **Create script** with clear comments
 2. **Test and verify** output
@@ -307,7 +224,7 @@ FILE="output.docx"
 officecli create "$FILE"
 # ... your commands ...
 officecli validate "$FILE"
-echo "✅ Created: $FILE"
+echo "Created: $FILE"
 ```
 
 ---
@@ -316,26 +233,24 @@ echo "✅ Created: $FILE"
 
 - **[SKILL.md](../SKILL.md)** - Complete command reference for AI agents
 - **[README.md](../README.md)** - Project overview and installation
-- **[API Documentation](../docs/)** - Detailed API reference
 
 ---
 
 ## 🆘 Getting Help
 
-**Command help:**
+**Top-level help:**
 ```bash
-officecli --help
-officecli docx --help
-officecli docx set --help
-officecli pptx set shape
+officecli --help                       # CLI usage
+officecli help                         # Schema reference entry point
+officecli help docx                    # All docx elements
+officecli help docx set                # Elements that support `set` for docx
+officecli help docx set paragraph      # Settable properties on paragraph
+officecli help docx paragraph --json   # Raw schema JSON
+officecli help all                     # Flat dump of every (format, element, property)
 ```
 
-**Three-layer help navigation:**
-```bash
-officecli pptx set              # All settable elements
-officecli pptx set shape        # Shape properties
-officecli pptx set shape.fill   # Fill property details
-```
+Format aliases: `word→docx`, `excel→xlsx`, `ppt`/`powerpoint→pptx`.
+Verbs: `add`, `set`, `get`, `query`, `remove`.
 
 ---
 
