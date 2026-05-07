@@ -15,9 +15,10 @@ static partial class CommandBuilder
         var dumpFileArg = new Argument<FileInfo>("file") { Description = "Office document path (.docx)" };
         var dumpPathArg = new Argument<string>("path")
         {
-            Description = "DOM path of the subtree to dump. Use '/' for the whole document. "
+            Description = "DOM path of the subtree to dump. Defaults to '/' (whole document) when omitted. "
                         + "Supported subtree paths: /body, /body/p[N], /body/tbl[N], /theme, /settings, /numbering, /styles. "
-                        + "Subtree dumps do NOT include resources at sibling paths (styles/numbering/theme); replay target must already define referenced styles/numIds."
+                        + "Subtree dumps do NOT include resources at sibling paths (styles/numbering/theme); replay target must already define referenced styles/numIds.",
+            DefaultValueFactory = _ => "/"
         };
         var formatOpt = new Option<string>("--format")
         {

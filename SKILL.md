@@ -319,7 +319,7 @@ When using `--after` or `--before`, `--to` can be omitted — the target contain
 
 Continues on error by default (returns exit 1 if any item fails). Use `--stop-on-error` to abort on the first failure. `--force` is the docx-protection bypass.
 
-`officecli dump <file.docx>` emits a replayable batch JSON for full-document round-trip; `officecli refresh <file.docx>` recalculates TOC page numbers / PAGE / cross-references after replay (Word backend on Windows; headless-HTML fallback elsewhere).
+`officecli dump <file.docx> [<path>]` emits a replayable batch JSON for round-trip. Path defaults to `/` (whole document); pass a subtree path (`/body`, `/body/p[N]`, `/body/tbl[N]`, `/theme`, `/settings`, `/numbering`, `/styles`) to scope the dump. `officecli refresh <file.docx>` recalculates TOC page numbers / PAGE / cross-references after replay (Word backend on Windows; headless-HTML fallback elsewhere).
 
 ```bash
 echo '[
