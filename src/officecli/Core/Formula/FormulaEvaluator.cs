@@ -45,6 +45,10 @@ internal record FormulaResult
 
     public string ToCellValueText()
     {
+        // An Area placed into a single cell collapses to its top-left.
+        // Excel does implicit-intersect; top-left is the simplest deterministic
+        // choice (and matches FirstCell()).
+        if (IsRange) return FirstCell()?.ToCellValueText() ?? "";
         if (NumericValue.HasValue)
         {
             var v = NumericValue.Value;
