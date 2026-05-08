@@ -474,6 +474,16 @@ public partial class ExcelHandler
                     var evalSheetData = GetSheet(worksheet).GetFirstChild<SheetData>();
                     var evaluator = new Core.FormulaEvaluator(evalSheetData!, _doc.WorkbookPart);
                     var evalResult = evaluator.TryEvaluateFull(value.TrimStart('='));
+                    // R3 BUG C: ResolveRef now always wraps even single-cell refs
+                    // in an Area (Round-2 change to preserve BaseRow/BaseCol).
+                    // When that single cell holds an Error (e.g. INDIRECT to a
+                    // non-existent sheet), the result reads IsRange:true rather
+                    // than IsError:true. Unwrap the 1x1 Area-of-Error so the
+                    // cell still gets t="e" + the error sentinel as its cached
+                    // value instead of falling through to the "no value" branch.
+                    if (evalResult is { IsRange: true, RangeValue: { Rows: 1, Cols: 1 } rd1 } &&
+                        rd1.Cells[0, 0] is { IsError: true } innerErr)
+                        evalResult = innerErr;
                     if (evalResult is { IsNumeric: true })
                     {
                         cell.CellValue = new CellValue(evalResult.ToCellValueText());

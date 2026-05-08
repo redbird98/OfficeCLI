@@ -599,7 +599,17 @@ internal partial class FormulaEvaluator
         var cellRef = sheetCellRef[(bangIdx + 1)..];
 
         var sheetData = GetSheetDataFor(sheetName);
-        if (sheetData == null) return FormulaResult.Number(0);
+        // R3 BUG C: if the sheet name is non-empty and unresolved, the
+        // reference itself is invalid (Excel: #REF!). The "0 fallback" was
+        // historically applied here, but it's only correct for an existing
+        // sheet with an empty cell — never for a missing sheet. INDIRECT,
+        // direct cross-sheet refs (Sheet999!A1), and Expand2DRange all rely
+        // on this path; surfacing #REF! here is Excel-correct in every case.
+        if (sheetData == null)
+        {
+            if (!string.IsNullOrEmpty(sheetName)) return FormulaResult.Error("#REF!");
+            return FormulaResult.Number(0);
+        }
 
         // ResolveCellResult will handle circular detection using qualified ref (sheetKey!cellRef)
         var eval = new FormulaEvaluator(sheetData, _workbookPart, _visiting, _depth + 1, sheetName);
