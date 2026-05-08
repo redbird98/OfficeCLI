@@ -593,7 +593,102 @@ public partial class PowerPointHandler
             return ($"/slide[{idx2}]", $"/slide[{idx1}]");
         }
 
-        // Case 2: Swap two elements within the same slide
+        // CONSISTENCY(table-sub-paths): same lockstep fix as Move (commit
+        // 6ba5bb67) — Swap also needs explicit tr / col branches before
+        // falling through to ResolveSlideElement, which only accepts the
+        // two-segment /slide[N]/elem[M] form.
+
+        // Case 2a: Swap two table rows (same table only).
+        var tr1Match = Regex.Match(path1, @"^/slide\[(\d+)\]/table\[(\d+)\]/tr\[(\d+)\]$");
+        var tr2Match = Regex.Match(path2, @"^/slide\[(\d+)\]/table\[(\d+)\]/tr\[(\d+)\]$");
+        if (tr1Match.Success && tr2Match.Success)
+        {
+            var sIdx = int.Parse(tr1Match.Groups[1].Value);
+            var tIdx = int.Parse(tr1Match.Groups[2].Value);
+            if (int.Parse(tr2Match.Groups[1].Value) != sIdx ||
+                int.Parse(tr2Match.Groups[2].Value) != tIdx)
+                throw new ArgumentException(
+                    $"Cross-table row swap is not supported. Both rows must share /slide[{sIdx}]/table[{tIdx}].");
+            var r1 = int.Parse(tr1Match.Groups[3].Value);
+            var r2 = int.Parse(tr2Match.Groups[3].Value);
+
+            var (trSlidePart, trTable) = ResolveTable(sIdx, tIdx);
+            var rows = trTable.Elements<Drawing.TableRow>().ToList();
+            if (r1 < 1 || r1 > rows.Count) throw new ArgumentException($"Row {r1} not found (total: {rows.Count})");
+            if (r2 < 1 || r2 > rows.Count) throw new ArgumentException($"Row {r2} not found (total: {rows.Count})");
+            if (r1 == r2)
+                return ($"/slide[{sIdx}]/table[{tIdx}]/tr[{r1}]", $"/slide[{sIdx}]/table[{tIdx}]/tr[{r2}]");
+
+            SwapXmlElements(rows[r1 - 1], rows[r2 - 1]);
+            GetSlide(trSlidePart).Save();
+            return ($"/slide[{sIdx}]/table[{tIdx}]/tr[{r2}]", $"/slide[{sIdx}]/table[{tIdx}]/tr[{r1}]");
+        }
+        if (tr1Match.Success != tr2Match.Success)
+            throw new ArgumentException(
+                "Both swap paths must be table rows in the same table; mixed types are not supported.");
+
+        // Case 2b: Swap two table columns (same table only). Columns are
+        // virtual (gridCol + per-row tc): swap the GridColumn entries in
+        // <a:tblGrid>, then swap each row's tc at the matching slot. Each
+        // pair shares a parent (same row / same grid), so SwapXmlElements
+        // applies; the function does not support cross-parent swaps.
+        var col1Match = Regex.Match(path1, @"^/slide\[(\d+)\]/table\[(\d+)\]/col\[(\d+)\]$");
+        var col2Match = Regex.Match(path2, @"^/slide\[(\d+)\]/table\[(\d+)\]/col\[(\d+)\]$");
+        if (col1Match.Success && col2Match.Success)
+        {
+            var sIdx = int.Parse(col1Match.Groups[1].Value);
+            var tIdx = int.Parse(col1Match.Groups[2].Value);
+            if (int.Parse(col2Match.Groups[1].Value) != sIdx ||
+                int.Parse(col2Match.Groups[2].Value) != tIdx)
+                throw new ArgumentException(
+                    $"Cross-table column swap is not supported. Both columns must share /slide[{sIdx}]/table[{tIdx}].");
+            var c1 = int.Parse(col1Match.Groups[3].Value);
+            var c2 = int.Parse(col2Match.Groups[3].Value);
+
+            var (colSlidePart, colTable) = ResolveTable(sIdx, tIdx);
+            var grid = colTable.TableGrid
+                ?? throw new InvalidOperationException("Table has no <a:tblGrid>");
+            var gridCols = grid.Elements<Drawing.GridColumn>().ToList();
+            if (c1 < 1 || c1 > gridCols.Count) throw new ArgumentException($"Column {c1} not found (total: {gridCols.Count})");
+            if (c2 < 1 || c2 > gridCols.Count) throw new ArgumentException($"Column {c2} not found (total: {gridCols.Count})");
+            if (c1 == c2)
+                return ($"/slide[{sIdx}]/table[{tIdx}]/col[{c1}]", $"/slide[{sIdx}]/table[{tIdx}]/col[{c2}]");
+
+            // Reject merges crossing either column slot — same guard the
+            // column move/copy use, since a swap that splits a merge
+            // produces silently broken cells.
+            foreach (var row in colTable.Elements<Drawing.TableRow>())
+            {
+                var rowCells = row.Elements<Drawing.TableCell>().ToList();
+                foreach (var cIdx in new[] { c1, c2 })
+                {
+                    if (cIdx - 1 >= rowCells.Count) continue;
+                    var tc = rowCells[cIdx - 1];
+                    var span = tc.GridSpan?.Value ?? 1;
+                    var hMerge = tc.HorizontalMerge?.Value ?? false;
+                    var vMerge = tc.VerticalMerge?.Value ?? false;
+                    if (span > 1 || hMerge || vMerge)
+                        throw new ArgumentException(
+                            $"Cannot swap column {cIdx}: a row contains a merged cell (gridSpan/hMerge/vMerge) " +
+                            "spanning that column. Unmerge before performing column-level operations.");
+                }
+            }
+
+            SwapXmlElements(gridCols[c1 - 1], gridCols[c2 - 1]);
+            foreach (var row in colTable.Elements<Drawing.TableRow>())
+            {
+                var rowCells = row.Elements<Drawing.TableCell>().ToList();
+                if (c1 - 1 < rowCells.Count && c2 - 1 < rowCells.Count)
+                    SwapXmlElements(rowCells[c1 - 1], rowCells[c2 - 1]);
+            }
+            GetSlide(colSlidePart).Save();
+            return ($"/slide[{sIdx}]/table[{tIdx}]/col[{c2}]", $"/slide[{sIdx}]/table[{tIdx}]/col[{c1}]");
+        }
+        if (col1Match.Success != col2Match.Success)
+            throw new ArgumentException(
+                "Both swap paths must be table columns in the same table; mixed types are not supported.");
+
+        // Case 3: Swap two elements within the same slide
         var (slide1Part, elem1) = ResolveSlideElement(path1, slideParts);
         var (slide2Part, elem2) = ResolveSlideElement(path2, slideParts);
         if (slide1Part != slide2Part)
