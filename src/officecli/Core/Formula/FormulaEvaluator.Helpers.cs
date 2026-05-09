@@ -20,7 +20,13 @@ internal partial class FormulaEvaluator
     {
         if (a.IsNumeric && b.IsNumeric) return a.NumericValue!.Value.CompareTo(b.NumericValue!.Value);
         if (a.IsString && b.IsString) return string.Compare(a.StringValue, b.StringValue, StringComparison.OrdinalIgnoreCase);
-        return a.AsNumber().CompareTo(b.AsNumber());
+        if (a.IsBool && b.IsBool) return (a.BoolValue!.Value ? 1 : 0).CompareTo(b.BoolValue!.Value ? 1 : 0);
+        // Excel cross-type ordering: Number < Text < FALSE < TRUE. Critically,
+        // ="1"=1 is FALSE in Excel (text-vs-number never equal) — do NOT coerce
+        // via AsNumber here. AsNumber's text→number coercion is for arithmetic
+        // operators only; comparison operators preserve type identity.
+        int Rank(FormulaResult r) => r.IsNumeric ? 0 : r.IsString ? 1 : r.IsBool ? (r.BoolValue!.Value ? 3 : 2) : 1;
+        return Rank(a).CompareTo(Rank(b));
     }
 
     private static IEnumerable<FormulaResult> ExpandRange(RangeData rd) =>
