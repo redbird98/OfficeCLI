@@ -108,6 +108,14 @@ public partial class WordHandler
             }
         }
 
+        // BUG-R9-B1: when caller passes colWidths=... without cols=, infer
+        // the column count from colWidths.Length so the tblGrid + downstream
+        // row-cell loops produce the right number of columns. Previously
+        // cols defaulted to 1 and only one column was emitted, silently
+        // dropping the rest of the widths.
+        if (colWidthArr != null && cols < colWidthArr.Length)
+            cols = colWidthArr.Length;
+
         // Add table grid
         // BUG-R1-P0-4: when colWidths is not specified, default per-column
         // width should be computed from the section's usable body width
@@ -170,6 +178,28 @@ public partial class WordHandler
         foreach (var (tk, tv) in properties)
         {
             var tkl = tk.ToLowerInvariant();
+            // BUG-R9 (tbllook.* compound key): strip the "tbllook." namespace
+            // prefix so callers can write tblLook.firstRow=true alongside the
+            // bare `firstRow=true` form. Sub-keys must resolve to a known
+            // tblLook leaf — unknown sub-keys raise instead of being silently
+            // dropped (and falsely reporting "Updated" via Set).
+            if (tkl.StartsWith("tbllook."))
+            {
+                var sub = tkl.Substring("tbllook.".Length);
+                if (sub is "firstrow" or "lastrow"
+                        or "firstcol" or "firstcolumn"
+                        or "lastcol" or "lastcolumn"
+                        or "bandrow" or "bandedrows" or "bandrows"
+                        or "bandcol" or "bandedcols" or "bandcols"
+                        or "nohband" or "nohorizontalband"
+                        or "novband" or "noverticalband")
+                    tkl = sub;
+                else
+                    throw new ArgumentException(
+                        $"Unknown tblLook sub-key: '{tk}'. Valid sub-keys: " +
+                        $"firstRow, lastRow, firstCol, lastCol, bandRow, bandCol, " +
+                        $"noHBand, noVBand. Or use the bare hex form tblLook=04A0.");
+            }
             if (tkl is "rows" or "cols" or "colwidths" || tkl.StartsWith("border")) continue;
             switch (tkl)
             {
