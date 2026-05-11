@@ -202,7 +202,13 @@ internal partial class FormulaEvaluator
         var tokens = Tokenize(formula);
         var pos = 0;
         var result = ParseExpression(tokens, ref pos);
-        return pos == tokens.Count ? result : null;
+        if (pos != tokens.Count) return null;
+        // Top-level Array/Range collapse to scalar via implicit intersect
+        // (Excel's pre-dynamic-array behavior). The first element is returned
+        // so a cell holding `=B1:B3*1` shows the first row's product.
+        if (result?.IsArray == true) return result.ArrayValue!.Length > 0 ? FormulaResult.Number(result.ArrayValue[0]) : FormulaResult.Number(0);
+        if (result?.IsRange == true) { var rd = result.RangeValue!; return rd.Rows > 0 && rd.Cols > 0 ? rd.Cells[0, 0] ?? FormulaResult.Number(0) : FormulaResult.Number(0); }
+        return result;
     }
 
     // ==================== Tokenizer ====================
@@ -498,7 +504,7 @@ internal partial class FormulaEvaluator
         while (p < t.Count && t[p].Type == TT.Op && t[p].Value is "+" or "-")
         { var op = t[p].Value; p++; var r = ParseMulDiv(t, ref p); if (r == null) return null;
           if (left.IsError) return left; if (r.IsError) return r;
-          left = FormulaResult.Number(op == "+" ? left.AsNumber() + r.AsNumber() : left.AsNumber() - r.AsNumber()); }
+          left = ApplyBinaryOp(left, r, op == "+" ? (a, b) => a + b : (a, b) => a - b); }
         return left;
     }
 
@@ -508,8 +514,16 @@ internal partial class FormulaEvaluator
         while (p < t.Count && t[p].Type == TT.Op && t[p].Value is "*" or "/")
         { var op = t[p].Value; p++; var r = ParsePower(t, ref p); if (r == null) return null;
           if (left.IsError) return left; if (r.IsError) return r;
-          if (op == "/" && r.AsNumber() == 0) return FormulaResult.Error("#DIV/0!");
-          left = FormulaResult.Number(op == "*" ? left.AsNumber() * r.AsNumber() : left.AsNumber() / r.AsNumber()); }
+          if (op == "/")
+          {
+              // Scalar-only div-by-zero gate. For array divisors, any zero produces
+              // +Inf rather than #DIV/0! — acceptable degradation; tighten if needed.
+              if (!HasArrayShape(r) && r.AsNumber() == 0) return FormulaResult.Error("#DIV/0!");
+              left = ApplyBinaryOp(left, r, (a, b) => b == 0 ? double.PositiveInfinity : a / b);
+          }
+          else
+              left = ApplyBinaryOp(left, r, (a, b) => a * b);
+        }
         return left;
     }
 
@@ -519,8 +533,40 @@ internal partial class FormulaEvaluator
         while (p < t.Count && t[p].Type == TT.Op && t[p].Value == "^")
         { p++; var e = ParseUnary(t, ref p); if (e == null) return null;
           if (b.IsError) return b; if (e.IsError) return e;
-          b = FormulaResult.Number(Math.Pow(b.AsNumber(), e.AsNumber())); }
+          b = ApplyBinaryOp(b, e, Math.Pow); }
         return b;
+    }
+
+    // Element-wise application of a binary numeric op. Handles scalar+scalar,
+    // array+scalar, scalar+array, array+array. Range operands are flattened
+    // row-major (empties treated as 0, matching Excel implicit-zero coercion).
+    // Length mismatch in array+array uses Min(len) — Excel would emit #N/A, but
+    // min-length is more lenient and only affects malformed inputs.
+    private static FormulaResult ApplyBinaryOp(FormulaResult left, FormulaResult right, Func<double, double, double> op)
+    {
+        var la = AsArrayLike(left); var ra = AsArrayLike(right);
+        if (la == null && ra == null) return FormulaResult.Number(op(left.AsNumber(), right.AsNumber()));
+        if (la != null && ra == null) { var rn = right.AsNumber(); var o = new double[la.Length]; for (int i = 0; i < la.Length; i++) o[i] = op(la[i], rn); return FormulaResult.Array(o); }
+        if (la == null && ra != null) { var ln = left.AsNumber(); var o = new double[ra.Length]; for (int i = 0; i < ra.Length; i++) o[i] = op(ln, ra[i]); return FormulaResult.Array(o); }
+        var n = Math.Min(la!.Length, ra!.Length); var oo = new double[n];
+        for (int i = 0; i < n; i++) oo[i] = op(la[i], ra[i]);
+        return FormulaResult.Array(oo);
+    }
+
+    private static bool HasArrayShape(FormulaResult r) => r.IsArray || r.IsRange;
+
+    private static double[]? AsArrayLike(FormulaResult r)
+    {
+        if (r.IsArray) return r.ArrayValue;
+        if (r.IsRange)
+        {
+            var rd = r.RangeValue!; var n = rd.Rows * rd.Cols; var a = new double[n];
+            for (int rr = 0; rr < rd.Rows; rr++)
+                for (int cc = 0; cc < rd.Cols; cc++)
+                    a[rr * rd.Cols + cc] = rd.Cells[rr, cc]?.AsNumber() ?? 0;
+            return a;
+        }
+        return null;
     }
 
     private FormulaResult? ParseUnary(List<Token> t, ref int p)
@@ -553,8 +599,12 @@ internal partial class FormulaEvaluator
             case TT.Bool: p++; return FormulaResult.Bool(tok.Value == "TRUE");
             case TT.CellRef: p++; return ResolveCellResult(tok.Value);
             case TT.SheetCellRef: p++; return ResolveSheetCellResult(tok.Value);
-            case TT.Range: p++; return FormulaResult.Number(0);
-            case TT.SheetRange: p++; return FormulaResult.Number(0);
+            // Range tokens that reach ParseAtom (e.g. inside an arithmetic expression
+            // like B1:B3*1) become Area FormulaResults so ApplyBinaryOp can do
+            // element-wise math. Range tokens appearing directly as function args
+            // are intercepted earlier by ParseFunction and bypass this path.
+            case TT.Range: p++; return FormulaResult.Area(Expand2DRange(tok.Value));
+            case TT.SheetRange: p++; return FormulaResult.Area(Expand2DRange(tok.Value));
             case TT.LParen: p++; var inner = ParseExpression(t, ref p); if (p < t.Count && t[p].Type == TT.RParen) p++; return inner;
             case TT.Func: return ParseFunction(t, ref p);
             default: return null;
@@ -577,7 +627,9 @@ internal partial class FormulaEvaluator
                 { args.Add(FormulaResult.Number(0)); }
                 else if (argIdx == 0 && name == "OFFSET" && TryParseRefArg(t, ref p) is { } refArg)
                 { args.Add(refArg); }
-                else if (p < t.Count && t[p].Type is TT.Range or TT.SheetRange) { args.Add(Expand2DRange(t[p].Value)); p++; }
+                else if (p < t.Count && t[p].Type is TT.Range or TT.SheetRange
+                         && (p + 1 >= t.Count || t[p + 1].Type is TT.Comma or TT.RParen))
+                { args.Add(Expand2DRange(t[p].Value)); p++; }
                 else { var expr = ParseExpression(t, ref p); if (expr == null) return null; args.Add(expr); }
                 argIdx++;
                 if (p >= t.Count || t[p].Type != TT.Comma) break; p++;

@@ -58,6 +58,7 @@ internal partial class FormulaEvaluator
         {
             if (a is RangeData rd) result.AddRange(rd.ToDoubleArray());
             else if (a is FormulaResult { IsRange: true } fr) result.AddRange(fr.RangeValue!.ToDoubleArray());
+            else if (a is FormulaResult { IsArray: true } fa) result.AddRange(fa.ArrayValue!);
             else if (a is double[] arr) result.AddRange(arr);
             else if (a is FormulaResult { IsNumeric: true } r) result.Add(r.NumericValue!.Value);
             else if (a is FormulaResult { IsBool: true } rb) result.Add(rb.BoolValue!.Value ? 1 : 0);

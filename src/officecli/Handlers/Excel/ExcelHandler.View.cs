@@ -438,6 +438,8 @@ public partial class ExcelHandler
             var sheetData = GetSheet(worksheetPart).GetFirstChild<SheetData>();
             if (sheetData == null) continue;
 
+            var evaluator = new Core.FormulaEvaluator(sheetData, _doc.WorkbookPart);
+
             foreach (var row in sheetData.Elements<Row>())
             {
                 foreach (var cell in row.Elements<Cell>())
@@ -456,6 +458,28 @@ public partial class ExcelHandler
                             Message = $"Formula error: {value}",
                             Context = $"={cell.CellFormula.Text}"
                         });
+                    }
+                    else if (cell.CellFormula?.Text is { } fText
+                        && string.IsNullOrEmpty(cell.CellValue?.Text)
+                        && (issueType == null || issueType == "formula_not_evaluated"))
+                    {
+                        // Formula written but no cachedValue and the evaluator
+                        // can't produce one either. Agents need this signal to
+                        // distinguish "formula is broken / unsupported" from
+                        // "view text legitimately shows the cell as empty/0".
+                        var er = evaluator.TryEvaluateFull(fText);
+                        if (er == null || er.IsError && er.ErrorValue is not ("#REF!" or "#VALUE!" or "#NAME?" or "#DIV/0!"))
+                        {
+                            issues.Add(new DocumentIssue
+                            {
+                                Id = $"U{++issueNum}",
+                                Type = IssueType.Content,
+                                Severity = IssueSeverity.Warning,
+                                Path = $"{sheetName}!{cellRef}",
+                                Message = "Formula written but not evaluated (no cachedValue, evaluator unsupported)",
+                                Context = $"={fText}"
+                            });
+                        }
                     }
 
                     if (limit.HasValue && issues.Count >= limit.Value) break;
