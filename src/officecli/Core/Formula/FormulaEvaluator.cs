@@ -85,6 +85,18 @@ internal record FormulaResult
 }
 
 /// <summary>
+/// Status returned by <see cref="FormulaEvaluator.EvaluateForReport"/>.
+/// Distinguishes "evaluator gave up" (NotEvaluated) from "evaluator produced
+/// an Excel-style error" (Error) — agents need both signals separately.
+/// </summary>
+internal enum EvalReportStatus { Evaluated, Error, NotEvaluated }
+
+/// <summary>Single-source report from EvaluateForReport — feeds the
+/// <c>evaluated</c> cell field, the <c>view text</c> sentinel, and the
+/// <c>view issues</c> formula_not_evaluated warning from one decision.</summary>
+internal sealed record EvalReport(EvalReportStatus Status, FormulaResult? Result);
+
+/// <summary>
 /// 2D range data for lookup functions (VLOOKUP, HLOOKUP, INDEX).
 /// </summary>
 internal class RangeData
@@ -195,6 +207,21 @@ internal partial class FormulaEvaluator
         }
         catch (NameResolutionException) { return FormulaResult.Error("#NAME?"); }
         catch { return null; }
+    }
+
+    /// <summary>
+    /// Single-source report wrapper used by `view text` sentinel, `view issues`
+    /// (formula_not_evaluated), and `get` (Format["evaluated"]). Routes all
+    /// three signals through one decision so they cannot drift apart as the
+    /// evaluator's coverage grows. Inspired by POI BaseFormulaEvaluator and
+    /// LibreOffice ScFormulaCell.MaybeInterpret single-entry pattern.
+    /// </summary>
+    internal EvalReport EvaluateForReport(string formula)
+    {
+        var r = TryEvaluateFull(formula);
+        if (r == null) return new EvalReport(EvalReportStatus.NotEvaluated, null);
+        if (r.IsError) return new EvalReport(EvalReportStatus.Error, r);
+        return new EvalReport(EvalReportStatus.Evaluated, r);
     }
 
     private FormulaResult? EvaluateFormula(string formula)

@@ -463,12 +463,11 @@ public partial class ExcelHandler
                         && string.IsNullOrEmpty(cell.CellValue?.Text)
                         && (issueType == null || issueType == "formula_not_evaluated"))
                     {
-                        // Formula written but no cachedValue and the evaluator
-                        // can't produce one either. Agents need this signal to
-                        // distinguish "formula is broken / unsupported" from
-                        // "view text legitimately shows the cell as empty/0".
-                        var er = evaluator.TryEvaluateFull(fText);
-                        if (er == null || er.IsError && er.ErrorValue is not ("#REF!" or "#VALUE!" or "#NAME?" or "#DIV/0!"))
+                        // Route through the shared EvaluateForReport so view
+                        // text / view issues / Format["evaluated"] all agree on
+                        // what counts as "evaluator gave up".
+                        var report = evaluator.EvaluateForReport(fText);
+                        if (report.Status == Core.EvalReportStatus.NotEvaluated)
                         {
                             issues.Add(new DocumentIssue
                             {
