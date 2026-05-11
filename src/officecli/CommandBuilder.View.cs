@@ -56,6 +56,29 @@ static partial class CommandBuilder
             var end = result.GetValue(endLineOpt);
             var maxLines = result.GetValue(maxLinesOpt);
             var issueType = result.GetValue(issueTypeOpt);
+            // Validate --type against the closed set of buckets + subtypes so
+            // typos surface as a CLI error rather than as a silent
+            // success:true/count:0 indistinguishable from a real zero-hit run.
+            if (issueType != null)
+            {
+                var canonical = issueType.ToLowerInvariant();
+                var validBuckets = new[] { "format", "content", "structure", "f", "c", "s" };
+                var validSubtypes = new[]
+                {
+                    "formula_not_evaluated", "formula_cache_stale",
+                    "field_not_evaluated", "field_cache_stale",
+                    "slide_field_not_evaluated",
+                    "chart_series_ref_missing_sheet", "chart_cache_stale",
+                    "definedname_broken", "definedname_target_missing"
+                };
+                if (!validBuckets.Contains(canonical) && !validSubtypes.Contains(canonical))
+                {
+                    var all = validBuckets.Concat(validSubtypes).ToArray();
+                    throw new OfficeCli.Core.CliException(
+                        $"Invalid --type value: '{issueType}'. Valid buckets: format, content, structure (alias f, c, s). Valid subtypes: {string.Join(", ", validSubtypes)}.")
+                    { Code = "invalid_issue_type", ValidValues = all };
+                }
+            }
             var limit = result.GetValue(limitOpt);
             var colsStr = result.GetValue(colsOpt);
             var pageFilter = result.GetValue(pageOpt);
