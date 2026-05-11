@@ -14,6 +14,7 @@ public static class IssueSubtypes
 {
     public const string FormulaNotEvaluated = "formula_not_evaluated";
     public const string FormulaCacheStale = "formula_cache_stale";
+    public const string FormulaRefMissingSheet = "formula_ref_missing_sheet";
     public const string FieldNotEvaluated = "field_not_evaluated";
     public const string FieldCacheStale = "field_cache_stale";
     public const string SlideFieldNotEvaluated = "slide_field_not_evaluated";
@@ -42,7 +43,7 @@ public static class IssueSubtypes
     /// <summary>Every subtype the <c>view issues</c> filter accepts by name.</summary>
     public static readonly string[] ValidSubtypes = new[]
     {
-        FormulaNotEvaluated, FormulaCacheStale,
+        FormulaNotEvaluated, FormulaCacheStale, FormulaRefMissingSheet,
         FieldNotEvaluated, FieldCacheStale,
         SlideFieldNotEvaluated,
         ChartSeriesRefMissingSheet, ChartCacheStale,

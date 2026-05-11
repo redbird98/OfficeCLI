@@ -506,21 +506,23 @@ public partial class ExcelHandler
                         });
                     }
                     else if (cell.CellFormula?.Text is { } fText
-                        && (ShouldScan(Core.IssueSubtypes.FormulaNotEvaluated) || ShouldScan(Core.IssueSubtypes.FormulaCacheStale)))
+                        && (ShouldScan(Core.IssueSubtypes.FormulaNotEvaluated)
+                            || ShouldScan(Core.IssueSubtypes.FormulaCacheStale)
+                            || ShouldScan(Core.IssueSubtypes.FormulaRefMissingSheet)))
                     {
-                        // Two-subtype scan on the same formula cell:
-                        //   formula_not_evaluated — neither cachedValue nor
-                        //     a successful evaluator result is available
-                        //     (Format["evaluated"]=false). Caller has no
-                        //     trustworthy value to read.
-                        //   formula_cache_stale  — cachedValue is present
-                        //     AND officecli's evaluator produced a different
-                        //     value. The XML cache is rot relative to the
-                        //     formula. Common after upstream edits to
-                        //     referenced cells when the file was not
-                        //     re-opened in Excel for recalc.
-                        // Both subtypes use the same gate semantics as the
-                        // BuildCellNode formula branch; keep them in lockstep.
+                        // Three subtypes can fire on the same formula cell:
+                        //   formula_ref_missing_sheet — formula text names a
+                        //     sheet that no longer exists. Distinct from
+                        //     "evaluator gave up" so agents filtering on
+                        //     formula_not_evaluated don't have to disambiguate
+                        //     "we can't evaluate" vs "the workbook references
+                        //     a deleted sheet" from message text.
+                        //   formula_not_evaluated — no cachedValue AND no
+                        //     computedValue. Caller has nothing to read.
+                        //   formula_cache_stale — cachedValue present AND
+                        //     evaluator disagrees. XML cache is rot.
+                        // The three share the same ShouldScan gate so
+                        // --type content covers all of them.
                         var rawCached = cell.CellValue?.Text;
                         var hasCache = !string.IsNullOrEmpty(rawCached);
                         var missingSheet = FormulaReferencesMissingSheet(fText);
@@ -534,7 +536,20 @@ public partial class ExcelHandler
                                 computed = report.Result!.ErrorValue!;
                         }
 
-                        if (!hasCache && computed == null && ShouldScan(Core.IssueSubtypes.FormulaNotEvaluated))
+                        if (missingSheet && ShouldScan(Core.IssueSubtypes.FormulaRefMissingSheet))
+                        {
+                            issues.Add(new DocumentIssue
+                            {
+                                Id = $"U{++issueNum}",
+                                Type = IssueType.Content,
+                                Subtype = Core.IssueSubtypes.FormulaRefMissingSheet,
+                                Severity = IssueSeverity.Warning,
+                                Path = $"{sheetName}!{cellRef}",
+                                Message = "Formula references missing sheet (officecli evaluator silently returns 0; Excel would show #REF!)",
+                                Context = $"={fText}"
+                            });
+                        }
+                        else if (!missingSheet && !hasCache && computed == null && ShouldScan(Core.IssueSubtypes.FormulaNotEvaluated))
                         {
                             issues.Add(new DocumentIssue
                             {
@@ -543,9 +558,7 @@ public partial class ExcelHandler
                                 Subtype = Core.IssueSubtypes.FormulaNotEvaluated,
                                 Severity = IssueSeverity.Warning,
                                 Path = $"{sheetName}!{cellRef}",
-                                Message = missingSheet
-                                    ? "Formula references missing sheet (officecli evaluator silently returns 0; Excel would show #REF!)"
-                                    : "Formula written but not evaluated (no cachedValue, evaluator unsupported)",
+                                Message = "Formula written but not evaluated (no cachedValue, evaluator unsupported)",
                                 Context = $"={fText}"
                             });
                         }
