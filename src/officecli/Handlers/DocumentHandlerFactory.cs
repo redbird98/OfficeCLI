@@ -83,33 +83,89 @@ public static class DocumentHandlerFactory
     /// found, return a handler that delegates to it. Returns null when no
     /// plugin is installed — callers fall back to the unsupported-type error.
     ///
-    /// IPC wiring (in-process resident host for dump-reader, ProxyHandler for
-    /// format-handler) is intentionally not implemented yet: this commit only
-    /// surfaces the existence of a plugin so that <c>officecli plugins install</c>
-    /// has an observable effect on the error path. Until the wiring lands, a
-    /// resolved plugin produces a clear "found but not yet wired" exception.
+    /// dump-reader: per docs/plugin-protocol.md §2.1, the plugin emits a batch
+    /// of officecli commands describing the foreign source; main replays them
+    /// into a fresh .docx. The result is cached as a sibling file
+    /// <c>&lt;source-stem&gt;.docx</c> next to the source so subsequent
+    /// invocations skip the plugin entirely (regenerated when the source
+    /// mtime is newer than the sibling's, or when the sibling has been
+    /// deleted). All edits target the sibling .docx, not the original source.
+    ///
+    /// format-handler: not yet wired; resolved plugins produce a clear
+    /// "found but not yet wired" exception until the proxy lands.
     /// </summary>
     private static IDocumentHandler? TryOpenViaPlugin(string filePath, string ext, bool editable)
     {
         var dumpReader = PluginRegistry.FindFor(PluginKind.DumpReader, ext);
         if (dumpReader is not null)
-            throw new CliException(
-                $"Plugin '{dumpReader.Manifest.Name}' is installed for {ext} but plugin invocation is not yet wired up in this build.")
-            {
-                Code = "plugin_not_wired",
-                Suggestion = "Plugin discovery works; runtime IPC integration is pending. Track in docs/plugin-protocol.md."
-            };
+        {
+            var sibling = Path.ChangeExtension(filePath, ".docx");
+            var needRegen = !File.Exists(sibling)
+                || File.GetLastWriteTimeUtc(filePath) > File.GetLastWriteTimeUtc(sibling);
 
-        var formatHandler = PluginRegistry.FindFor(PluginKind.FormatHandler, ext);
-        if (formatHandler is not null)
+            if (needRegen)
+            {
+                var converted = DumpReaderInvoker.Run(filePath, ext);
+
+                // Some plugins (e.g. Word interop on .doc) inherently write a
+                // converted .docx in the source directory as a side effect of
+                // their conversion path. If the sibling now exists and is
+                // current, prefer it over the batch-replayed copy: it's the
+                // plugin's direct conversion, higher fidelity than going
+                // through batch round-trip serialization.
+                var siblingFresh = File.Exists(sibling)
+                    && File.GetLastWriteTimeUtc(sibling) >= File.GetLastWriteTimeUtc(filePath);
+
+                if (siblingFresh)
+                {
+                    try { File.Delete(converted.ConvertedDocxPath); } catch { /* tmp will age out */ }
+                }
+                else
+                {
+                    try
+                    {
+                        var bytes = File.ReadAllBytes(converted.ConvertedDocxPath);
+                        File.WriteAllBytes(sibling, bytes);
+                        try { File.Delete(converted.ConvertedDocxPath); } catch { /* tmp will age out */ }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine(
+                            $"[note] could not write sibling {Path.GetFileName(sibling)} ({ex.Message}); falling back to temp file (will reconvert next run)");
+                        return new WordHandler(converted.ConvertedDocxPath, editable);
+                    }
+                }
+                Console.Error.WriteLine(
+                    $"[note] generated {Path.GetFileName(sibling)} from {Path.GetFileName(filePath)}; reusing on future runs (delete or rename it to force reconversion)");
+            }
+
+            // The sibling .docx may be transiently locked right after a fresh
+            // plugin run (Word COM server lingering, Defender scan, OneDrive
+            // sync). Retry briefly before surfacing the lock to the user.
+            return OpenWordWithRetry(sibling, editable);
+        }
+
+        var formatHandler2 = PluginRegistry.FindFor(PluginKind.FormatHandler, ext);
+        if (formatHandler2 is not null)
             throw new CliException(
-                $"Plugin '{formatHandler.Manifest.Name}' is installed for {ext} but plugin invocation is not yet wired up in this build.")
+                $"Plugin '{formatHandler2.Manifest.Name}' is installed for {ext} but format-handler invocation is not yet wired up in this build.")
             {
                 Code = "plugin_not_wired",
                 Suggestion = "Plugin discovery works; runtime IPC integration is pending. Track in docs/plugin-protocol.md."
             };
 
         return null;
+    }
+
+    private static WordHandler OpenWordWithRetry(string docxPath, bool editable)
+    {
+        Exception? last = null;
+        for (int attempt = 0; attempt < 8; attempt++)
+        {
+            try { return new WordHandler(docxPath, editable); }
+            catch (IOException ex) { last = ex; Thread.Sleep(150 * (attempt + 1)); }
+        }
+        throw last!;
     }
 
     private static CliException UnsupportedTypeException(string ext) =>

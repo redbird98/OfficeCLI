@@ -35,19 +35,26 @@ Used to **migrate** a foreign format into the main repo's native format (current
 |---|---|
 | Lifecycle | Short-lived (one shot) |
 | Source file handle | Plugin (read-only) |
-| Target file handle | Main (writes blank target, mutated by plugin's commands) |
+| Target file handle | Main (replays plugin's batch into a sibling .docx) |
 | Vocabulary | **Main's docx command vocabulary** (no plugin-defined extensions) |
-| Output extension | Always native (e.g. `.doc` opens as `.docx` after save) |
+| IPC | None — plugin writes a `BatchItem[]` JSON array to stdout and exits |
+| Output extension | Sibling `<source-stem>.docx` next to the source |
 
 Flow:
 
 1. User invokes a command that opens a `.doc` file
-2. Main creates an in-memory blank `.docx` target and starts an in-process
-   resident host on it
-3. Main spawns the plugin with the pipe name and the source file path
-4. Plugin parses the source and sends a stream of `add`/`set`/`batch` commands
-   over the pipe
-5. Plugin exits 0; main saves the target
+2. Main checks for a sibling `<source-stem>.docx` next to the source. If it
+   exists and is newer than the source, main opens it directly and skips
+   steps 3–5
+3. Main spawns the plugin: `<plugin> dump <source>`
+4. Plugin parses the source and prints a JSON array of `add`/`set`/`batch` items
+   (same schema as `officecli batch --commands`) to stdout, then exits 0
+5. Main creates a blank docx skeleton, replays the batch against it, and moves
+   it to the sibling path. Subsequent invocations reuse the sibling
+
+Edits target the sibling `.docx`, not the original source. Source-side changes
+invalidate the cache automatically via mtime comparison; delete the sibling to
+force reconversion.
 
 ### 2.2 `exporter` — convert native format to a foreign target
 
@@ -228,14 +235,31 @@ Beyond `--info`, each kind has its own subcommand surface.
 ### 5.1 dump-reader
 
 ```
-<plugin> dump <source-file> --pipe <pipe-name> [--media-dir <dir>]
+<plugin> dump <source-file> [--media-dir <dir>]
 ```
 
 - `<source-file>`: absolute path to the file to read
-- `--pipe`: name of the IPC pipe to connect to (no leading `\\.\pipe\` on Windows;
-  no leading `/tmp/` on Unix — main handles the platform prefix)
 - `--media-dir`: optional scratch directory the plugin may use for transient
   files (e.g. extracted images referenced by command paths)
+
+Main sets the `OFFICECLI_BIN` environment variable to the path of the running
+officecli binary, so plugins that produce an intermediate `.docx` (e.g. via an
+external converter) can shell out to `officecli dump <converted.docx>` and pipe
+its output to stdout instead of reimplementing docx → batch conversion. Plugins
+that don't need this can ignore the variable.
+
+The plugin writes a JSON array of batch commands to stdout. Schema matches
+`officecli batch --commands`:
+
+```json
+[
+  {"command": "add", "parent": "/body", "type": "paragraph", "props": {"text": "Hello"}},
+  {"command": "set", "path": "/body/paragraph[1]", "props": {"bold": "true"}}
+]
+```
+
+Diagnostics go to stderr or `--log-file`. The plugin exits 0 on success; non-zero
+codes follow §6.6.
 
 ### 5.2 exporter
 
@@ -265,8 +289,9 @@ All subcommands accept:
 
 ## 6. IPC Protocol
 
-Plugins that exchange messages with main (dump-reader and format-handler) use the
-following framing.
+Only `format-handler` exchanges live messages with main; the framing below
+applies to that kind. (`dump-reader` and `exporter` are short-lived and use the
+simpler stdout / exit-code contracts described in §5.1 and §5.2.)
 
 ### 6.1 Transport
 
@@ -278,11 +303,8 @@ endpoint before spawning the plugin and passes the name via `--pipe`. The .NET
 
 UTF-8 text. One JSON object per line, terminated by `\n`. The protocol is
 **request/response**: every client message receives exactly one server reply
-before the next message is sent.
-
-For dump-reader, the **plugin is the client** (sends commands) and **main is the
-server** (executes and replies). For format-handler, **main is the client** and
-**plugin is the server**.
+before the next message is sent. For `format-handler`, **main is the client**
+and **plugin is the server**.
 
 ### 6.3 Message envelope
 
@@ -302,12 +324,12 @@ Every message MUST include:
 
 | `msg_type` | Used by | Body |
 |---|---|---|
-| `command` | dump-reader, format-handler | `{ "command": "add"\|"set"\|..., "args": {...}, "props": {...} }` |
+| `command` | format-handler | `{ "command": "add"\|"set"\|..., "args": {...}, "props": {...} }` |
 | `open` | format-handler | `{ "path": "<file>" }` (sent by main on session start) |
 | `save` | format-handler | `{}` |
 | `close` | format-handler | `{}` |
-| `capabilities` | both | `{}` (query what the server supports) |
-| `ping` | both | `{}` (liveness check) |
+| `capabilities` | format-handler | `{}` (query what the server supports) |
+| `ping` | format-handler | `{}` (liveness check) |
 
 #### Response types (server → client)
 
@@ -431,7 +453,6 @@ which lists approved plugins, versions, download URLs, and SHA-256 hashes.
 ### 11.1 Minimum dump-reader (C#)
 
 ```csharp
-using System.IO.Pipes;
 using System.Text.Json;
 
 if (args[0] == "--info") {
@@ -445,30 +466,19 @@ if (args[0] == "--info") {
     return 0;
 }
 
-// args: dump <source-file> --pipe <pipe-name>
+// args: dump <source-file>
 string sourcePath = args[1];
-int pipeIdx = Array.IndexOf(args, "--pipe");
-string pipeName = args[pipeIdx + 1];
 
-using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
-pipe.Connect();
-using var reader = new StreamReader(pipe);
-using var writer = new StreamWriter(pipe) { AutoFlush = true };
-
-// Parse source file (your library here) and emit commands:
-void Send(object msg) {
-    writer.WriteLine(JsonSerializer.Serialize(msg));
-    reader.ReadLine(); // wait for ok/error
-}
-
-Send(new {
-    protocol = 1,
-    msg_type = "command",
-    command = "add",
-    args = new { type = "paragraph", parent = "/body" },
-    props = new { text = "Hello from .doc" }
-});
-
+// Parse source file (your library here) and emit a batch on stdout:
+var batch = new object[] {
+    new {
+        command = "add",
+        parent = "/body",
+        type = "paragraph",
+        props = new { text = "Hello from .doc" }
+    }
+};
+Console.WriteLine(JsonSerializer.Serialize(batch));
 return 0;
 ```
 
