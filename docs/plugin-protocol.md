@@ -64,7 +64,9 @@ file (e.g. `.pdf`). Single-direction, no editing.
 
 Flow:
 
-1. User invokes `officecli export <native> --to <ext> --out <path>`
+1. User invokes a view mode that targets a foreign format (e.g.
+   `officecli view <file> pdf --out <path>`). The mode name maps to the
+   target extension.
 2. Main resolves the `(from, to)` pair to a plugin
 3. Main spawns the plugin with the source path and target path
 4. Plugin reads the source (using its own libraries), writes the target

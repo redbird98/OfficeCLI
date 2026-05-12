@@ -12,7 +12,7 @@ static partial class CommandBuilder
     private static Command BuildViewCommand(Option<bool> jsonOption)
     {
         var viewFileArg = new Argument<FileInfo>("file") { Description = "Office document path (.docx, .xlsx, .pptx)" };
-        var viewModeArg = new Argument<string>("mode") { Description = "View mode: text, annotated, outline, stats, issues, html, svg, screenshot, forms" };
+        var viewModeArg = new Argument<string>("mode") { Description = "View mode: text, annotated, outline, stats, issues, html, svg, screenshot, pdf, forms" };
         var startLineOpt = new Option<int?>("--start") { Description = "Start line/paragraph number" };
         var endLineOpt = new Option<int?>("--end") { Description = "End line/paragraph number" };
         var maxLinesOpt = new Option<int?>("--max-lines") { Description = "Maximum number of lines/rows/slides to output (truncates with total count)" };
@@ -68,6 +68,37 @@ static partial class CommandBuilder
             if (renderMode is not ("auto" or "native" or "html"))
                 throw new OfficeCli.Core.CliException($"Invalid --render value: {renderMode}. Valid: auto, native, html") { Code = "invalid_render", ValidValues = ["auto", "native", "html"] };
             var withPages = result.GetValue(withPagesOpt);
+
+            // pdf mode runs entirely through an exporter plugin (no handler
+            // open, no resident hop — the plugin gets a snapshot of the
+            // source and writes the PDF). Handled before TryResident
+            // because exporter invocation needs the file lock released, and
+            // ExporterInvoker closes the resident itself when present.
+            if (mode.ToLowerInvariant() is "pdf")
+            {
+                var pdfPath = outArg ?? Path.ChangeExtension(file.FullName, "pdf");
+                var exp = OfficeCli.Core.Plugins.ExporterInvoker.Run(file.FullName, ".pdf", pdfPath);
+                if (json)
+                {
+                    Console.WriteLine(OutputFormatter.WrapEnvelopeText(exp.OutputPath));
+                }
+                else
+                {
+                    Console.WriteLine(Path.GetFullPath(exp.OutputPath));
+                    if (exp.ResidentClosed)
+                        Console.Error.WriteLine($"[note] resident closed to release lock; reopen with `officecli open` if needed");
+                }
+                if (browser)
+                {
+                    try
+                    {
+                        var psi = new System.Diagnostics.ProcessStartInfo(exp.OutputPath) { UseShellExecute = true };
+                        System.Diagnostics.Process.Start(psi);
+                    }
+                    catch { /* silently ignore if no default PDF viewer */ }
+                }
+                return 0;
+            }
 
             // Try resident first
             if (TryResident(file.FullName, req =>
@@ -354,14 +385,14 @@ static partial class CommandBuilder
                         throw new OfficeCli.Core.CliException("Forms view is only supported for .docx files.")
                         {
                             Code = "unsupported_type",
-                            ValidValues = ["text", "annotated", "outline", "stats", "issues", "html", "svg", "screenshot", "forms"]
+                            ValidValues = ["text", "annotated", "outline", "stats", "issues", "html", "svg", "screenshot", "pdf", "forms"]
                         };
                 }
                 else
                     throw new OfficeCli.Core.CliException($"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html, svg, screenshot, forms")
                     {
                         Code = "invalid_value",
-                        ValidValues = ["text", "annotated", "outline", "stats", "issues", "html", "svg", "screenshot", "forms"]
+                        ValidValues = ["text", "annotated", "outline", "stats", "issues", "html", "svg", "screenshot", "pdf", "forms"]
                     };
             }
             else
@@ -380,12 +411,12 @@ static partial class CommandBuilder
                         : throw new OfficeCli.Core.CliException("Forms view is only supported for .docx files.")
                         {
                             Code = "unsupported_type",
-                            ValidValues = ["text", "annotated", "outline", "stats", "issues", "html", "svg", "screenshot", "forms"]
+                            ValidValues = ["text", "annotated", "outline", "stats", "issues", "html", "svg", "screenshot", "pdf", "forms"]
                         },
                     _ => throw new OfficeCli.Core.CliException($"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html, svg, screenshot, forms")
                     {
                         Code = "invalid_value",
-                        ValidValues = ["text", "annotated", "outline", "stats", "issues", "html", "svg", "screenshot", "forms"]
+                        ValidValues = ["text", "annotated", "outline", "stats", "issues", "html", "svg", "screenshot", "pdf", "forms"]
                     }
                 };
                 Console.WriteLine(output);

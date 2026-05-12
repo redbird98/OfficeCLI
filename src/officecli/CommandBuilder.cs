@@ -139,7 +139,6 @@ static partial class CommandBuilder
         rootCommand.Add(BuildCreateCommand(jsonOption));
         rootCommand.Add(BuildMergeCommand(jsonOption));
         rootCommand.Add(BuildPluginsCommand(jsonOption));
-        rootCommand.Add(BuildExportCommand(jsonOption));
 
         foreach (var stub in BuildIntegrationStubCommands())
             rootCommand.Add(stub);

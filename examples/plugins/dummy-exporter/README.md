@@ -1,8 +1,14 @@
 # DummyExporter
 
 Reference exporter plugin used to smoke-test officecli's plugin discovery and
-exporter invocation paths. Not part of the main solution; built independently
-when needed.
+to serve as a copy-pasteable starting point for third-party plugin authors. Not
+part of the main solution; built independently when needed.
+
+This fixture targets the synthetic `.test` extension so it doesn't conflict
+with real exporters that users may have installed. Officecli has no built-in
+view mode for `.test`, so end-to-end invocation through `view <file> <mode>`
+isn't applicable — full coverage of the export path requires a plugin that
+targets a real view mode (e.g. `view <file> pdf`).
 
 ## Build
 
@@ -10,34 +16,38 @@ when needed.
 dotnet publish examples/plugins/dummy-exporter -c Release -o examples/plugins/dummy-exporter/out
 ```
 
-## Manual smoke test
+## Install
 
-1. Build officecli main:
-   `dotnet build src/officecli/officecli.csproj`
-2. Build this fixture (see above).
-3. Drop the binary at a plugin discovery path:
-   - Windows: `mkdir %USERPROFILE%\.officecli\plugins\exporter\test`
-   - copy `examples/plugins/dummy-exporter/out/officecli-exporter-test.exe`
-     into that directory and rename it `plugin.exe`.
-   - Linux/macOS: same idea under `~/.officecli/plugins/exporter/test/plugin`,
-     `chmod +x`.
-4. Verify discovery:
-   `officecli plugins list` — expect `officecli-exporter-test  0.1.0  exporter  .test  <path>`
-5. Verify export:
-   ```
-   officecli create /tmp/probe.docx --type docx
-   officecli export /tmp/probe.docx --to test --out /tmp/probe.test
-   cat /tmp/probe.test
-   ```
-   Expect a file with `# officecli-exporter-test stub` and the source path.
+```
+# Windows:
+mkdir %USERPROFILE%\.officecli\plugins\exporter\test
+copy examples\plugins\dummy-exporter\out\officecli-exporter-test.exe %USERPROFILE%\.officecli\plugins\exporter\test\plugin.exe
 
-## Protocol coverage
+# Linux/macOS:
+mkdir -p ~/.officecli/plugins/exporter/test
+cp examples/plugins/dummy-exporter/out/officecli-exporter-test ~/.officecli/plugins/exporter/test/plugin
+chmod +x ~/.officecli/plugins/exporter/test/plugin
+```
 
-This fixture exercises:
-- `--info` manifest emission (§4 of the plugin protocol)
-- Subprocess-based exporter invocation (§5.2)
-- `(source, target)` resolution via `supports` matching (§4.4 example)
-- Exit code 0 on success, 2 on corrupt input (§6.6)
+## Verify discovery
 
-It does NOT cover dump-reader or format-handler protocols. Separate fixtures
-will follow when those code paths land in main.
+```
+officecli plugins list
+# expect: officecli-exporter-test  0.1.0  exporter  .test  <path>
+
+officecli plugins info officecli-exporter-test
+# expect: full manifest including supports=["from:docx","from:xlsx","from:pptx"]
+```
+
+## What this fixture demonstrates
+
+- `--info` manifest emission per docs/plugin-protocol.md §4
+- The 4-path discovery resolution (it's installed at path #2, the user dir)
+- Subprocess invocation surface per §5.2 (the `export <source> --out <target>`
+  contract is implemented even though no main-side command currently dispatches
+  to a `.test` target)
+- Exit code conventions per §6.6 (0 success, 2 corrupt input, 64 invalid args)
+
+For a complete end-to-end working example targeting a real format, see the
+`view <file> pdf` path which dispatches to any installed exporter plugin
+declaring `.pdf` in its manifest's `extensions` field.
