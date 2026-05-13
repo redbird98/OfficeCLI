@@ -32,7 +32,9 @@ public partial class PowerPointHandler
             }
 
             sb.AppendLine($"=== /slide[{slideNum}] ===");
-            var shapes = GetSlide(slidePart).CommonSlideData?.ShapeTree?.Elements<Shape>() ?? Enumerable.Empty<Shape>();
+            // CONSISTENCY(pptx-group-flatten): Descendants<Shape>() walks into
+            // GroupShape children; Elements<Shape>() would drop them.
+            var shapes = GetSlide(slidePart).CommonSlideData?.ShapeTree?.Descendants<Shape>() ?? Enumerable.Empty<Shape>();
 
             foreach (var shape in shapes)
             {
@@ -150,12 +152,14 @@ public partial class PowerPointHandler
         foreach (var slidePart in slideParts)
         {
             slideNum++;
-            var shapes = GetSlide(slidePart).CommonSlideData?.ShapeTree?.Elements<Shape>() ?? Enumerable.Empty<Shape>();
+            // CONSISTENCY(pptx-group-flatten)
+            var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
+            var shapes = shapeTree?.Descendants<Shape>() ?? Enumerable.Empty<Shape>();
 
             var title = shapes.Where(IsTitle).Select(GetShapeText).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t)) ?? "(untitled)";
 
             int textBoxes = shapes.Count(s => !IsTitle(s) && !string.IsNullOrWhiteSpace(GetShapeText(s)));
-            int pictures = GetSlide(slidePart).CommonSlideData?.ShapeTree?.Elements<Picture>().Count() ?? 0;
+            int pictures = shapeTree?.Descendants<Picture>().Count() ?? 0;
             int oleObjects = CountSlideOleObjects(slidePart);
 
             var details = new List<string>();
@@ -211,12 +215,14 @@ public partial class PowerPointHandler
             var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
             if (shapeTree == null) continue;
 
-            var shapes = shapeTree.Elements<Shape>().ToList();
-            var pictures = shapeTree.Elements<Picture>().ToList();
+            // CONSISTENCY(pptx-group-flatten): include shapes/pictures/charts
+            // nested inside GroupShape.
+            var shapes = shapeTree.Descendants<Shape>().ToList();
+            var pictures = shapeTree.Descendants<Picture>().ToList();
             // CONSISTENCY(stats-chart-count): charts live in GraphicFrame elements
             // alongside tables; surface them as a separate Charts row so the totals
             // visibly account for chart shapes.
-            totalCharts += shapeTree.Elements<GraphicFrame>()
+            totalCharts += shapeTree.Descendants<GraphicFrame>()
                 .Count(gf => gf.Descendants<DocumentFormat.OpenXml.Drawing.Charts.ChartReference>().Any()
                           || IsExtendedChartFrame(gf));
             totalShapes += shapes.Count;
@@ -305,10 +311,11 @@ public partial class PowerPointHandler
             var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
             if (shapeTree == null) continue;
 
-            var shapes = shapeTree.Elements<Shape>().ToList();
-            var pictures = shapeTree.Elements<Picture>().ToList();
+            // CONSISTENCY(pptx-group-flatten)
+            var shapes = shapeTree.Descendants<Shape>().ToList();
+            var pictures = shapeTree.Descendants<Picture>().ToList();
             // CONSISTENCY(stats-chart-count): see ViewAsStats.
-            totalCharts += shapeTree.Elements<GraphicFrame>()
+            totalCharts += shapeTree.Descendants<GraphicFrame>()
                 .Count(gf => gf.Descendants<DocumentFormat.OpenXml.Drawing.Charts.ChartReference>().Any()
                           || IsExtendedChartFrame(gf));
             totalShapes += shapes.Count;
@@ -387,10 +394,12 @@ public partial class PowerPointHandler
         foreach (var slidePart in slideParts)
         {
             slideNum++;
-            var shapes = GetSlide(slidePart).CommonSlideData?.ShapeTree?.Elements<Shape>() ?? Enumerable.Empty<Shape>();
+            // CONSISTENCY(pptx-group-flatten)
+            var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
+            var shapes = shapeTree?.Descendants<Shape>() ?? Enumerable.Empty<Shape>();
             var title = shapes.Where(IsTitle).Select(GetShapeText).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t));
             int textBoxes = shapes.Count(s => !IsTitle(s) && !string.IsNullOrWhiteSpace(GetShapeText(s)));
-            int pictures = GetSlide(slidePart).CommonSlideData?.ShapeTree?.Elements<Picture>().Count() ?? 0;
+            int pictures = shapeTree?.Descendants<Picture>().Count() ?? 0;
 
             int oleObjects = CountSlideOleObjects(slidePart);
             var slide = new JsonObject
