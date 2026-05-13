@@ -1254,12 +1254,13 @@ public partial class ExcelHandler
                 var drawingsPart = worksheetPart.DrawingsPart;
                 if (drawingsPart?.WorksheetDrawing == null) continue;
 
-                var shpAnchors = drawingsPart.WorksheetDrawing
-                    .Elements<DocumentFormat.OpenXml.Drawing.Spreadsheet.TwoCellAnchor>()
-                    .Where(a => a.Descendants<DocumentFormat.OpenXml.Drawing.Spreadsheet.Shape>().Any())
-                    .ToList();
-
-                for (int i = 0; i < shpAnchors.Count; i++)
+                // CONSISTENCY(xlsx-group-flatten): enumerate every leaf shape
+                // across all anchors, so an anchor that wraps a GroupShape
+                // with N inner shapes contributes N results (was 1). Anchors
+                // without a group still contribute exactly one shape so the
+                // common-case shape index numbering does not change.
+                var leafShapeCount = EnumerateLeafShapes(drawingsPart.WorksheetDrawing).Count();
+                for (int i = 0; i < leafShapeCount; i++)
                 {
                     var node = GetShapeNode(sheetName, worksheetPart, i + 1, $"/{sheetName}/shape[{i + 1}]");
                     if (node == null) continue;

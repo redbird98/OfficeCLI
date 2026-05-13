@@ -1038,6 +1038,23 @@ public partial class ExcelHandler
     /// <summary>
     /// Build a DocumentNode for a sparkline group.
     /// </summary>
+    // Strip the parent-sheet prefix from a user-supplied sparkline location.
+    // <xm:sqref> is ST_Sqref — a bare cell address, no sheet prefix allowed
+    // (sheet is implied by the parent worksheet). Accept lenient input so the
+    // canonical "Sheet1!G2" form many users naturally write still works; reject
+    // cross-sheet references because OOXML doesn't allow them.
+    internal static string NormalizeSparklineSqref(string spkCell, string parentSheetName)
+    {
+        var excl = spkCell.IndexOf('!');
+        if (excl < 0) return spkCell;
+        var sheetPart = spkCell[..excl].Trim('\'');
+        if (!string.Equals(sheetPart, parentSheetName, StringComparison.Ordinal))
+            throw new ArgumentException(
+                $"Sparkline location '{spkCell}' targets sheet '{sheetPart}' but sparkline lives on '{parentSheetName}'. " +
+                "OOXML requires sparkline location to be on the same worksheet (sheet prefix is implicit).");
+        return spkCell[(excl + 1)..];
+    }
+
     internal static DocumentNode SparklineGroupToNode(string sheetName, X14.SparklineGroup spkGroup, int index)
     {
         var node = new DocumentNode
@@ -2523,6 +2540,22 @@ public partial class ExcelHandler
         return node;
     }
 
+    // CONSISTENCY(xlsx-group-flatten): enumerate every leaf XDR.Shape across
+    // all TwoCellAnchors in worksheet-drawing order. Anchors that wrap a
+    // GroupShape (`<xdr:grpSp>`) with multiple inner shapes contribute each
+    // inner shape; non-grouped anchors contribute exactly one shape, so
+    // existing files without groups see no index renumbering. Shapes anchored
+    // alone (no group) and shapes inside a group are returned in document
+    // order, which matches how Excel itself enumerates them on the canvas.
+    internal static IEnumerable<(XDR.Shape shape, XDR.TwoCellAnchor anchor)> EnumerateLeafShapes(XDR.WorksheetDrawing wsDrawing)
+    {
+        foreach (var anchor in wsDrawing.Elements<XDR.TwoCellAnchor>())
+        {
+            foreach (var sp in anchor.Descendants<XDR.Shape>())
+                yield return (sp, anchor);
+        }
+    }
+
     private DocumentNode? GetShapeNode(string sheetName, WorksheetPart worksheetPart, int index, string path)
     {
         var drawingsPart = worksheetPart.DrawingsPart;
@@ -2530,14 +2563,12 @@ public partial class ExcelHandler
         var wsDrawing = drawingsPart.WorksheetDrawing;
         if (wsDrawing == null) return null;
 
-        var shpAnchors = wsDrawing.Elements<XDR.TwoCellAnchor>()
-            .Where(a => a.Descendants<XDR.Shape>().Any()).ToList();
+        var shapes = EnumerateLeafShapes(wsDrawing).ToList();
 
-        if (index < 1 || index > shpAnchors.Count)
+        if (index < 1 || index > shapes.Count)
             return null;
 
-        var anchor = shpAnchors[index - 1];
-        var shape = anchor.Descendants<XDR.Shape>().First();
+        var (shape, anchor) = shapes[index - 1];
 
         var node = new DocumentNode { Path = path, Type = "shape" };
 
