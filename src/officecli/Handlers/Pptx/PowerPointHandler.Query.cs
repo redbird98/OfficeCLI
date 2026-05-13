@@ -1252,9 +1252,18 @@ public partial class PowerPointHandler
             var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
             if (shapeTree == null) continue;
 
-            int shapeIdx = 0;
-            foreach (var shape in shapeTree.Elements<Shape>())
+            // CONSISTENCY(pptx-group-flatten): one recursive walk per slide,
+            // cached as list so each type block filters without re-walking.
+            // Walker descends into GroupShape, so y.ParentPath carries the
+            // group ancestor chain — passed to *ToNode helpers so emitted
+            // paths are honest (`/slide[1]/group[2]/shape[3]`).
+            var slideRoot = $"/slide[{slideNum}]";
+            var allRenderables = EnumerateRenderableElements(shapeTree, slideRoot).ToList();
+
+            foreach (var y in allRenderables)
             {
+                if (y.TypeName != "shape") continue;
+                var shape = (Shape)y.Element;
                 if (isEquationSelector)
                 {
                     var mathElements = FindShapeMathElements(shape);
@@ -1265,7 +1274,7 @@ public partial class PowerPointHandler
                         {
                             results.Add(new DocumentNode
                             {
-                                Path = $"/slide[{slideNum}]/{BuildElementPathSegment("shape", shape, shapeIdx + 1)}",
+                                Path = $"{y.ParentPath}/{BuildElementPathSegment("shape", shape, y.IndexInParent)}",
                                 Type = "equation",
                                 Text = latex,
                                 Format = { ["mode"] = "display" }
@@ -1275,45 +1284,43 @@ public partial class PowerPointHandler
                 }
                 else if (MatchesShapeSelector(shape, parsed))
                 {
-                    var node = ShapeToNode(shape, slideNum, shapeIdx + 1, 0, slidePart);
+                    var node = ShapeToNode(shape, slideNum, y.IndexInParent, 0, slidePart, y.ParentPath);
                     if (MatchesGenericAttributes(node, parsed.Attributes))
                         results.Add(node);
                 }
-                shapeIdx++;
             }
 
             if (parsed.ElementType is "picture" or "pic" or "video" or "audio" or null)
             {
-                int picIdx = 0;
-                foreach (var pic in shapeTree.Elements<Picture>())
+                foreach (var y in allRenderables)
                 {
+                    if (y.TypeName != "picture") continue;
+                    var pic = (Picture)y.Element;
                     var picNvPr = pic.NonVisualPictureProperties?.ApplicationNonVisualDrawingProperties;
                     var picIsVideo = picNvPr?.GetFirstChild<Drawing.VideoFromFile>() != null;
                     var picIsAudio = picNvPr?.GetFirstChild<Drawing.AudioFromFile>() != null;
 
                     // Filter by media type
-                    if (parsed.ElementType == "video" && !picIsVideo) { picIdx++; continue; }
-                    if (parsed.ElementType == "audio" && !picIsAudio) { picIdx++; continue; }
-                    if (parsed.ElementType is "picture" or "pic" && (picIsVideo || picIsAudio)) { picIdx++; continue; }
+                    if (parsed.ElementType == "video" && !picIsVideo) continue;
+                    if (parsed.ElementType == "audio" && !picIsAudio) continue;
+                    if (parsed.ElementType is "picture" or "pic" && (picIsVideo || picIsAudio)) continue;
 
                     if (MatchesPictureSelector(pic, parsed))
                     {
-                        var picNode = PictureToNode(pic, slideNum, picIdx + 1, slidePart);
+                        var picNode = PictureToNode(pic, slideNum, y.IndexInParent, slidePart, y.ParentPath);
                         if (MatchesGenericAttributes(picNode, parsed.Attributes))
                             results.Add(picNode);
                     }
-                    picIdx++;
                 }
             }
 
             if (parsed.ElementType == "table" || (parsed.ElementType == null && !isEquationSelector))
             {
-                int tblIdx = 0;
-                foreach (var gf in shapeTree.Elements<GraphicFrame>())
+                foreach (var y in allRenderables)
                 {
-                    if (!gf.Descendants<Drawing.Table>().Any()) continue;
-                    tblIdx++;
-                    var tblNode = TableToNode(gf, slideNum, tblIdx, 0);
+                    if (y.TypeName != "table") continue;
+                    var gf = (GraphicFrame)y.Element;
+                    var tblNode = TableToNode(gf, slideNum, y.IndexInParent, 0, y.ParentPath);
                     if (parsed.TextContains != null)
                     {
                         // GraphicData children may be opaque when loaded from disk,
@@ -1331,13 +1338,14 @@ public partial class PowerPointHandler
             // Table cell (tc/cell) and row (tr/row) query — returns friendly paths
             if (parsed.ElementType is "tc" or "cell" or "tr" or "row")
             {
-                int tblIdx2 = 0;
-                foreach (var gf in shapeTree.Elements<GraphicFrame>())
+                foreach (var y in allRenderables)
                 {
+                    if (y.TypeName != "table") continue;
+                    var gf = (GraphicFrame)y.Element;
                     var tbl = gf.Descendants<Drawing.Table>().FirstOrDefault();
                     if (tbl == null) continue;
-                    tblIdx2++;
-                    var tblPathSeg2 = BuildElementPathSegment("table", gf, tblIdx2);
+                    var tblPathSeg2 = BuildElementPathSegment("table", gf, y.IndexInParent);
+                    var tblPath2 = $"{y.ParentPath}/{tblPathSeg2}";
                     int rIdx = 0;
                     foreach (var row in tbl.Elements<Drawing.TableRow>())
                     {
@@ -1347,7 +1355,7 @@ public partial class PowerPointHandler
                             var rowText = string.Join(" | ", row.Elements<Drawing.TableCell>().Select(c => c.TextBody?.InnerText ?? ""));
                             var rowNode = new DocumentNode
                             {
-                                Path = $"/slide[{slideNum}]/{tblPathSeg2}/tr[{rIdx}]",
+                                Path = $"{tblPath2}/tr[{rIdx}]",
                                 Type = "tr",
                                 Text = rowText,
                                 ChildCount = row.Elements<Drawing.TableCell>().Count()
@@ -1367,7 +1375,7 @@ public partial class PowerPointHandler
                                 var cellText = cell.TextBody?.InnerText ?? "";
                                 var cellNode = new DocumentNode
                                 {
-                                    Path = $"/slide[{slideNum}]/{tblPathSeg2}/tr[{rIdx}]/tc[{cIdx}]",
+                                    Path = $"{tblPath2}/tr[{rIdx}]/tc[{cIdx}]",
                                     Type = "tc",
                                     Text = cellText
                                 };
@@ -1384,13 +1392,11 @@ public partial class PowerPointHandler
 
             if (parsed.ElementType == "chart" || (parsed.ElementType == null && !isEquationSelector))
             {
-                int chartIdx = 0;
-                foreach (var gf in shapeTree.Elements<GraphicFrame>())
+                foreach (var y in allRenderables)
                 {
-                    if (!gf.Descendants<C.ChartReference>().Any()
-                        && !IsExtendedChartFrame(gf)) continue;
-                    chartIdx++;
-                    var chartNode = ChartToNode(gf, slidePart, slideNum, chartIdx, 0);
+                    if (y.TypeName != "chart") continue;
+                    var gf = (GraphicFrame)y.Element;
+                    var chartNode = ChartToNode(gf, slidePart, slideNum, y.IndexInParent, 0, y.ParentPath);
                     if (parsed.TextContains != null)
                     {
                         var titleVal = chartNode.Format.ContainsKey("title") ? chartNode.Format["title"]?.ToString() ?? "" : "";
@@ -1403,41 +1409,35 @@ public partial class PowerPointHandler
 
             if (parsed.ElementType is "connector" or "connection" || (parsed.ElementType == null && !isEquationSelector))
             {
-                int cxnIdx = 0;
-                foreach (var cxn in shapeTree.Elements<ConnectionShape>())
+                foreach (var y in allRenderables)
                 {
-                    cxnIdx++;
-                    if (parsed.ElementType is "connector" or "connection" || parsed.ElementType == null)
-                    {
-                        var cxnNode = ConnectorToNode(cxn, slideNum, cxnIdx);
-                        if (MatchesGenericAttributes(cxnNode, parsed.Attributes))
-                            results.Add(cxnNode);
-                    }
+                    if (y.TypeName != "connector") continue;
+                    var cxn = (ConnectionShape)y.Element;
+                    var cxnNode = ConnectorToNode(cxn, slideNum, y.IndexInParent, y.ParentPath);
+                    if (MatchesGenericAttributes(cxnNode, parsed.Attributes))
+                        results.Add(cxnNode);
                 }
             }
 
             if (parsed.ElementType == "group" || (parsed.ElementType == null && !isEquationSelector))
             {
-                int grpIdx = 0;
-                foreach (var grp in shapeTree.Elements<GroupShape>())
+                foreach (var y in allRenderables)
                 {
-                    grpIdx++;
-                    if (parsed.ElementType == "group" || parsed.ElementType == null)
+                    if (y.TypeName != "group") continue;
+                    var grp = (GroupShape)y.Element;
+                    var grpName = grp.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? "Group";
+                    var grpNode = new DocumentNode
                     {
-                        var grpName = grp.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? "Group";
-                        var grpNode = new DocumentNode
-                        {
-                            Path = $"/slide[{slideNum}]/{BuildElementPathSegment("group", grp, grpIdx)}",
-                            Type = "group",
-                            Preview = grpName,
-                            ChildCount = grp.Elements<Shape>().Count() + grp.Elements<Picture>().Count()
-                            + grp.Elements<GraphicFrame>().Count() + grp.Elements<ConnectionShape>().Count()
-                            + grp.Elements<GroupShape>().Count()
-                        };
-                        grpNode.Format["name"] = grpName;
-                        if (MatchesGenericAttributes(grpNode, parsed.Attributes))
-                            results.Add(grpNode);
-                    }
+                        Path = $"{y.ParentPath}/{BuildElementPathSegment("group", grp, y.IndexInParent)}",
+                        Type = "group",
+                        Preview = grpName,
+                        ChildCount = grp.Elements<Shape>().Count() + grp.Elements<Picture>().Count()
+                        + grp.Elements<GraphicFrame>().Count() + grp.Elements<ConnectionShape>().Count()
+                        + grp.Elements<GroupShape>().Count()
+                    };
+                    grpNode.Format["name"] = grpName;
+                    if (MatchesGenericAttributes(grpNode, parsed.Attributes))
+                        results.Add(grpNode);
                 }
             }
 

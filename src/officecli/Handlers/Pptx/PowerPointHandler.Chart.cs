@@ -115,14 +115,15 @@ public partial class PowerPointHandler
     /// <summary>
     /// Build a DocumentNode from a chart GraphicFrame.
     /// </summary>
-    private static DocumentNode ChartToNode(GraphicFrame gf, SlidePart slidePart, int slideNum, int chartIdx, int depth)
+    private static DocumentNode ChartToNode(GraphicFrame gf, SlidePart slidePart, int slideNum, int chartIdx, int depth, string? parentPathPrefix = null)
     {
         var name = gf.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Name?.Value ?? "Chart";
 
         var chartPathSeg = BuildElementPathSegment("chart", gf, chartIdx);
+        var basePath = parentPathPrefix ?? $"/slide[{slideNum}]";
         var node = new DocumentNode
         {
-            Path = $"/slide[{slideNum}]/{chartPathSeg}",
+            Path = $"{basePath}/{chartPathSeg}",
             Type = "chart",
             Preview = name
         };
