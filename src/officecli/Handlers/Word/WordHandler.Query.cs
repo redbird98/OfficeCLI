@@ -2411,6 +2411,45 @@ public partial class WordHandler
         int mathParaIdx = -1;
         foreach (var element in body.ChildElements)
         {
+            // CONSISTENCY(word-sdt-recurse): SdtBlock wraps block-level content
+            // (paragraphs / tables) inside an SdtContentBlock. Without this
+            // branch, `query paragraph` silently skipped any paragraph whose
+            // only crime was living inside a content control. Mirror the
+            // existing "drill into table cells" pattern further down — for
+            // each paragraph inside the SDT, run the paragraph-selector
+            // checks with a path prefixed by the SDT segment.
+            if (element is SdtBlock sdtBlockEl)
+            {
+                if (!isParagraphSelector)
+                    continue;
+                var sdtIdx = body.ChildElements.OfType<SdtBlock>()
+                    .TakeWhile(s => s != sdtBlockEl).Count() + 1;
+                var sdtPathSeg = BuildSdtPathSegment(sdtBlockEl, sdtIdx);
+                var sdtContentBlock = sdtBlockEl.GetFirstChild<SdtContentBlock>();
+                if (sdtContentBlock == null) continue;
+                int sdtInnerParaIdx = 0;
+                foreach (var sdtPara in sdtContentBlock.Elements<Paragraph>())
+                {
+                    sdtInnerParaIdx++;
+                    var sdtParaPath = $"/body/{sdtPathSeg}/{BuildParaPathSegment(sdtPara, sdtInnerParaIdx)}";
+                    var sdtParaNode = ElementToNode(sdtPara, sdtParaPath, 0);
+                    if (parsed.ContainsText != null
+                        && !(sdtParaNode.Text?.Contains(parsed.ContainsText, StringComparison.OrdinalIgnoreCase) ?? false))
+                        continue;
+                    bool ok = true;
+                    foreach (var (attrKey, rawVal) in parsed.Attributes)
+                    {
+                        bool negate = rawVal.StartsWith("!");
+                        var aval = negate ? rawVal[1..] : rawVal;
+                        var has = sdtParaNode.Format.TryGetValue(attrKey, out var fv);
+                        bool m = has && string.Equals(fv?.ToString(), aval, StringComparison.OrdinalIgnoreCase);
+                        if (negate ? m : !m) { ok = false; break; }
+                    }
+                    if (ok) results.Add(sdtParaNode);
+                }
+                continue;
+            }
+
             // Display equations (m:oMathPara) at body level
             if (element.LocalName == "oMathPara" || element is M.Paragraph)
             {
