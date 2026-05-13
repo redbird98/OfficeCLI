@@ -2641,6 +2641,12 @@ public static class BatchEmitter
         // numId/numLevel/numFmt/listStyle/start before they ride on `add p`.
         // Drop the flag itself from any emitted prop bag.
         "numInherited",
+        // Document-internal relationship id (rId4 / R5c0e4d…). Assigned fresh
+        // by every Add* path when it creates a new part-relationship, so the
+        // value is unstable across replays even when the document is byte-
+        // identical otherwise. Pictures, charts, OLE, hyperlinks all emit
+        // relId on Get for diagnostics but it must not ride on `add`/`set`.
+        "relId",
         // BUG-019: lineSpacing alone cannot distinguish AtLeast from Exact —
         // SpacingConverter.FormatWordLineSpacing serializes both as "Npt".
         // Set/AddParagraph now accept `lineRule` explicitly so it must flow
