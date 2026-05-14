@@ -56,7 +56,12 @@ public partial class WordHandler
             new Paragraph(new Run(new Text(commentText) { Space = SpaceProcessingModeValues.Preserve })))
         {
             Id = commentId, Author = author, Initials = initials,
-            Date = properties.TryGetValue("date", out var ds) ? DateTime.Parse(ds) : DateTime.UtcNow
+            // CONSISTENCY(date-roundtrip): RoundtripKind keeps DateTimeKind.Utc
+            // (input ending in Z stays UTC and serializes back with Z) and
+            // DateTimeKind.Local with explicit offset (input "...+08:00" keeps
+            // the +08:00 form). Default Parse converts everything to Local,
+            // poisoning round-trip on docs whose comment dates are UTC.
+            Date = properties.TryGetValue("date", out var ds) ? DateTime.Parse(ds, null, System.Globalization.DateTimeStyles.RoundtripKind) : DateTime.UtcNow
         };
         commentsPart.Comments.AppendChild(commentEl);
         // Apply paragraph-level / run-level format keys (direction, font, size, etc.)
@@ -87,9 +92,32 @@ public partial class WordHandler
             }
             else
             {
-                var after = commentPara.ParagraphProperties as OpenXmlElement;
-                if (after != null) after.InsertAfterSelf(rangeStart);
-                else commentPara.InsertAt(rangeStart, 0);
+                // CONSISTENCY(comment-runStart): when caller passes runStart=N (N>=1),
+                // place rangeStart immediately AFTER the Nth run in the paragraph
+                // so dump round-trip restores the anchor position. N=0 keeps the
+                // legacy paragraph-start placement.
+                int runStartIdx = 0;
+                if ((properties.TryGetValue("runstart", out var rsRaw)
+                     || properties.TryGetValue("runStart", out rsRaw))
+                    && int.TryParse(rsRaw, out var rsN))
+                    runStartIdx = rsN;
+                OpenXmlElement? anchorRun = null;
+                if (runStartIdx >= 1)
+                {
+                    var runs = commentPara.Elements<Run>().ToList();
+                    if (runStartIdx <= runs.Count)
+                        anchorRun = runs[runStartIdx - 1];
+                }
+                if (anchorRun != null)
+                {
+                    anchorRun.InsertAfterSelf(rangeStart);
+                }
+                else
+                {
+                    var after = commentPara.ParagraphProperties as OpenXmlElement;
+                    if (after != null) after.InsertAfterSelf(rangeStart);
+                    else commentPara.InsertAt(rangeStart, 0);
+                }
                 commentPara.AppendChild(rangeEnd);
                 commentPara.AppendChild(refRun);
             }
