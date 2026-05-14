@@ -21,14 +21,10 @@ public partial class WordHandler
             case "columns.count":
             {
                 var cols = EnsureColumns();
-                var n = (short)ParseHelpers.SafeParseInt(value, "columns.count");
-                cols.ColumnCount = n;
-                // Auto-stamp equalWidth=true only for multi-column layouts —
-                // single column has no visible difference, and the auto-stamp
-                // poisoned dump round-trip for sources whose single-column
-                // sectPr had no <w:cols w:equalWidth=…> attribute.
-                if (n > 1 && cols.EqualWidth == null)
-                    cols.EqualWidth = true;
+                cols.ColumnCount = (short)ParseHelpers.SafeParseInt(value, "columns.count");
+                // No auto-stamp — see `columns` case above. equalWidth is
+                // implicitly true per OOXML when no <w:col> children carry
+                // explicit widths.
                 return true;
             }
             // CONSISTENCY(canonical-key): 'columnSpace' is the canonical key
@@ -238,12 +234,13 @@ public partial class WordHandler
                 if (!short.TryParse(colParts[0], out var colCount))
                     throw new ArgumentException($"Invalid 'columns' value: '{value}'. Expected an integer or integer,space (e.g. '3' or '3,720').");
                 eqCols.ColumnCount = (DocumentFormat.OpenXml.Int16Value)colCount;
-                // Single column → no visible difference whether equalWidth
-                // is set; the auto-stamp leaked a phantom `columns.equalWidth=true`
-                // key on dump round-trip for sources whose <w:cols> had no
-                // equalWidth attr (complex-textbox-test.docx).
-                if (colCount > 1)
-                    eqCols.EqualWidth = true;
+                // Don't auto-stamp equalWidth. Per OOXML spec, equalWidth is
+                // implicitly true when no <w:col> children carry explicit
+                // widths — so the auto-stamp was always redundant. Leaving
+                // it off lets the round-trip preserve source's no-equalWidth
+                // shape (complex-textbox-test.docx, 03_filesamples_sample3).
+                // Callers that want unequal columns must populate <w:col>
+                // children separately or pass `columns.equalWidth=false`.
                 if (colParts.Length > 1)
                     eqCols.Space = colParts[1];
                 else

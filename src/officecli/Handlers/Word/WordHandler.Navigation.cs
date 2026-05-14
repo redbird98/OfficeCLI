@@ -2450,8 +2450,20 @@ public partial class WordHandler
                 if (breakEl != null)
                 {
                     node.Type = "break";
+                    // Normalize "textWrapping" → "line" on emit. OOXML treats
+                    // a typeless <w:br/> as textWrapping (the default), but
+                    // AddBreak's user-facing vocab uses "line"; without
+                    // normalisation, dump round-trip emits `type=line` from
+                    // typeless source and `type=textWrapping` from the
+                    // explicitly-stamped replay target — semantically
+                    // identical, byte-different.
                     if (breakEl.Type?.HasValue == true)
-                        node.Format["breakType"] = breakEl.Type.InnerText;
+                    {
+                        var bt = breakEl.Type.InnerText;
+                        node.Format["breakType"] = string.Equals(bt, "textWrapping", StringComparison.OrdinalIgnoreCase)
+                            ? "line"
+                            : bt;
+                    }
                 }
             }
 
