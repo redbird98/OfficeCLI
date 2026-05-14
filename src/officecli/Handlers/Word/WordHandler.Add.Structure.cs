@@ -963,6 +963,34 @@ public partial class WordHandler
                     indHi.Hanging = SpacingConverter.ParseWordSpacing(value).ToString();
                     continue;
                 }
+                case "firstlinechars":
+                {
+                    var pPrFlc = newStyle.StyleParagraphProperties ?? EnsureStyleParagraphProperties(newStyle);
+                    var indFlc = pPrFlc.Indentation ?? (pPrFlc.Indentation = new Indentation());
+                    indFlc.FirstLineChars = ParseHelpers.SafeParseInt(value, "firstLineChars");
+                    continue;
+                }
+                case "leftchars" or "startchars":
+                {
+                    var pPrLc = newStyle.StyleParagraphProperties ?? EnsureStyleParagraphProperties(newStyle);
+                    var indLc = pPrLc.Indentation ?? (pPrLc.Indentation = new Indentation());
+                    indLc.LeftChars = ParseHelpers.SafeParseInt(value, "leftChars");
+                    continue;
+                }
+                case "rightchars" or "endchars":
+                {
+                    var pPrRc = newStyle.StyleParagraphProperties ?? EnsureStyleParagraphProperties(newStyle);
+                    var indRc = pPrRc.Indentation ?? (pPrRc.Indentation = new Indentation());
+                    indRc.RightChars = ParseHelpers.SafeParseInt(value, "rightChars");
+                    continue;
+                }
+                case "hangingchars":
+                {
+                    var pPrHc = newStyle.StyleParagraphProperties ?? EnsureStyleParagraphProperties(newStyle);
+                    var indHc = pPrHc.Indentation ?? (pPrHc.Indentation = new Indentation());
+                    indHc.HangingChars = ParseHelpers.SafeParseInt(value, "hangingChars");
+                    continue;
+                }
                 case "pbdr.top" or "pbdr.bottom" or "pbdr.left" or "pbdr.right" or "pbdr.between" or "pbdr.bar" or "pbdr.all" or "pbdr":
                 {
                     var pPrB = newStyle.StyleParagraphProperties ?? EnsureStyleParagraphProperties(newStyle);

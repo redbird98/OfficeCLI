@@ -1399,12 +1399,30 @@ public partial class WordHandler
                                     }
                                     else
                                     {
-                                        int per = (int)(widthVal / (uint)thisSpan);
-                                        int remainder = (int)(widthVal - (uint)(per * thisSpan));
+                                        // CONSISTENCY(tblgrid-preserve): when the
+                                        // spanned gridCols already sum to widthVal
+                                        // (the common dump-replay case — AddTable
+                                        // wrote authoritative colWidths and a later
+                                        // tc/width=Σ on a span>1 cell is just a
+                                        // restatement) leave them alone. Only
+                                        // redistribute evenly when the sum disagrees.
+                                        long existingSum = 0;
+                                        bool allParsed = true;
                                         for (int gi = 0; gi < thisSpan && startCol + gi < widthGridCols.Count; gi++)
                                         {
-                                            var slice = per + (gi == thisSpan - 1 ? remainder : 0);
-                                            widthGridCols[startCol + gi].Width = slice.ToString();
+                                            if (long.TryParse(widthGridCols[startCol + gi].Width?.Value, out var gw))
+                                                existingSum += gw;
+                                            else { allParsed = false; break; }
+                                        }
+                                        if (!(allParsed && existingSum == widthVal))
+                                        {
+                                            int per = (int)(widthVal / (uint)thisSpan);
+                                            int remainder = (int)(widthVal - (uint)(per * thisSpan));
+                                            for (int gi = 0; gi < thisSpan && startCol + gi < widthGridCols.Count; gi++)
+                                            {
+                                                var slice = per + (gi == thisSpan - 1 ? remainder : 0);
+                                                widthGridCols[startCol + gi].Width = slice.ToString();
+                                            }
                                         }
                                     }
                                 }
