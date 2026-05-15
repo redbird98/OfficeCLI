@@ -2131,8 +2131,18 @@ public partial class WordHandler
         {
             var fonts = rProps.RunFonts;
             if (fonts == null) return;
-            var slots = new List<string?> { fonts.Ascii?.Value, fonts.HighAnsi?.Value };
-            if (includeEastAsia) slots.Add(fonts.EastAsia?.Value);
+            // OOXML §17.3.2.27: each rFonts slot may carry either a literal
+            // typeface OR a *Theme reference (asciiTheme/hAnsiTheme/...).
+            // When only the theme attribute is set, resolve it via theme1.xml
+            // so the line-height calculation sees the same effective font
+            // the renderer uses.
+            var slots = new List<string?>
+            {
+                fonts.Ascii?.Value ?? ResolveThemeFont(fonts.AsciiTheme?.InnerText),
+                fonts.HighAnsi?.Value ?? ResolveThemeFont(fonts.HighAnsiTheme?.InnerText),
+            };
+            if (includeEastAsia)
+                slots.Add(fonts.EastAsia?.Value ?? ResolveThemeFont(fonts.EastAsiaTheme?.InnerText));
             foreach (var f in slots)
             {
                 if (string.IsNullOrEmpty(f)) continue;
@@ -2162,8 +2172,12 @@ public partial class WordHandler
         }
         if (best != null) return best;
 
-        var defFont = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles
-            ?.DocDefaults?.RunPropertiesDefault?.RunPropertiesBaseStyle?.RunFonts?.Ascii?.Value;
+        var defRFonts = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles
+            ?.DocDefaults?.RunPropertiesDefault?.RunPropertiesBaseStyle?.RunFonts;
+        var defFont = defRFonts?.Ascii?.Value
+            ?? ResolveThemeFont(defRFonts?.AsciiTheme?.InnerText)
+            ?? defRFonts?.HighAnsi?.Value
+            ?? ResolveThemeFont(defRFonts?.HighAnsiTheme?.InnerText);
         return defFont ?? GetThemeMinorLatinFont() ?? OfficeDefaultFonts.MinorLatin;
     }
 
