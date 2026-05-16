@@ -19,6 +19,7 @@ public partial class WordHandler
     partial void OnHtmlParagraphBegin(Paragraph para);
     partial void OnHtmlParagraphEnd(StringBuilder sb);
     partial void OnHtmlRenderText(StringBuilder sb, string text, RunProperties? rProps, string? runStyle, ref bool handled);
+    partial void OnHtmlRenderBreak(string? runStyle, ref bool handled);
     // Notify overlay that a <w:tab/> was just emitted as a visible `widthPt`
     // wide spacer. Overlay must account for this width in its per-line budget
     // since the browser lays it out inline and pushes subsequent text right.
@@ -324,7 +325,17 @@ public partial class WordHandler
                     if (needsSpan) sb.Append($"<span style=\"{style}\">");
                 }
                 else
-                    sb.Append("<br>");
+                {
+                    // When CJK line-break tracking is active, text from <w:t>
+                    // is buffered (via OnHtmlRenderText) for post-measurement
+                    // flush; emitting <br> directly to sb here would land it
+                    // BEFORE the buffered text in the output. Route through
+                    // OnHtmlRenderBreak so the overlay can buffer the break
+                    // in document order alongside text.
+                    bool brkHandled = false;
+                    OnHtmlRenderBreak(style, ref brkHandled);
+                    if (!brkHandled) sb.Append("<br>");
+                }
             }
             else if (child is TabChar)
             {
