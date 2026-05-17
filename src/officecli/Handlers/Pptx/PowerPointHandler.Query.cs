@@ -867,12 +867,14 @@ public partial class PowerPointHandler
             // Generic XML fallback: navigate by element localName
             var allSegments = GenericXmlQuery.ParsePathSegments(path);
             if (allSegments.Count == 0 || !allSegments[0].Name.Equals("slide", StringComparison.OrdinalIgnoreCase) || !allSegments[0].Index.HasValue)
-                throw new ArgumentException($"Path must start with /slide[N], /slidemaster[N], or /slidelayout[N]: {path}");
+                throw new CliException($"Path must start with /slide[N], /slidemaster[N], or /slidelayout[N]: {path}")
+                    { Code = "invalid_path" };
 
             var fbSlideIdx = allSegments[0].Index!.Value;
             var fbSlideParts = GetSlideParts().ToList();
             if (fbSlideIdx < 1 || fbSlideIdx > fbSlideParts.Count)
-                throw new ArgumentException($"Slide {fbSlideIdx} not found (total: {fbSlideParts.Count})");
+                throw new CliException($"Slide {fbSlideIdx} not found (total: {fbSlideParts.Count})")
+                    { Code = "path_not_found" };
 
             OpenXmlElement fbCurrent = GetSlide(fbSlideParts[fbSlideIdx - 1]);
             var remaining = allSegments.Skip(1).ToList();
