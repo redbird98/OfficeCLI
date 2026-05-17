@@ -218,6 +218,11 @@ public partial class PowerPointHandler
                         || double.IsNaN(opacityVal) || double.IsInfinity(opacityVal))
                         throw new ArgumentException($"Invalid 'opacity' value: '{value}'. Expected a finite decimal 0.0-1.0.");
                     if (opacityVal > 1.0) opacityVal /= 100.0;
+                    // CONSISTENCY(opacity-clamp): same rule as shape/cell opacity —
+                    // reject out-of-range values so picture blips can't quietly land
+                    // at sub-1% alpha when callers pass an obviously-wrong number.
+                    if (opacityVal < 0.0 || opacityVal > 1.0)
+                        throw new ArgumentException($"Invalid 'opacity' value: '{value}'. Expected 0.0-1.0 (or 0-100 as percent).");
                     var blip = pic.BlipFill?.GetFirstChild<Drawing.Blip>();
                     if (blip != null)
                     {

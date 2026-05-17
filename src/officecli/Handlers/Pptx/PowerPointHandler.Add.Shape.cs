@@ -516,6 +516,10 @@ public partial class PowerPointHandler
                     if (double.TryParse(opacityVal, System.Globalization.CultureInfo.InvariantCulture, out var alphaNum))
                     {
                         if (alphaNum > 1.0) alphaNum /= 100.0; // treat >1 as percentage (e.g. 30 → 0.30)
+                        // CONSISTENCY(opacity-clamp): same rejection as Set paths.
+                        if (alphaNum < 0.0 || alphaNum > 1.0)
+                            throw new ArgumentException(
+                                $"Invalid 'opacity' value: '{opacityVal}'. Expected 0.0-1.0 (or 0-100 as percent).");
                         var alphaPct = (int)(alphaNum * 100000);
                         var solidFill = newShape.ShapeProperties?.GetFirstChild<Drawing.SolidFill>();
                         if (solidFill != null)

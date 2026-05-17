@@ -2109,6 +2109,13 @@ public partial class PowerPointHandler
                     {
                         var opacityVal = ParseHelpers.SafeParseDouble(value, "opacity");
                         if (opacityVal > 1.0) opacityVal /= 100.0; // treat >1 as percentage (e.g. 50 → 0.50)
+                        // CONSISTENCY(opacity-clamp): mirror the shape opacity path —
+                        // reject out-of-range values instead of silently clamping. A
+                        // raw `opacity=1.5` would divide to 0.015 then quietly write
+                        // alpha=1500 (≈1.5% — almost transparent) on cells whose fill
+                        // already existed.
+                        if (opacityVal < 0.0 || opacityVal > 1.0)
+                            throw new ArgumentException($"Invalid 'opacity' value: '{value}'. Expected 0.0-1.0 (or 0-100 as percent).");
                         var alphaVal = (int)Math.Round(opacityVal * 100000); // 0.0-1.0 → 0-100000
                         alphaVal = Math.Max(0, Math.Min(100000, alphaVal));
                         var solidFill = tcPrO.GetFirstChild<Drawing.SolidFill>();
