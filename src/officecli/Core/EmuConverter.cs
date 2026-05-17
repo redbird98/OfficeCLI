@@ -107,14 +107,21 @@ internal static class EmuConverter
         if (emu == 0) return "0cm";
         var cm = emu / 360000.0;
         var cmStr = cm.ToString("0.##", CultureInfo.InvariantCulture);
-        // The "0.##" cm format loses precision below ~1800 EMU per side
-        // (rounded to two decimal places of cm). For values that round
-        // either to "0"/"-0" or to a string that does not faithfully
-        // represent the original EMU, fall back to a `<n>emu` form so
-        // Get readback is both non-lossy AND unit-qualified — round-trips
-        // through ParseEmu and satisfies the documented length-string
-        // readback contract.
+        // The "0.##" cm format loses precision below ~3600 EMU per side
+        // (less than 0.01cm rounds away). For values that round either
+        // to "0"/"-0" OR re-parse back to a different EMU than the source,
+        // fall back to a `<n>emu` form so Get readback is both non-lossy
+        // AND unit-qualified — round-trips through ParseEmu and satisfies
+        // the documented length-string readback contract.
         if (cmStr == "0" || cmStr == "-0")
+            return emu.ToString(CultureInfo.InvariantCulture) + "emu";
+        // Round-trip sanity for sub-0.01cm values: anything under 3600 EMU
+        // (= 0.01cm) can't be expressed faithfully in "0.##" cm form (e.g.
+        // 1800 EMU → "0.01cm" → re-parses as 3600 EMU, doubling the source).
+        // Switch to raw emu only in that narrow band; values ≥ 3600 EMU keep
+        // the cm output (existing baselines unchanged), accepting the
+        // documented 0.01cm grid quantization for larger sizes.
+        if (Math.Abs(emu) < 3600)
             return emu.ToString(CultureInfo.InvariantCulture) + "emu";
         return $"{cmStr}cm";
     }
