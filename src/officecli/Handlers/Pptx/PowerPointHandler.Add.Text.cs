@@ -256,6 +256,10 @@ public partial class PowerPointHandler
                 var paraText = properties.GetValueOrDefault("text", "");
                 var newRun = new Drawing.Run();
                 var rProps = new Drawing.RunProperties { Language = "en-US" };
+                if (properties.TryGetValue("lang", out var pLang) && !string.IsNullOrEmpty(pLang))
+                    rProps.Language = pLang;
+                if (properties.TryGetValue("altLang", out var pAltLang) && !string.IsNullOrEmpty(pAltLang))
+                    rProps.AlternativeLanguage = pAltLang;
 
                 if (properties.TryGetValue("size", out var pSize)
                     || properties.TryGetValue("font.size", out pSize)
@@ -415,6 +419,10 @@ public partial class PowerPointHandler
                 var runText = properties.GetValueOrDefault("text", "");
                 var newRun = new Drawing.Run();
                 var rProps = new Drawing.RunProperties { Language = "en-US" };
+                if (properties.TryGetValue("lang", out var rLang) && !string.IsNullOrEmpty(rLang))
+                    rProps.Language = rLang;
+                if (properties.TryGetValue("altLang", out var rAltLang) && !string.IsNullOrEmpty(rAltLang))
+                    rProps.AlternativeLanguage = rAltLang;
 
                 if (properties.TryGetValue("size", out var rSize)
                     || properties.TryGetValue("font.size", out rSize)
