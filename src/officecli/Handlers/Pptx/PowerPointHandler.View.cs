@@ -6,6 +6,9 @@ using System.Text.Json.Nodes;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
+#pragma warning disable OOXML0001
+using DocumentFormat.OpenXml.Experimental;
+#pragma warning restore OOXML0001
 using OfficeCli.Core;
 using Drawing = DocumentFormat.OpenXml.Drawing;
 
@@ -518,6 +521,116 @@ public partial class PowerPointHandler
             slideNum++;
             var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
             if (shapeTree == null) continue;
+
+            // Broken part-relationship detection. A slide's .rels file can
+            // point r:id="rN" at /ppt/media/NONEXISTENT.png (or similar) when
+            // a deck was hand-edited, partial-extracted, or assembled by a
+            // buggy authoring tool. The Open XML SDK loads the relationship
+            // but throws when any reader (NodeBuilder picture, ResolveChart,
+            // HTML preview) calls GetPartById and the package can't resolve
+            // the target. Surface this as a stable, filterable issue so the
+            // gap is observable BEFORE callers hit a failure path —
+            // mirrors xlsx's definedname_broken / chart_series_ref_missing_sheet
+            // observability for "rot in the package" rather than deferred
+            // evaluation.
+            // A slide's .rels file can point r:id="rN" Target="/ppt/media/NONEXISTENT.png"
+            // (or similar) when a deck was hand-edited, partial-extracted, or
+            // assembled by a buggy authoring tool. The Open XML SDK silently
+            // skips such relationships during enumeration of slidePart.Parts
+            // (the target part isn't constructed), but downstream readers
+            // (NodeBuilder/ResolveChart/HtmlPreview) that walk the slide XML
+            // and call slidePart.GetPartById(rId) raise
+            // ArgumentOutOfRangeException "Part: <uri> doesn't exist in the
+            // package." with no rId / slide context — opaque to agents and
+            // unfilterable in `view issues`.
+            //
+            // Diff slide-XML referenced rIds against the SDK-loaded ones to
+            // surface the gap as a stable broken_part_ref subtype BEFORE
+            // any reader hits the failure path. Mirrors xlsx's
+            // definedname_broken observability for "rot in the package".
+            // Build the set of package Uris and the slide's relationship
+            // table by reading the rels XML directly. The SDK's
+            // slidePart.Parts iteration silently skips a relationship
+            // whose Target points to a missing part — and may also drop
+            // valid siblings under the same rels file once the broken one
+            // is encountered. Reading rels XML + comparing Target to
+            // package.GetParts() Uri gives a reader-faithful gap report
+            // without relying on the SDK's tolerant enumeration.
+            var brokenRelIds = new Dictionary<string, string>(StringComparer.Ordinal);
+            try
+            {
+#pragma warning disable OOXML0001
+                var pkg = slidePart.OpenXmlPackage.GetPackage();
+#pragma warning restore OOXML0001
+                var packageUris = new HashSet<string>(
+                    pkg.GetParts().Select(p => p.Uri.OriginalString.TrimStart('/')),
+                    StringComparer.OrdinalIgnoreCase);
+                // Read the slide's .rels file directly — IPackage's
+                // Relationships collection silently drops relationships
+                // whose Target points to a missing part, so a Parts-vs-rels
+                // diff via the SDK's API misses the very rot we want to
+                // surface. Reading the rels XML preserves every declared
+                // relationship, including dangling ones.
+                var slideUriPath = slidePart.Uri.OriginalString.TrimStart('/');
+                var lastSlash = slideUriPath.LastIndexOf('/');
+                var relPartUri = lastSlash >= 0
+                    ? "/" + slideUriPath.Substring(0, lastSlash) + "/_rels/" + slideUriPath.Substring(lastSlash + 1) + ".rels"
+                    : "/_rels/" + slideUriPath + ".rels";
+                var relsUri = new Uri(relPartUri, UriKind.Relative);
+                if (pkg.PartExists(relsUri))
+                {
+                    var relsPart = pkg.GetPart(relsUri);
+                    using var rs = relsPart.GetStream(System.IO.FileMode.Open, System.IO.FileAccess.Read);
+                    var relsDoc = System.Xml.Linq.XDocument.Load(rs);
+                    System.Xml.Linq.XNamespace relsNs2006 = "http://schemas.openxmlformats.org/package/2006/relationships";
+                    foreach (var relEl in relsDoc.Descendants(relsNs2006 + "Relationship"))
+                    {
+                        var targetMode = (string?)relEl.Attribute("TargetMode") ?? "Internal";
+                        if (!string.Equals(targetMode, "Internal", StringComparison.OrdinalIgnoreCase)) continue;
+                        var id = (string?)relEl.Attribute("Id");
+                        var target = (string?)relEl.Attribute("Target");
+                        if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(target)) continue;
+                        Uri resolved;
+                        try
+                        {
+                            resolved = System.IO.Packaging.PackUriHelper.ResolvePartUri(
+                                slidePart.Uri, new Uri(target, UriKind.RelativeOrAbsolute));
+                        }
+                        catch { continue; }
+                        var key = resolved.OriginalString.TrimStart('/');
+                        if (!packageUris.Contains(key))
+                            brokenRelIds[id] = key;
+                    }
+                }
+            }
+            catch { /* probe is best-effort; never break view issues */ }
+
+            const string relNs = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+            var slideXml = GetSlide(slidePart);
+            var reportedRids = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var el in slideXml.Descendants())
+            {
+                foreach (var attr in el.GetAttributes())
+                {
+                    if (attr.NamespaceUri != relNs) continue;
+                    if (attr.LocalName != "id" && attr.LocalName != "embed" && attr.LocalName != "link") continue;
+                    var rId = attr.Value;
+                    if (string.IsNullOrEmpty(rId)) continue;
+                    if (!brokenRelIds.TryGetValue(rId, out var missingTarget)) continue;
+                    if (!reportedRids.Add(rId)) continue;
+                    issues.Add(new DocumentIssue
+                    {
+                        Id = $"R{++issueNum}",
+                        Type = IssueType.Structure,
+                        Subtype = Core.IssueSubtypes.BrokenPartRef,
+                        Severity = IssueSeverity.Error,
+                        Path = $"/slide[{slideNum}]",
+                        Message = $"Slide rel '{rId}' on <{el.LocalName}> targets missing part '/{missingTarget}'",
+                        Context = $"<{el.LocalName} r:{attr.LocalName}=\"{rId}\">",
+                        Suggestion = "Restore the missing target part, or remove the dangling relationship and the referencing element."
+                    });
+                }
+            }
 
             var shapes = shapeTree.Elements<Shape>().ToList();
             if (!shapes.Any(IsTitle))
