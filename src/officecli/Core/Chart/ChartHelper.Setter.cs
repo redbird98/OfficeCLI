@@ -1789,10 +1789,7 @@ internal static partial class ChartHelper
                     var bubble = plotArea2?.GetFirstChild<C.BubbleChart>();
                     if (bubble == null) { unsupported.Add(key); break; }
                     bubble.RemoveAllChildren<C.BubbleScale>();
-                    var bsNode = new C.BubbleScale { Val = (uint)ParseHelpers.SafeParseInt(value, "bubbleScale") };
-                    var bsAxId = bubble.GetFirstChild<C.AxisId>();
-                    if (bsAxId != null) bubble.InsertBefore(bsNode, bsAxId);
-                    else bubble.AppendChild(bsNode);
+                    InsertBubbleChartChildInOrder(bubble, new C.BubbleScale { Val = (uint)ParseHelpers.SafeParseInt(value, "bubbleScale") });
                     break;
                 }
 
@@ -1802,7 +1799,7 @@ internal static partial class ChartHelper
                     var bubble = plotArea2?.GetFirstChild<C.BubbleChart>();
                     if (bubble == null) { unsupported.Add(key); break; }
                     bubble.RemoveAllChildren<C.ShowNegativeBubbles>();
-                    bubble.AppendChild(new C.ShowNegativeBubbles { Val = ParseHelpers.IsTruthy(value) });
+                    InsertBubbleChartChildInOrder(bubble, new C.ShowNegativeBubbles { Val = ParseHelpers.IsTruthy(value) });
                     break;
                 }
 
@@ -1817,7 +1814,7 @@ internal static partial class ChartHelper
                         "width" or "w" => C.SizeRepresentsValues.Width,
                         _ => C.SizeRepresentsValues.Area
                     };
-                    bubble.AppendChild(new C.SizeRepresents { Val = srVal });
+                    InsertBubbleChartChildInOrder(bubble, new C.SizeRepresents { Val = srVal });
                     break;
                 }
 

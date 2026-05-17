@@ -933,6 +933,33 @@ internal static partial class ChartHelper
     }
 
     /// <summary>
+    /// Insert a child into a CT_BubbleChart at the correct schema position.
+    /// Schema: varyColors?, ser*, dLbls?, bubble3D?, bubbleScale?, showNegBubbles?, sizeRepresents?, axId+, extLst?.
+    /// PowerPoint silently renders out-of-order children, but the validator emits
+    /// "unexpected child element 'sizeRepresents'/'showNegBubbles'" when they trail axId.
+    /// </summary>
+    internal static void InsertBubbleChartChildInOrder(OpenXmlCompositeElement bubble, OpenXmlElement child)
+    {
+        string[] insertBeforeNames = child.LocalName switch
+        {
+            "bubble3D" => ["bubbleScale", "showNegBubbles", "sizeRepresents", "axId", "extLst"],
+            "bubbleScale" => ["showNegBubbles", "sizeRepresents", "axId", "extLst"],
+            "showNegBubbles" => ["sizeRepresents", "axId", "extLst"],
+            "sizeRepresents" => ["axId", "extLst"],
+            _ => ["axId", "extLst"]
+        };
+        foreach (var sibling in bubble.ChildElements)
+        {
+            if (insertBeforeNames.Contains(sibling.LocalName))
+            {
+                bubble.InsertBefore(child, sibling);
+                return;
+            }
+        }
+        bubble.AppendChild(child);
+    }
+
+    /// <summary>
     /// Insert effectLst into spPr respecting DrawingML schema: ..., ln, effectLst, effectDag, ...
     /// </summary>
     internal static void InsertEffectListInSpPr(Drawing.ShapeProperties spPr, Drawing.EffectList effectList)
