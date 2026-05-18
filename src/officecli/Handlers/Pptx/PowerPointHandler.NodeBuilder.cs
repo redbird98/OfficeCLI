@@ -959,7 +959,12 @@ public partial class PowerPointHandler
             }
             var softEdge = activeEffectList.GetFirstChild<Drawing.SoftEdge>();
             if (softEdge?.Radius?.HasValue == true)
-                node.Format["softEdge"] = $"{softEdge.Radius.Value / 12700.0:0.##}";
+                // Unit-qualified pt — matches the cross-format canonical from
+                // root CLAUDE.md (line.width "0.75pt", padding "12pt", glow
+                // "4pt"). The bare numeric form here was the lone outlier on
+                // the effects readback surface and broke dump round-trip
+                // when set softEdge=<value> re-parses the readback.
+                node.Format["softEdge"] = $"{softEdge.Radius.Value / 12700.0:0.##}pt";
         }
 
         // 3D rotation (scene3d)
