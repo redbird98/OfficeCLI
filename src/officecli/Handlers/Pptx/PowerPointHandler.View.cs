@@ -673,17 +673,11 @@ public partial class PowerPointHandler
             }
 
             var shapes = shapeTree.Elements<Shape>().ToList();
-            if (!shapes.Any(IsTitle))
-            {
-                issues.Add(new DocumentIssue
-                {
-                    Id = $"S{++issueNum}",
-                    Type = IssueType.Structure,
-                    Severity = IssueSeverity.Warning,
-                    Path = $"/slide[{slideNum}]",
-                    Message = "Slide has no title"
-                });
-            }
+            // No "slide has no title" warning: PowerPoint does not require a
+            // Title placeholder, free-form / chart-only / image-only slides
+            // are legitimate, and the check has no actionable subtype or
+            // suggestion. A dedicated a11y audit mode is the right home for
+            // this kind of structural lint if it returns later.
 
             // Check for font consistency issues
             int shapeIdx = 0;
