@@ -702,9 +702,15 @@ public partial class PowerPointHandler
                 new Drawing.Offset { X = geom.x, Y = geom.y },
                 new Drawing.Extents { Cx = geom.cx, Cy = geom.cy }
             ));
-            shape.ShapeProperties.AppendChild(new Drawing.PresetGeometry(
-                new Drawing.AdjustValueList()
-            ) { Preset = Drawing.ShapeTypeValues.Rectangle });
+            // R24 — do NOT inject <a:prstGeom prst="rect"/>. PPT and
+            // LibreOffice both fall back to a rectangle when no geometry is
+            // declared on a placeholder's spPr (the placeholder slot is
+            // inherently rectangular), so the explicit element is redundant
+            // for rendering. The cost of emitting it is real: NodeBuilder
+            // surfaces it as `geometry=rect` in dump, the batch emitter
+            // forwards it through Set, and Set's geometry path seeds a
+            // default outline (bbe1a0c8) — so an idempotent dump+replay
+            // grows a 1pt border around every formerly-unbound placeholder.
         }
 
         // Optional text prepopulation. Build a minimal TextBody so PowerPoint
