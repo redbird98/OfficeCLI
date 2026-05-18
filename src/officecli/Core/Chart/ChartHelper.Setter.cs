@@ -1246,8 +1246,10 @@ internal static partial class ChartHelper
                         // Truthy/falsy shorthands (true/yes/log/1, false/no/
                         // none/linear/0) are intercepted earlier and don't
                         // reach this branch.
-                        if (logVal < 2 || logVal > 1000)
-                            throw new ArgumentException($"Invalid logBase '{value}': must be in the OOXML range [2, 1000] (ST_LogBase).");
+                        // ST_LogBase: minInclusive=2.0, maxExclusive=1000.0.
+                        // logBase=1000 itself is rejected (matches Excel's clamp); logBase=2 is the lower bound.
+                        if (logVal < 2.0 || logVal >= 1000.0)
+                            throw new ArgumentException($"Invalid logBase '{value}': must be in the OOXML range [2, 1000) (ST_LogBase).");
                         scaling.PrependChild(new C.LogBase { Val = logVal });
                     }
                     break;

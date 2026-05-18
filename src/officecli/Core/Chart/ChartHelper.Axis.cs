@@ -349,6 +349,11 @@ internal static partial class ChartHelper
                                      value != "0")
                             {
                                 var logVal = ParseHelpers.SafeParseDouble(value, "logBase");
+                                // ST_LogBase: minInclusive=2.0, maxExclusive=1000.0 — reject
+                                // fractional and out-of-band values so Excel doesn't silently
+                                // ghost-rewrite the chart back to linear.
+                                if (logVal < 2.0 || logVal >= 1000.0)
+                                    throw new ArgumentException($"Invalid logBase '{value}': must be in the OOXML range [2, 1000) (ST_LogBase).");
                                 scaling.PrependChild(new C.LogBase { Val = logVal });
                             }
                         }
