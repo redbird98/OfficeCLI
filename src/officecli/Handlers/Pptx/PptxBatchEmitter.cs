@@ -175,19 +175,42 @@ public static partial class PptxBatchEmitter
 
     /// <summary>
     /// Emit a subtree of a PowerPoint document. Supported subtree paths:
-    /// `/slide[N]`. Other paths fall through to a NotImplementedException
-    /// for now — PR3 will widen the entry surface when the CLI is wired up.
+    /// `/slide[N]`, `/theme`, `/notesMaster`, `/slideMaster[N]`, `/slideLayout[N]`,
+    /// `/noteSlide[N]`, `/presentation`. Resource subtrees emit a single raw-set
+    /// replace; replay onto a foreign deck does NOT carry cross-part dependency
+    /// closure (e.g. a `/slideLayout[K]` dump only stamps the layout's XML — the
+    /// referenced master, theme, and per-slide layout rId rewiring are NOT
+    /// included). Mirrors WordBatchEmitter's raw-emit subtree surface
+    /// (/theme, /settings, /numbering, /styles).
     /// </summary>
     public static (List<BatchItem> Items, List<UnsupportedWarning> Warnings) EmitPptx(
         PowerPointHandler ppt, string path)
     {
+        const string SupportedHint = "Supported: /, /presentation, /slide[N], /theme, /notesMaster, /slideMaster[N], /slideLayout[N], /noteSlide[N]";
+
         if (string.IsNullOrEmpty(path))
-            throw new CliException("dump path cannot be empty. Use '/' for the full document or /slide[N].")
+            throw new CliException($"dump path cannot be empty. Use '/' for the full document or a subtree path like /slide[N]. {SupportedHint}")
                 { Code = "invalid_path" };
         if (path == "/") return EmitPptx(ppt);
 
         var items = new List<BatchItem>();
         var ctx = new SlideEmitContext(new List<UnsupportedWarning>());
+
+        if (path == "/presentation")
+        {
+            EmitPresentationProps(ppt, items);
+            return (items, ctx.Unsupported);
+        }
+        if (path == "/theme")
+        {
+            EmitThemeRaw(ppt, items);
+            return (items, ctx.Unsupported);
+        }
+        if (path == "/notesMaster")
+        {
+            EmitNotesMasterRaw(ppt, items);
+            return (items, ctx.Unsupported);
+        }
 
         var slideMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/slide\[(\d+)\]$",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
@@ -204,8 +227,46 @@ public static partial class PptxBatchEmitter
             return (items, ctx.Unsupported);
         }
 
+        var masterMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/slideMaster\[(\d+)\]$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (masterMatch.Success)
+        {
+            var idx = int.Parse(masterMatch.Groups[1].Value);
+            if (idx < 1 || idx > ppt.SlideMasterCount)
+                throw new CliException($"dump path not found: {path} (total slideMasters: {ppt.SlideMasterCount})")
+                    { Code = "path_not_found" };
+            EmitMasterRawOne(ppt, idx, items);
+            return (items, ctx.Unsupported);
+        }
+
+        var layoutMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/slideLayout\[(\d+)\]$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (layoutMatch.Success)
+        {
+            var idx = int.Parse(layoutMatch.Groups[1].Value);
+            if (idx < 1 || idx > ppt.SlideLayoutCount)
+                throw new CliException($"dump path not found: {path} (total slideLayouts: {ppt.SlideLayoutCount})")
+                    { Code = "path_not_found" };
+            EmitLayoutRawOne(ppt, idx, items);
+            return (items, ctx.Unsupported);
+        }
+
+        var noteMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/noteSlide\[(\d+)\]$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (noteMatch.Success)
+        {
+            var idx = int.Parse(noteMatch.Groups[1].Value);
+            if (idx < 1 || idx > ppt.SlideCount)
+                throw new CliException($"dump path not found: {path} (total slides: {ppt.SlideCount})")
+                    { Code = "path_not_found" };
+            if (!EmitNoteSlideRawOne(ppt, idx, items))
+                throw new CliException($"dump path not found: {path} (slide {idx} has no notes)")
+                    { Code = "path_not_found" };
+            return (items, ctx.Unsupported);
+        }
+
         throw new CliException(
-            $"dump path not supported: {path}. Supported: /, /slide[N]")
+            $"dump path not supported: {path}. {SupportedHint}")
             { Code = "unsupported_path" };
     }
 
@@ -270,6 +331,11 @@ public static partial class PptxBatchEmitter
         // replay paths for paragraph/run inside that placeholder still used
         // the same `/slide[N]/shape[K]` form — see EmitTextBody — so every
         // shape after a placeholder collided.
+        // Pre-build the per-slide animation index keyed by source shape @id
+        // (or positional fallback). EmitAnimationsForShape pulls per-shape
+        // entries from this map as we emit each <p:sp>.
+        var animIndex = BuildSlideAnimationIndex(ppt, slideNum);
+
         var ord = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var child in fullSlide.Children)
         {
@@ -279,7 +345,9 @@ public static partial class PptxBatchEmitter
                 && placeholderById.TryGetValue(cid.ToString()!, out var phNode))
             {
                 ord["shape"] = ord.GetValueOrDefault("shape", 0) + 1;
-                EmitPlaceholder(ppt, phNode, slidePath, $"{slidePath}/shape[{ord["shape"]}]", items, ctx);
+                var phReplay = $"{slidePath}/shape[{ord["shape"]}]";
+                EmitPlaceholder(ppt, phNode, slidePath, phReplay, items, ctx);
+                EmitAnimationsForShape(GetAnimationsForChild(animIndex, child, ord["shape"]), phReplay, items);
                 continue;
             }
             switch (child.Type)
@@ -289,11 +357,19 @@ public static partial class PptxBatchEmitter
                 case "shape":
                 case "equation":
                     ord["shape"] = ord.GetValueOrDefault("shape", 0) + 1;
-                    EmitShape(ppt, child, slidePath, $"{slidePath}/shape[{ord["shape"]}]", items, ctx);
+                    {
+                        var shReplay = $"{slidePath}/shape[{ord["shape"]}]";
+                        EmitShape(ppt, child, slidePath, shReplay, items, ctx);
+                        EmitAnimationsForShape(GetAnimationsForChild(animIndex, child, ord["shape"]), shReplay, items);
+                    }
                     break;
                 case "placeholder":
                     ord["shape"] = ord.GetValueOrDefault("shape", 0) + 1;
-                    EmitPlaceholder(ppt, child, slidePath, $"{slidePath}/shape[{ord["shape"]}]", items, ctx);
+                    {
+                        var phReplay2 = $"{slidePath}/shape[{ord["shape"]}]";
+                        EmitPlaceholder(ppt, child, slidePath, phReplay2, items, ctx);
+                        EmitAnimationsForShape(GetAnimationsForChild(animIndex, child, ord["shape"]), phReplay2, items);
+                    }
                     break;
                 case "connector":
                     ord["connector"] = ord.GetValueOrDefault("connector", 0) + 1;
@@ -359,11 +435,12 @@ public static partial class PptxBatchEmitter
         try { xml = ppt.Raw(slidePath); }
         catch { return; }
 
-        // <p:timing> = slide animation. Cheapest substring test is sufficient —
-        // the element name is unique within slide XML.
-        if (xml.Contains("<p:timing", StringComparison.Ordinal))
-            ctx.Unsupported.Add(new UnsupportedWarning("animation", slidePath,
-                "<p:timing> animation tree present"));
+        // <p:timing> = slide animation. EmitAnimationsForShape now emits the
+        // entrance/exit/emphasis effects per shape via the `animation` Query
+        // surface, so the timing tree no longer aborts to an unsupported
+        // warning. Exotic timing constructs (motion paths, sequence groupings)
+        // still go through the Query — animations the Query doesn't enumerate
+        // are silently dropped.
 
         // SmartArt sits inside a graphicFrame as a dgm:relIds element.
         if (xml.Contains("dgm:relIds", StringComparison.Ordinal))
@@ -399,5 +476,104 @@ public static partial class PptxBatchEmitter
                     "morph transition uses p15: extension"));
             }
         }
+    }
+
+    // Emit one `add animation` BatchItem per effect attached to this shape.
+    // Replay parent is the shape's positional path in the emitted document
+    // (caller-supplied — must match the just-emitted `add shape/placeholder`).
+    //
+    // Previously animations were caught by ProbeUnsupportedOnSlide and surfaced
+    // only as a warning, so dump→batch→replay lost every entrance/exit/emphasis
+    // effect plus its trigger/delay/duration. The animation Query surface
+    // already produces fine-grained nodes (effect/class/trigger/duration/delay/
+    // direction/easein/easeout via PopulateAnimationNode); this helper just
+    // forwards each animation's emittable props as an `add animation` row.
+    //
+    // Direction was added to PopulateAnimationNode in this same change — without
+    // it, fly-down would round-trip as fly-up (AddAnimation default).
+    //
+    // Motion-path animations are excluded by the Query (presetClass="motion"
+    // never surfaces under selector "animation"). Other exotic timing
+    // constructs (sequence groupings, conditional triggers) are silently
+    // dropped — the visible effects round-trip.
+    // Per-shape animation emit. Accepts a pre-filtered list of animation
+    // nodes whose shape segment matches this shape (resolved by the caller
+    // via the @id → positional map built from fullSlide.Children).
+    private static void EmitAnimationsForShape(List<DocumentNode> animsForShape,
+                                               string replayShapePath, List<BatchItem> items)
+    {
+        foreach (var anim in animsForShape)
+        {
+            var animProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            // Map Format keys → AddAnimation accepted keys. presetId is
+            // derived from effect+class on Add, so emitting it would either
+            // be ignored or trigger an unsupported_property warning.
+            foreach (var (k, v) in anim.Format)
+            {
+                if (v == null) continue;
+                if (k.Equals("presetId", StringComparison.OrdinalIgnoreCase)) continue;
+                var s = v.ToString() ?? "";
+                if (s.Length == 0) continue;
+                animProps[k] = s;
+            }
+            if (animProps.Count == 0) continue;
+
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = replayShapePath,
+                Type = "animation",
+                Props = animProps,
+            });
+        }
+    }
+
+    // Build a map from source @id (or source positional) to the list of
+    // animation nodes on that shape. Query("animation") paths use either
+    // /slide[N]/shape[@id=X]/animation[A] or /slide[N]/shape[K]/animation[A]
+    // depending on whether cNvPr.Id is present.
+    private static Dictionary<string, List<DocumentNode>> BuildSlideAnimationIndex(
+        PowerPointHandler ppt, int slideNum)
+    {
+        var map = new Dictionary<string, List<DocumentNode>>(StringComparer.Ordinal);
+        List<DocumentNode> all;
+        try { all = ppt.Query("animation"); }
+        catch { return map; }
+
+        var slidePrefix = $"/slide[{slideNum}]/";
+        var rx = new System.Text.RegularExpressions.Regex(
+            @"^/slide\[\d+\]/shape\[([^\]]+)\]/animation\[\d+\]$");
+        foreach (var anim in all)
+        {
+            if (!anim.Path.StartsWith(slidePrefix, StringComparison.Ordinal)) continue;
+            var m = rx.Match(anim.Path);
+            if (!m.Success) continue;
+            var key = m.Groups[1].Value; // either "5" (positional) or "@id=10" form
+            if (!map.TryGetValue(key, out var list))
+            {
+                list = new List<DocumentNode>();
+                map[key] = list;
+            }
+            list.Add(anim);
+        }
+        return map;
+    }
+
+    // Resolve the animation list for the shape currently being emitted.
+    // child.Format["id"] (when present) maps to @id=X; otherwise positional.
+    private static List<DocumentNode> GetAnimationsForChild(
+        Dictionary<string, List<DocumentNode>> map, DocumentNode child, int sourcePositional)
+    {
+        // Try @id= form first when child carries id.
+        if (child.Format.TryGetValue("id", out var cidObj) && cidObj != null)
+        {
+            var idKey = $"@id={cidObj}";
+            if (map.TryGetValue(idKey, out var byId)) return byId;
+        }
+        // Fall back to positional.
+        if (map.TryGetValue(sourcePositional.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            out var byPos))
+            return byPos;
+        return new List<DocumentNode>();
     }
 }

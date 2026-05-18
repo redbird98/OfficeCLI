@@ -51,7 +51,28 @@ public static partial class PptxBatchEmitter
         // as UNSUPPORTED, flipping the per-item success to false and
         // (per pre-R6 contract) the batch-level success too.
         "notes",
+        // ReadShapeAnimation emits Format["animation"] / Format["animationN"]
+        // on the shape node as a compound `effect-class-direction-duration`
+        // string, originally used by the AddShape `animation=` prop. Dump
+        // now emits a separate `add animation` row per effect
+        // (EmitAnimationsForShape), so passing the compound through `add
+        // shape` would double-add each effect on replay. Drop the
+        // shape-level animation keys; the fine-grained rows carry trigger
+        // / delay / direction / easing that the compound form loses.
+        "animation",
     };
+
+    // Shape-level `animation` is filtered above. The same readback emits
+    // `animation2`, `animation3`, ... for shapes carrying multiple effects;
+    // strip those alongside the singular form.
+    private static bool IsShapeLevelAnimationKey(string key)
+    {
+        if (key.StartsWith("animation", StringComparison.OrdinalIgnoreCase)
+            && key.Length > "animation".Length
+            && int.TryParse(key.AsSpan("animation".Length), out _))
+            return true;
+        return false;
+    }
 
     private static Dictionary<string, string> FilterEmittableProps(Dictionary<string, object?> raw)
     {
@@ -60,6 +81,7 @@ public static partial class PptxBatchEmitter
         foreach (var (key, val) in raw)
         {
             if (PptxSkipKeys.Contains(key)) continue;
+            if (IsShapeLevelAnimationKey(key)) continue;
             // CONSISTENCY(effective-X-mirror): docx WordBatchEmitter.Filters.cs
             // applies the same `effective.*` prefix filter — those are read-only
             // cascade snapshots, never user-settable.

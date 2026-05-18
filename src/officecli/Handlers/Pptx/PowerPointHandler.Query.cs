@@ -1880,6 +1880,21 @@ public partial class PowerPointHandler
         animNode.Format["class"] = cls;
         animNode.Format["presetId"] = presetId;
 
+        // CONSISTENCY(anim-direction-readback): mirror the slide-level shape Get
+        // direction decode in Animations.cs (`Read direction from presetSubtype`).
+        // Without this key, dump emit cannot round-trip directional effects
+        // (fly-down → fly-up on replay, since AddAnimation defaults direction).
+        var presetSubtype = effectCTn.PresetSubtype?.Value ?? 0;
+        var dirStr = presetSubtype switch
+        {
+            8 => "left",
+            2 => "right",
+            1 when effectName is "fly" or "wipe" or "crawl" => "up",
+            4 when effectName is "fly" or "wipe" or "crawl" => "down",
+            _ => (string?)null
+        };
+        if (dirStr != null) animNode.Format["direction"] = dirStr;
+
         // bt-2 fix: surface trigger (encoded as effectCTn.NodeType in OOXML).
         // ClickEffect → onclick, AfterEffect → afterPrevious, WithEffect → withPrevious.
         var nt = effectCTn.NodeType?.Value;
