@@ -342,6 +342,16 @@ internal static class OutputFormatter
             return;
         }
 
+        // Pattern: "<thing> already exists: <name>" — uniqueness violation
+        // (duplicate sheet name, defined name, etc). Distinct from
+        // invalid_value: the value is well-formed but collides with an
+        // existing entity.
+        if (msg.Contains("already exists", StringComparison.Ordinal))
+        {
+            result.Code = "duplicate_name";
+            return;
+        }
+
         // Pattern: "UNSUPPORTED props: ..."
         if (msg.StartsWith("UNSUPPORTED props:"))
         {
