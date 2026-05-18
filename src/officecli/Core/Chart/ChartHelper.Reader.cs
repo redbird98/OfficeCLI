@@ -369,13 +369,16 @@ internal static partial class ChartHelper
             var rotY = view3d.GetFirstChild<C.RotateY>()?.Val?.Value;
             var persp = view3d.GetFirstChild<C.Perspective>()?.Val?.Value;
             var v3dParts = new List<string>();
-            if (rotX != null) v3dParts.Add(rotX.Value.ToString());
-            else v3dParts.Add("0");
-            if (rotY != null) v3dParts.Add(rotY.Value.ToString());
-            else v3dParts.Add("0");
-            if (persp != null) v3dParts.Add(persp.Value.ToString());
-            else v3dParts.Add("0");
-            node.Format["view3d"] = string.Join(",", v3dParts);
+            // Emit empty slot for missing child to preserve "not set" through
+            // dump→replay. "0" placeholders caused Setter to write explicit
+            // rotX/rotY/perspective=0 elements that PPT then renders as a flat
+            // 3D camera (phantom rotation).
+            v3dParts.Add(rotX != null ? rotX.Value.ToString() : "");
+            v3dParts.Add(rotY != null ? rotY.Value.ToString() : "");
+            v3dParts.Add(persp != null ? persp.Value.ToString() : "");
+            // Suppress wholly-empty tuple (no children present at all).
+            if (rotX != null || rotY != null || persp != null)
+                node.Format["view3d"] = string.Join(",", v3dParts);
             if (rotX != null) node.Format["view3d.rotateX"] = (int)rotX.Value;
             if (rotY != null) node.Format["view3d.rotateY"] = (int)rotY.Value;
             if (persp != null) node.Format["view3d.perspective"] = (int)persp.Value;

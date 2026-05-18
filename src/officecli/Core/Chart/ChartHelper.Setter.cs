@@ -863,11 +863,16 @@ internal static partial class ChartHelper
                     }
                     else
                     {
-                        if (v3dParts.Length >= 1 && int.TryParse(v3dParts[0], out var rx))
+                        // Empty slot = field absent in source — do not emit (else
+                        // dump→replay introduces phantom rotX=0/rotY=0 children).
+                        if (v3dParts.Length >= 1 && !string.IsNullOrWhiteSpace(v3dParts[0])
+                            && int.TryParse(v3dParts[0], out var rx))
                             view3d.AppendChild(new C.RotateX { Val = (sbyte)rx });
-                        if (v3dParts.Length >= 2 && int.TryParse(v3dParts[1], out var ry))
+                        if (v3dParts.Length >= 2 && !string.IsNullOrWhiteSpace(v3dParts[1])
+                            && int.TryParse(v3dParts[1], out var ry))
                             view3d.AppendChild(new C.RotateY { Val = (ushort)ry });
-                        if (v3dParts.Length >= 3 && int.TryParse(v3dParts[2], out var persp))
+                        if (v3dParts.Length >= 3 && !string.IsNullOrWhiteSpace(v3dParts[2])
+                            && int.TryParse(v3dParts[2], out var persp))
                             view3d.AppendChild(new C.Perspective { Val = (byte)persp });
                     }
                     // Schema order: title, autoTitleDeleted, pivotFmts, view3D, ..., plotArea
