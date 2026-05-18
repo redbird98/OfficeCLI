@@ -207,6 +207,61 @@ public partial class PowerPointHandler
             return layoutNode;
         }
 
+        // CONSISTENCY(master-layout-shape-edit): Get on a master/layout shape path.
+        // Add returns `/slidemaster[N]/shape[@id=K]` (and `/slidelayout[N]/shape[K]`,
+        // `/slidemaster[N]/slidelayout[L]/shape[K]`); without this branch the path
+        // fell through to the slide-only fallback and emitted the misleading
+        // "Path must start with /slide[N], ..." error so Add output was
+        // non-round-trippable.
+        var nestedMasterShapeGetMatch = Regex.Match(path,
+            @"^/slidemaster\[(\d+)\]/slidelayout\[(\d+)\]/shape\[(\d+)\]$", RegexOptions.IgnoreCase);
+        var masterShapeGetMatch = Regex.Match(path,
+            @"^/(slidemaster|slidelayout)\[(\d+)\]/shape\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (nestedMasterShapeGetMatch.Success || masterShapeGetMatch.Success)
+        {
+            ShapeTree? mlShapeTree;
+            string mlPathPrefix;
+            if (nestedMasterShapeGetMatch.Success)
+            {
+                var mIdx = int.Parse(nestedMasterShapeGetMatch.Groups[1].Value);
+                var lIdx = int.Parse(nestedMasterShapeGetMatch.Groups[2].Value);
+                var masters = _doc.PresentationPart?.SlideMasterParts?.ToList() ?? [];
+                if (mIdx < 1 || mIdx > masters.Count)
+                    throw new ArgumentException($"Slide master {mIdx} not found (total: {masters.Count})");
+                var layouts = masters[mIdx - 1].SlideLayoutParts?.ToList() ?? [];
+                if (lIdx < 1 || lIdx > layouts.Count)
+                    throw new ArgumentException($"Slide layout {lIdx} not found under master {mIdx} (total: {layouts.Count})");
+                mlShapeTree = layouts[lIdx - 1].SlideLayout?.CommonSlideData?.ShapeTree;
+                mlPathPrefix = $"/slidemaster[{mIdx}]/slidelayout[{lIdx}]";
+                var shapeIdx = int.Parse(nestedMasterShapeGetMatch.Groups[3].Value);
+                return GetMasterOrLayoutShapeNode(mlShapeTree, shapeIdx, mlPathPrefix, depth);
+            }
+            else
+            {
+                var kind = masterShapeGetMatch.Groups[1].Value.ToLowerInvariant();
+                var pIdx = int.Parse(masterShapeGetMatch.Groups[2].Value);
+                var shapeIdx = int.Parse(masterShapeGetMatch.Groups[3].Value);
+                if (kind == "slidemaster")
+                {
+                    var masters = _doc.PresentationPart?.SlideMasterParts?.ToList() ?? [];
+                    if (pIdx < 1 || pIdx > masters.Count)
+                        throw new ArgumentException($"Slide master {pIdx} not found (total: {masters.Count})");
+                    mlShapeTree = masters[pIdx - 1].SlideMaster?.CommonSlideData?.ShapeTree;
+                    mlPathPrefix = $"/slidemaster[{pIdx}]";
+                }
+                else
+                {
+                    var allLayouts = (_doc.PresentationPart?.SlideMasterParts ?? Enumerable.Empty<SlideMasterPart>())
+                        .SelectMany(m => m.SlideLayoutParts ?? Enumerable.Empty<SlideLayoutPart>()).ToList();
+                    if (pIdx < 1 || pIdx > allLayouts.Count)
+                        throw new ArgumentException($"Slide layout {pIdx} not found (total: {allLayouts.Count})");
+                    mlShapeTree = allLayouts[pIdx - 1].SlideLayout?.CommonSlideData?.ShapeTree;
+                    mlPathPrefix = $"/slidelayout[{pIdx}]";
+                }
+                return GetMasterOrLayoutShapeNode(mlShapeTree, shapeIdx, mlPathPrefix, depth);
+            }
+        }
+
         // Try OLE path: /slide[N]/ole[M]
         // CONSISTENCY(ole-alias): "oleobject" mirrors Add's case switch
         var oleGetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/(?:ole|oleobject|object|embed)\[(\d+)\]$", RegexOptions.IgnoreCase);
@@ -1080,6 +1135,22 @@ public partial class PowerPointHandler
                 throw new ArgumentException($"{elementType} {elementIdx} not found (total: {shapes2.Count}). Slide {slideIdx} contains: {DescribeSlideInventory(shapeTreeEl)}");
             return GenericXmlQuery.ElementToNode(shapes2[elementIdx - 1], path, depth);
         }
+    }
+
+    // CONSISTENCY(master-layout-shape-edit): render a Shape that lives under a
+    // slideMaster or slideLayout. Reuses ShapeToNode for property emission so
+    // master/layout shapes Get back the same Format keys as slide shapes
+    // (name, x/y/w/h, fill/stroke, runs, ...). slideNum=0 is a sentinel —
+    // ShapeToNode honours parentPathPrefix when provided, so the slide index
+    // is never consulted for path construction.
+    private static DocumentNode GetMasterOrLayoutShapeNode(ShapeTree? shapeTree, int shapeIdx, string parentPathPrefix, int depth)
+    {
+        if (shapeTree == null)
+            throw new ArgumentException($"No shape tree found at {parentPathPrefix}");
+        var shapes = shapeTree.Elements<Shape>().ToList();
+        if (shapeIdx < 1 || shapeIdx > shapes.Count)
+            throw new ArgumentException($"Shape {shapeIdx} not found at {parentPathPrefix} (total: {shapes.Count})");
+        return ShapeToNode(shapes[shapeIdx - 1], slideNum: 0, shapeIdx, depth, part: null, parentPathPrefix: parentPathPrefix);
     }
 
     public List<DocumentNode> Query(string selector)

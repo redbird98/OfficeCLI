@@ -308,18 +308,64 @@ public partial class PowerPointHandler
             else if (m.Groups[4].Success) attrValue = m.Groups[4].Value;
             else attrValue = m.Groups[5].Value.Trim('"', '\'', ' ');
 
-            var slideMatch = Regex.Match(prefix, @"/slide\[(\d+)\]");
-            if (!slideMatch.Success)
-                throw new ArgumentException($"Cannot resolve @{attrName}= outside of a slide context: {path}");
-            var slideIdx = int.Parse(slideMatch.Groups[1].Value);
+            // CONSISTENCY(master-layout-shape-edit): @id=/@name= resolution must
+            // also work when the prefix is a slidemaster or slidelayout shape
+            // container — Add returns `/slidemaster[N]/shape[@id=K]` so the
+            // same path must round-trip through Get/Set/Remove.
+            ShapeTree? shapeTree;
+            var nestedMlMatch = Regex.Match(prefix, @"^/slidemaster\[(\d+)\]/slidelayout\[(\d+)\]", RegexOptions.IgnoreCase);
+            var masterMlMatch = Regex.Match(prefix, @"^/slidemaster\[(\d+)\]", RegexOptions.IgnoreCase);
+            var layoutMlMatch = Regex.Match(prefix, @"^/slidelayout\[(\d+)\]", RegexOptions.IgnoreCase);
+            if (nestedMlMatch.Success)
+            {
+                var mIdx = int.Parse(nestedMlMatch.Groups[1].Value);
+                var lIdx = int.Parse(nestedMlMatch.Groups[2].Value);
+                var masters = _doc.PresentationPart?.SlideMasterParts?.ToList() ?? [];
+                if (mIdx < 1 || mIdx > masters.Count)
+                    throw new ArgumentException($"Slide master {mIdx} not found (total: {masters.Count})");
+                var layouts = masters[mIdx - 1].SlideLayoutParts?.ToList() ?? [];
+                if (lIdx < 1 || lIdx > layouts.Count)
+                    throw new ArgumentException($"Slide layout {lIdx} not found under master {mIdx} (total: {layouts.Count})");
+                shapeTree = layouts[lIdx - 1].SlideLayout?.CommonSlideData?.ShapeTree;
+                if (shapeTree == null)
+                    throw new ArgumentException($"Slide layout {lIdx} has no shape tree");
+            }
+            else if (masterMlMatch.Success && !prefix.Contains("/slidelayout[", StringComparison.OrdinalIgnoreCase))
+            {
+                var mIdx = int.Parse(masterMlMatch.Groups[1].Value);
+                var masters = _doc.PresentationPart?.SlideMasterParts?.ToList() ?? [];
+                if (mIdx < 1 || mIdx > masters.Count)
+                    throw new ArgumentException($"Slide master {mIdx} not found (total: {masters.Count})");
+                shapeTree = masters[mIdx - 1].SlideMaster?.CommonSlideData?.ShapeTree;
+                if (shapeTree == null)
+                    throw new ArgumentException($"Slide master {mIdx} has no shape tree");
+            }
+            else if (layoutMlMatch.Success)
+            {
+                var lIdx = int.Parse(layoutMlMatch.Groups[1].Value);
+                var allLayouts = (_doc.PresentationPart?.SlideMasterParts ?? Enumerable.Empty<SlideMasterPart>())
+                    .SelectMany(m => m.SlideLayoutParts ?? Enumerable.Empty<SlideLayoutPart>()).ToList();
+                if (lIdx < 1 || lIdx > allLayouts.Count)
+                    throw new ArgumentException($"Slide layout {lIdx} not found (total: {allLayouts.Count})");
+                shapeTree = allLayouts[lIdx - 1].SlideLayout?.CommonSlideData?.ShapeTree;
+                if (shapeTree == null)
+                    throw new ArgumentException($"Slide layout {lIdx} has no shape tree");
+            }
+            else
+            {
+                var slideMatch = Regex.Match(prefix, @"/slide\[(\d+)\]");
+                if (!slideMatch.Success)
+                    throw new ArgumentException($"Cannot resolve @{attrName}= outside of a slide context: {path}");
+                var slideIdx = int.Parse(slideMatch.Groups[1].Value);
 
-            var slideParts = GetSlideParts().ToList();
-            if (slideIdx < 1 || slideIdx > slideParts.Count)
-                throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts.Count})");
-            var slidePart = slideParts[slideIdx - 1];
-            var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
-            if (shapeTree == null)
-                throw new ArgumentException($"Slide {slideIdx} has no shape tree");
+                var slideParts = GetSlideParts().ToList();
+                if (slideIdx < 1 || slideIdx > slideParts.Count)
+                    throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts.Count})");
+                var slidePart = slideParts[slideIdx - 1];
+                shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
+                if (shapeTree == null)
+                    throw new ArgumentException($"Slide {slideIdx} has no shape tree");
+            }
 
             // CONSISTENCY(group-id-scope): if the prefix has /group[N] segments
             // after /slide[N], scope the @id=/@name= search inside that nested
