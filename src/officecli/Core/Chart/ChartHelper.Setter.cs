@@ -1499,6 +1499,16 @@ internal static partial class ChartHelper
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     if (plotArea2 == null) { unsupported.Add(key); break; }
+                    // CONSISTENCY(pie-only-prop): c:explosion lives on CT_PieSer
+                    // (pie / pie3D / ofPie / doughnut). On bar/line/area the
+                    // element is ignored by Excel — make the failure mode loud
+                    // so callers see it, matching firstSliceAngle's existing
+                    // unsupported-on-non-pie behavior below.
+                    var pieOnly = plotArea2.GetFirstChild<C.PieChart>() != null
+                                  || plotArea2.GetFirstChild<C.Pie3DChart>() != null
+                                  || plotArea2.GetFirstChild<C.OfPieChart>() != null
+                                  || plotArea2.GetFirstChild<C.DoughnutChart>() != null;
+                    if (!pieOnly) { unsupported.Add(key); break; }
                     var expInt = ParseHelpers.SafeParseInt(value, "explosion");
                     // CT_DLblPercent/CT_UnsignedInt: explosion is non-negative
                     // and reads as a percentage. >100 is technically legal in
