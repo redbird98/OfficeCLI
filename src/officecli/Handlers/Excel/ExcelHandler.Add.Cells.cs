@@ -46,7 +46,15 @@ public partial class ExcelHandler
             var caseExact = string.Equals(caseMatch.Name, name, StringComparison.Ordinal);
             var isPlaceholder = sheets.Elements<Sheet>().Count() == 1
                 && IsPristineWorksheet(workbookPart, caseMatch);
-            if (!caseExact || !isPlaceholder)
+            // Placeholder claim is only meaningful when the caller actually
+            // supplies a sheet-level prop that would mutate the placeholder
+            // (autoFilter / tabColor / hidden). Without any such prop the
+            // "claim" is a true no-op and indistinguishable from a duplicate-
+            // name collision — reject so callers don't see fake success.
+            var hasClaimableProp = properties.ContainsKey("autoFilter")
+                || properties.ContainsKey("tabColor")
+                || properties.ContainsKey("hidden");
+            if (!caseExact || !isPlaceholder || !hasClaimableProp)
             {
                 throw new ArgumentException(
                     $"A sheet named '{caseMatch.Name}' already exists. Sheet names must be unique.");
