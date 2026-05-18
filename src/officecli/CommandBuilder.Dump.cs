@@ -16,9 +16,9 @@ static partial class CommandBuilder
         var dumpPathArg = new Argument<string>("path")
         {
             Description = "DOM path of the subtree to dump. Defaults to '/' (whole document) when omitted. "
-                        + "Supported docx subtree paths: /body, /body/p[N], /body/tbl[N], /theme, /settings, /numbering, /styles. "
-                        + "Supported pptx subtree paths: /, /slide[N]. "
-                        + "Subtree dumps do NOT include resources at sibling paths (styles/numbering/theme); replay target must already define referenced styles/numIds.",
+                        + "Supported docx subtree paths: /, /body, /body/p[N], /body/tbl[N], /theme, /settings, /numbering, /styles. "
+                        + "Supported pptx subtree paths: /, /presentation, /slide[N], /theme, /notesMaster, /slideMaster[N], /slideLayout[N], /noteSlide[N]. "
+                        + "Subtree dumps do NOT include resources at sibling paths (styles/numbering/theme; pptx: master/layout/theme); replay target must already define referenced styles/numIds/layouts.",
             DefaultValueFactory = _ => "/"
         };
         var formatOpt = new Option<string>("--format")
