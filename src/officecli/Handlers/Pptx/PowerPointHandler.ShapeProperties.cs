@@ -87,7 +87,14 @@ public partial class PowerPointHandler
 
     private static bool IsValidDrawingRunAttrValue(string key, string value)
     {
-        if (DrawingRunIntAttrs.Contains(key)) return int.TryParse(value, out _);
+        if (DrawingRunIntAttrs.Contains(key))
+        {
+            if (!int.TryParse(value, out var iv)) return false;
+            // OOXML ST_TextNonNegativePoint refuses negative kern. Writing
+            // kern=-100 produces a file PowerPoint silently rewrites on open.
+            if (key == "kern" && iv < 0) return false;
+            return true;
+        }
         if (DrawingRunBoolAttrs.Contains(key))
             return value is "0" or "1" or "true" or "false" or "True" or "False";
         if (key == "u") return DrawingUnderlineEnum.Contains(value);
@@ -1272,6 +1279,9 @@ public partial class PowerPointHandler
                             if (key is "lang" or "altLang")
                                 throw new ArgumentException(
                                     $"Invalid BCP-47 language tag for {key}: '{value}'. Expected a tag like 'en-US', 'ja-JP', or 'ar-SA' (RFC 5646: <= {OfficeCli.Core.Bcp47LanguageTag.MaxLength} chars, primary subtag 2-3 letters, then hyphen-separated subtags).");
+                            if (key == "kern" && int.TryParse(value, out var kv) && kv < 0)
+                                throw new ArgumentException(
+                                    $"Invalid kern '{value}': OOXML ST_TextNonNegativePoint requires kern >= 0 (hundredths of a point).");
                             throw new ArgumentException(
                                 $"Invalid value for OOXML rPr/{key}: '{value}'.");
                         }
