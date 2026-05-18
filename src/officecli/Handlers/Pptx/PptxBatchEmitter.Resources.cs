@@ -14,6 +14,45 @@ public static partial class PptxBatchEmitter
     // natural operation is "swap the whole block". Replay's raw-set overwrites
     // whatever the blank deck stamped during BlankDocCreator.
 
+    // CONSISTENCY(raw-xmlns-canonicalize): mirrors
+    // WordBatchEmitter.Resources.CanonicalizeRawXml. RawXmlHelper.Execute
+    // propagates the root's xmlns declarations onto every direct child so the
+    // SDK's InnerXml setter can resolve prefixes (SDK does not inherit root
+    // xmlns scope when parsing inner content). After replay, the part's XML
+    // carries redundant xmlns:p / xmlns:a attrs on each child of /theme,
+    // /slideMaster[N], /slideLayout[N] — observed first-replay growth on a
+    // blank-deck round-trip: 16657 → 17923 bytes (≈1.2 KB across 7 raw-set
+    // parts), then stable on subsequent rounds. Canonicalise on emit so the
+    // first-pass (clean source) and second-pass (post-replay bloated) shapes
+    // collapse identically.
+    private static string CanonicalizeRawXml(string xml)
+    {
+        if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<")) return xml;
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(xml);
+            if (doc.Root == null) return xml;
+            var rootNsAttrs = doc.Root.Attributes()
+                .Where(a => a.IsNamespaceDeclaration)
+                .ToDictionary(a => a.Name, a => a.Value);
+            foreach (var desc in doc.Root.Descendants())
+            {
+                var toRemove = desc.Attributes()
+                    .Where(a => a.IsNamespaceDeclaration
+                                && rootNsAttrs.TryGetValue(a.Name, out var v)
+                                && v == a.Value)
+                    .ToList();
+                foreach (var a in toRemove) a.Remove();
+            }
+            return doc.Root.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+        }
+        catch
+        {
+            // Malformed XML — leave as-is rather than corrupting.
+            return xml;
+        }
+    }
+
     private static void EmitThemeRaw(PowerPointHandler ppt, List<BatchItem> items)
     {
         // Pptx Raw("/theme") returns the presentation-level theme part (first
@@ -26,6 +65,7 @@ public static partial class PptxBatchEmitter
         catch { return; }
         if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<") || xml == "(no theme)")
             return;
+        xml = CanonicalizeRawXml(xml);
 
         items.Add(new BatchItem
         {
@@ -44,6 +84,7 @@ public static partial class PptxBatchEmitter
         try { xml = ppt.Raw("/notesMaster"); }
         catch { return; }
         if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<")) return;
+        xml = CanonicalizeRawXml(xml);
 
         items.Add(new BatchItem
         {
@@ -64,6 +105,7 @@ public static partial class PptxBatchEmitter
             try { xml = ppt.Raw($"/slideMaster[{i}]"); }
             catch { continue; }
             if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<")) continue;
+            xml = CanonicalizeRawXml(xml);
 
             items.Add(new BatchItem
             {
@@ -85,6 +127,7 @@ public static partial class PptxBatchEmitter
             try { xml = ppt.Raw($"/slideLayout[{i}]"); }
             catch { continue; }
             if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<")) continue;
+            xml = CanonicalizeRawXml(xml);
 
             items.Add(new BatchItem
             {
