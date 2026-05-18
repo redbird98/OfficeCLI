@@ -2496,6 +2496,12 @@ public partial class ExcelHandler
         var unsupported = new List<string>();
         var ws = GetSheet(worksheet);
         var colIdx = (uint)ColumnNameToIndex(colName);
+        // Excel's column space tops out at XFD (16384). Anything past that
+        // can't render in Excel; reject at the handler boundary so callers
+        // get an invalid_value rather than a quietly-corrupt OOXML file.
+        if (colIdx < 1 || colIdx > 16384)
+            throw new ArgumentException(
+                $"Invalid column '{colName}'. Column index {colIdx} is out of range; valid range is A-XFD (1-16384).");
 
         var columns = ws.GetFirstChild<Columns>();
         if (columns == null)
@@ -2659,6 +2665,12 @@ public partial class ExcelHandler
     private List<string> SetRow(WorksheetPart worksheet, uint rowIdx, Dictionary<string, string> properties)
     {
         var unsupported = new List<string>();
+        // Excel's row space tops out at 1048576 (2^20). Reject anything past
+        // that at the handler boundary so callers get an invalid_value
+        // rather than a quietly-corrupt OOXML file.
+        if (rowIdx < 1 || rowIdx > 1048576)
+            throw new ArgumentException(
+                $"Invalid row index {rowIdx}. Valid row range is 1-1048576.");
         var ws = GetSheet(worksheet);
         var sheetData = ws.GetFirstChild<SheetData>();
         if (sheetData == null)
