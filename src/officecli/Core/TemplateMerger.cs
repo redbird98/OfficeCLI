@@ -19,13 +19,13 @@ namespace OfficeCli.Core;
 internal static class TemplateMerger
 {
     // Allow optional outer whitespace ({{ name }}), hyphenated keys
-    // ({{user-id}}), and inner spaces ({{ first name }}). Outer \s* is
-    // stripped; inner spaces are preserved as part of the key. The captured
-    // group is also Trim()'d at the use site so a placeholder like
-    // "{{  name  }}" resolves the same as "{{name}}".
+    // ({{user-id}}), inner spaces ({{ first name }}), and array indexing
+    // ({{items[0]}}). Outer \s* is stripped; inner spaces are preserved as
+    // part of the key. The captured group is also Trim()'d at the use site
+    // so a placeholder like "{{  name  }}" resolves the same as "{{name}}".
     // Match is non-greedy on the inner segment so trailing whitespace
     // followed by }} is not absorbed into the key.
-    private static readonly Regex PlaceholderPattern = new(@"\{\{\s*(\w[\w.\- ]*?)\s*\}\}", RegexOptions.Compiled);
+    private static readonly Regex PlaceholderPattern = new(@"\{\{\s*(\w[\w.\-\[\] ]*?)\s*\}\}", RegexOptions.Compiled);
 
     /// <summary>
     /// Result of a merge operation.
@@ -75,15 +75,47 @@ internal static class TemplateMerger
             data[kvp.Key] = kvp.Value?.ToString() ?? "";
         }
         // Pass 2: flatten nested objects into dot paths ("a"→{"b":"v"} →
-        // "a.b":"v"). Only fill keys that pass 1 did NOT already write, so
-        // a literal "a.b" sibling at the root stays authoritative. Arrays
-        // are skipped — there is no canonical placeholder indexing syntax.
+        // "a.b":"v") and arrays into bracket paths ("items"→[v0,v1] →
+        // "items[0]":"v0", "items[1]":"v1"). Only fill keys that pass 1 did
+        // NOT already write, so a literal "a.b" or "items[0]" sibling at the
+        // root stays authoritative.
         foreach (var kvp in jsonObj)
         {
             if (kvp.Value is JsonObject nested)
                 FlattenNested(nested, kvp.Key, data);
+            else if (kvp.Value is JsonArray arr)
+                FlattenArray(arr, kvp.Key, data);
         }
         return data;
+    }
+
+    /// <summary>
+    /// Walk a JsonArray and emit <c>prefix[i]</c> entries for each element.
+    /// Nested objects/arrays recurse so e.g. <c>users[0].name</c> and
+    /// <c>matrix[0][1]</c> resolve. Existing literal sibling keys win, same
+    /// precedence rule as <see cref="FlattenNested"/>.
+    /// </summary>
+    private static void FlattenArray(JsonArray arr, string prefix, Dictionary<string, string> data)
+    {
+        for (int i = 0; i < arr.Count; i++)
+        {
+            var path = $"{prefix}[{i}]";
+            var item = arr[i];
+            if (item is JsonObject childObj)
+            {
+                FlattenNested(childObj, path, data);
+                if (!data.ContainsKey(path))
+                    data[path] = item.ToString();
+            }
+            else if (item is JsonArray childArr)
+            {
+                FlattenArray(childArr, path, data);
+            }
+            else if (!data.ContainsKey(path))
+            {
+                data[path] = item?.ToString() ?? "";
+            }
+        }
     }
 
     /// <summary>
@@ -107,11 +139,9 @@ internal static class TemplateMerger
                 if (!data.ContainsKey(path))
                     data[path] = kvp.Value?.ToString() ?? "";
             }
-            else if (kvp.Value is JsonArray)
+            else if (kvp.Value is JsonArray nestedArr)
             {
-                // No canonical array placeholder syntax — leave the path
-                // unresolved so ScanUnresolved* surfaces it.
-                continue;
+                FlattenArray(nestedArr, path, data);
             }
             else if (!data.ContainsKey(path))
             {
