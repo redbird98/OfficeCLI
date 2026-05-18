@@ -228,6 +228,7 @@ public partial class PowerPointHandler
             Type = "comment",
             Text = comment.GetFirstChild<DocumentFormat.OpenXml.Presentation.Text>()?.Text ?? "",
         };
+        node.Format["text"] = node.Text;
         var authId = comment.AuthorId?.Value;
         var authors = _doc.PresentationPart?.CommentAuthorsPart?.CommentAuthorList?
             .Elements<CommentAuthor>().ToList();
