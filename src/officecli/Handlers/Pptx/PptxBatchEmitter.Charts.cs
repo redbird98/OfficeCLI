@@ -122,6 +122,7 @@ public static partial class PptxBatchEmitter
         if (!isWaterfall && fullChart.Children != null)
         {
             int seriesIdx = 0;
+            bool anySeriesTrendline = false;
             foreach (var s in fullChart.Children)
             {
                 if (s.Type != "series") continue;
@@ -135,9 +136,24 @@ public static partial class PptxBatchEmitter
                     {
                         var sval = val.ToString();
                         if (!string.IsNullOrEmpty(sval))
+                        {
                             props[$"series{seriesIdx}.{key}"] = sval;
+                            if (key == "trendline") anySeriesTrendline = true;
+                        }
                     }
                 }
+            }
+            // Chart-level `trendline` is Reader's first-series summary — once
+            // per-series `seriesN.trendline` rows have been emitted, the
+            // chart-level key would replay through BuildTrendline a SECOND
+            // time on series 1, doubling its trendline collection (or, for
+            // multi-series varied trendlines, would overwrite series 1's
+            // exp/log spec with the first-scanned type). Strip it.
+            if (anySeriesTrendline)
+            {
+                props.Remove("trendline");
+                props.Remove("trendline.dispRSqr");
+                props.Remove("trendline.dispEq");
             }
         }
 
