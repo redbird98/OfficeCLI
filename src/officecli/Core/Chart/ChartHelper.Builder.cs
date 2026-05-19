@@ -233,45 +233,43 @@ internal static partial class ChartHelper
             }
             case "combo":
             {
-                int splitAt = 1;
-                if (properties.TryGetValue("combosplit", out var splitStr))
-                    splitAt = ParseHelpers.SafeParseInt(splitStr, "combosplit");
-                splitAt = Math.Min(splitAt, seriesData.Count);
-
-                var barData = seriesData.Take(splitAt).ToList();
-                var lineData = seriesData.Skip(splitAt).ToList();
-
-                var comboBar = new C.BarChart(
-                    new C.BarDirection { Val = C.BarDirectionValues.Column },
-                    new C.BarGrouping { Val = C.BarGroupingValues.Clustered },
-                    new C.VaryColors { Val = false }
-                );
-                for (int ci = 0; ci < barData.Count; ci++)
+                // Reader emits per-series type list as `comboTypes=column,column,line`
+                // (or area,area,column,column,line — any mix). Honor it so dump→replay
+                // of line+area / bar+line / area+column+line combos rebuilds the
+                // correct CT_*Chart elements with each ser bound to its original type.
+                // Falls back to the legacy column-vs-line split at `combosplit` when
+                // comboTypes is absent.
+                string[]? comboTypes = null;
+                if (properties.TryGetValue("comboTypes", out var ctList))
+                    comboTypes = ctList.Split(',').Select(t => t.Trim().ToLowerInvariant()).ToArray();
+                if (comboTypes == null || comboTypes.Length == 0)
                 {
-                    var clr = colors != null && ci < colors.Length ? colors[ci] : DefaultSeriesColors[ci % DefaultSeriesColors.Length];
-                    comboBar.AppendChild(BuildBarSeries((uint)ci, barData[ci].name, categories, barData[ci].values, clr));
+                    int splitAt = 1;
+                    if (properties.TryGetValue("combosplit", out var splitStr))
+                        splitAt = ParseHelpers.SafeParseInt(splitStr, "combosplit");
+                    splitAt = Math.Min(splitAt, seriesData.Count);
+                    comboTypes = new string[seriesData.Count];
+                    for (int i = 0; i < seriesData.Count; i++)
+                        comboTypes[i] = i < splitAt ? "column" : "line";
                 }
-                comboBar.AppendChild(new C.AxisId { Val = catAxisId });
-                comboBar.AppendChild(new C.AxisId { Val = valAxisId });
-                plotArea.AppendChild(comboBar);
 
-                if (lineData.Count > 0)
+                // Group adjacent series of identical type into one CT_*Chart container
+                // (matches OOXML structure: each chart element holds a contiguous
+                // run of series of its own type; combo charts may interleave by
+                // chart-element ordering but each container is homogeneous).
+                int gi = 0;
+                while (gi < seriesData.Count)
                 {
-                    var comboLine = new C.LineChart(
-                        new C.Grouping { Val = C.GroupingValues.Standard },
-                        new C.VaryColors { Val = false }
-                    );
-                    for (int ci = 0; ci < lineData.Count; ci++)
-                    {
-                        var sIdx = (uint)(splitAt + ci);
-                        var cIdx = splitAt + ci;
-                        var clr = colors != null && cIdx < colors.Length ? colors[cIdx] : DefaultSeriesColors[cIdx % DefaultSeriesColors.Length];
-                        comboLine.AppendChild(BuildLineSeries(sIdx, lineData[ci].name, categories, lineData[ci].values, clr));
-                    }
-                    // ShowMarker stays opt-in here too (see BuildLineChart).
-                    comboLine.AppendChild(new C.AxisId { Val = catAxisId });
-                    comboLine.AppendChild(new C.AxisId { Val = valAxisId });
-                    plotArea.AppendChild(comboLine);
+                    var t = gi < comboTypes.Length ? comboTypes[gi] : "line";
+                    int gj = gi + 1;
+                    while (gj < seriesData.Count
+                           && gj < comboTypes.Length
+                           && comboTypes[gj] == t)
+                        gj++;
+                    BuildComboGroup(t, plotArea, seriesData, categories,
+                        startIdx: gi, endIdxExclusive: gj,
+                        catAxisId, valAxisId, colors);
+                    gi = gj;
                 }
                 chartElement = null;
                 break;
@@ -629,6 +627,65 @@ internal static partial class ChartHelper
     };
 
     // ==================== Chart Type Builders ====================
+
+    /// <summary>
+    /// Build one homogeneous CT_*Chart container for a contiguous slice of
+    /// the combo's seriesData and append it to plotArea. Series indices remain
+    /// global (startIdx..endIdxExclusive-1) so each ser's c:idx matches its
+    /// original position — required for the Reader's comboTypes round-trip.
+    /// </summary>
+    private static void BuildComboGroup(string typeLabel,
+        C.PlotArea plotArea,
+        List<(string name, double[] values)> seriesData,
+        string[]? categories,
+        int startIdx, int endIdxExclusive,
+        uint catAxisId, uint valAxisId,
+        string[]? colors)
+    {
+        OpenXmlCompositeElement container = typeLabel switch
+        {
+            "bar" => new C.BarChart(
+                new C.BarDirection { Val = C.BarDirectionValues.Bar },
+                new C.BarGrouping { Val = C.BarGroupingValues.Clustered },
+                new C.VaryColors { Val = false }),
+            "column" => new C.BarChart(
+                new C.BarDirection { Val = C.BarDirectionValues.Column },
+                new C.BarGrouping { Val = C.BarGroupingValues.Clustered },
+                new C.VaryColors { Val = false }),
+            "area" => new C.AreaChart(
+                new C.Grouping { Val = C.GroupingValues.Standard },
+                new C.VaryColors { Val = false }),
+            "line" => new C.LineChart(
+                new C.Grouping { Val = C.GroupingValues.Standard },
+                new C.VaryColors { Val = false }),
+            _ => new C.LineChart(
+                new C.Grouping { Val = C.GroupingValues.Standard },
+                new C.VaryColors { Val = false }),
+        };
+
+        for (int i = startIdx; i < endIdxExclusive; i++)
+        {
+            var clr = colors != null && i < colors.Length ? colors[i]
+                : DefaultSeriesColors[i % DefaultSeriesColors.Length];
+            OpenXmlCompositeElement ser = typeLabel switch
+            {
+                "bar" or "column" => BuildBarSeries((uint)i, seriesData[i].name,
+                    categories, seriesData[i].values, clr),
+                "area" => BuildAreaSeries((uint)i, seriesData[i].name,
+                    categories, seriesData[i].values, clr),
+                _ => BuildLineSeries((uint)i, seriesData[i].name,
+                    categories, seriesData[i].values, clr),
+            };
+            container.AppendChild(ser);
+        }
+
+        if (typeLabel == "bar" || typeLabel == "column")
+            container.AppendChild(new C.GapWidth { Val = 150 });
+
+        container.AppendChild(new C.AxisId { Val = catAxisId });
+        container.AppendChild(new C.AxisId { Val = valAxisId });
+        plotArea.AppendChild(container);
+    }
 
     internal static C.BarChart BuildBarChart(
         C.BarDirectionValues direction, bool stacked, bool percentStacked,
