@@ -175,14 +175,16 @@ internal static partial class ChartHelper
 
     /// <summary>
     /// Check if the parent chart type supports errBars on its series (CT_*Ser).
-    /// OOXML allows errBars in: barChart, bar3DChart, scatterChart, areaChart,
-    /// area3DChart, bubbleChart.  Not allowed in: lineChart, line3DChart,
-    /// pieChart, pie3DChart, doughnutChart, radarChart, stockChart.
+    /// ECMA-376: errBars is a child of CT_LineSer, CT_ScatterSer, CT_BarSer,
+    /// CT_AreaSer, CT_BubbleSer (and their 3D variants where applicable).
+    /// Not allowed in: pieChart, pie3DChart, doughnutChart, radarChart, stockChart,
+    /// surfaceChart, surface3DChart.
     /// </summary>
     internal static bool SeriesSupportsErrorBars(OpenXmlElement ser)
     {
         var parentName = ser.Parent?.LocalName ?? "";
         return parentName is "barChart" or "bar3DChart"
+            or "lineChart" or "line3DChart"
             or "scatterChart"
             or "areaChart" or "area3DChart"
             or "bubbleChart";
