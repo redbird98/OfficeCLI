@@ -369,6 +369,81 @@ public partial class PowerPointHandler
     }
 
 
+    /// <summary>
+    /// `add --type linebreak /slide[N]/shape[M]/paragraph[K]` (also /placeholder[X]) —
+    /// insert an &lt;a:br/&gt; element into the target paragraph. Mirrors AddRun's path
+    /// resolution shape so /paragraph[K] suffix and /placeholder[X] alias both work.
+    /// </summary>
+    private string AddLineBreak(string parentPath, int? index, Dictionary<string, string> properties)
+    {
+        var brParaMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]/shape\[(\d+)\](?:/(?:paragraph|p)\[(\d+)\])?$");
+        var brPhMatch = brParaMatch.Success ? null : Regex.Match(parentPath, @"^/slide\[(\d+)\]/placeholder\[(\w+)\](?:/(?:paragraph|p)\[(\d+)\])?$");
+        if (!brParaMatch.Success && (brPhMatch == null || !brPhMatch.Success))
+            throw new ArgumentException(
+                "Line breaks must be added to a shape/placeholder or paragraph: " +
+                "/slide[N]/shape[M], /slide[N]/placeholder[X], /slide[N]/shape[M]/paragraph[K], or /slide[N]/placeholder[X]/paragraph[K]");
+
+        Shape brShape;
+        System.Text.RegularExpressions.Group brParaGroup;
+        if (brParaMatch.Success)
+        {
+            var slideIdx = int.Parse(brParaMatch.Groups[1].Value);
+            var shapeIdx = int.Parse(brParaMatch.Groups[2].Value);
+            (_, brShape) = ResolveShape(slideIdx, shapeIdx);
+            brParaGroup = brParaMatch.Groups[3];
+        }
+        else
+        {
+            var slideIdx = int.Parse(brPhMatch!.Groups[1].Value);
+            var phToken = brPhMatch.Groups[2].Value;
+            var slideParts = GetSlideParts().ToList();
+            if (slideIdx < 1 || slideIdx > slideParts.Count)
+                throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts.Count})");
+            brShape = ResolvePlaceholderShape(slideParts[slideIdx - 1], phToken);
+            brParaGroup = brPhMatch.Groups[3];
+        }
+
+        var brTextBody = brShape.TextBody
+            ?? throw new InvalidOperationException("Shape has no text body");
+
+        Drawing.Paragraph targetPara;
+        int targetParaIdx;
+        var paras = brTextBody.Elements<Drawing.Paragraph>().ToList();
+        if (brParaGroup.Success)
+        {
+            targetParaIdx = int.Parse(brParaGroup.Value);
+            if (targetParaIdx < 1 || targetParaIdx > paras.Count)
+                throw new ArgumentException($"Paragraph {targetParaIdx} not found");
+            targetPara = paras[targetParaIdx - 1];
+        }
+        else
+        {
+            targetPara = paras.LastOrDefault()
+                ?? throw new InvalidOperationException("Shape has no paragraphs");
+            targetParaIdx = paras.Count;
+        }
+
+        var br = new Drawing.Break();
+        if (index.HasValue)
+        {
+            var children = targetPara.ChildElements.ToList();
+            var insertAt = Math.Max(0, Math.Min(index.Value, children.Count));
+            if (insertAt >= children.Count) targetPara.AppendChild(br);
+            else children[insertAt].InsertBeforeSelf(br);
+        }
+        else
+        {
+            targetPara.AppendChild(br);
+        }
+
+        var brIdx = targetPara.Elements<Drawing.Break>().ToList().FindIndex(b => ReferenceEquals(b, br)) + 1;
+        return $"/slide[{(brParaMatch.Success ? brParaMatch.Groups[1].Value : brPhMatch!.Groups[1].Value)}]" +
+               (brParaMatch.Success
+                    ? $"/shape[{brParaMatch.Groups[2].Value}]"
+                    : $"/placeholder[{brPhMatch!.Groups[2].Value}]") +
+               $"/paragraph[{targetParaIdx}]/br[{brIdx}]";
+    }
+
     private string AddRun(string parentPath, int? index, Dictionary<string, string> properties)
     {
                 // Add a run to a paragraph: /slide[N]/shape[M]/paragraph[P] or /slide[N]/shape[M]

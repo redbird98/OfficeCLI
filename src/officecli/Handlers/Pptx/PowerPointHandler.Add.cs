@@ -81,6 +81,11 @@ public partial class PowerPointHandler
             "hyperlink" or "hlink" => AddHyperlinkOnShape(parentPath, properties),
             "paragraph" or "para" => AddParagraph(parentPath, index, properties),
             "run" => AddRun(parentPath, index, properties),
+            // CONSISTENCY(linebreak-shape-path): `add --type linebreak /slide[N]/shape[M]/paragraph[K]`
+            // inserts an <a:br/> into the paragraph. Same dispatch-gap class as AddRun/hyperlink —
+            // without an explicit case, the type falls to AddDefault → ResolveLogicalPath (no shape
+            // support) → generic XML fallback by localName "shape" misses <p:sp> → "parent not found".
+            "linebreak" or "br" or "line-break" => AddLineBreak(parentPath, index, properties),
             "zoom" or "slidezoom" or "slide-zoom" => AddZoom(parentPath, index, properties),
             "3dmodel" or "model3d" or "model" or "glb" => AddModel3D(parentPath, index, properties),
             // BUG-R36-B11: legacy slide comments lifecycle.
