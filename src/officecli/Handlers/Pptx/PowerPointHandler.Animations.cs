@@ -880,7 +880,15 @@ public partial class PowerPointHandler
                 ShapeId = shapeIdStr,
                 GroupId = new UInt32Value((uint)grpId)
             };
-            if (chartBuildCanon != null && chartBuildCanon != "asWhole")
+            // OOXML schema (CT_TLBuildGraphic) requires exactly one of
+            // <p:bldAsOne/> or <p:bldSub>...</p:bldSub> — an empty bldGraphic
+            // makes PowerPoint refuse the file with a schema-incomplete error.
+            // asWhole / null → bldAsOne; everything else → bldSub/bldChart.
+            if (chartBuildCanon == null || chartBuildCanon == "asWhole")
+            {
+                bldGraphic.AppendChild(new BuildAsOne());
+            }
+            else
             {
                 // SDK exposes <a:bldChart @bld> as a StringValue (not the typed
                 // AnimationBuildValues enum) — write the canonical OOXML token
