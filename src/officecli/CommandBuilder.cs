@@ -444,7 +444,7 @@ static partial class CommandBuilder
         }
         else
         {
-            Console.Error.WriteLine($"Error: {rendered.Message}");
+            Console.Error.WriteLine($"Error: {OfficeCli.Core.MsysPathHint.AugmentMessage(rendered.Message)}");
         }
     }
 

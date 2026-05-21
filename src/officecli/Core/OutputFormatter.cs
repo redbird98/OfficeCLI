@@ -250,7 +250,7 @@ internal static class OutputFormatter
 
     private static ErrorResult BuildErrorResult(Exception ex)
     {
-        var result = new ErrorResult { Error = ex.Message };
+        var result = new ErrorResult { Error = MsysPathHint.AugmentMessage(ex.Message) };
 
         if (ex is CliException cli)
         {

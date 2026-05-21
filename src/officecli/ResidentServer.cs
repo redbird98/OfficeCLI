@@ -661,7 +661,7 @@ public class ResidentServer : IDisposable
             // non-resident CLI path (WriteError in Program.cs). Without
             // this, clients diffing stderr across modes would mis-detect
             // failures.
-            return MakeResponse(1, "", $"Error: {rendered.Message}");
+            return MakeResponse(1, "", $"Error: {OfficeCli.Core.MsysPathHint.AugmentMessage(rendered.Message)}");
         }
     }
 
