@@ -5,7 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>OfficeCli</RootNamespace>
     <AssemblyName>officecli</AssemblyName>
-    <Version>1.0.94</Version>
+    <Version>1.0.95</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
@@ -34,6 +34,9 @@
     </EmbeddedResource>
     <EmbeddedResource Include="Resources/chartex-colors.xml" />
     <EmbeddedResource Include="Resources/chartex-style.xml" />
+    <EmbeddedResource Include="Handlers/Pptx/EffectTemplates/*.xml">
+      <LogicalName>OfficeCli.Handlers.Pptx.EffectTemplates.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>

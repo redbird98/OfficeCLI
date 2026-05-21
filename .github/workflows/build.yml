@@ -122,6 +122,32 @@ jobs:
             "$HOME/.local/bin/officecli" --version
           fi
 
+      - name: Smoke test - install.sh / install.ps1
+        # Exercises the shell installers themselves (separate from the CLI's
+        # own `install` subcommand tested above). Downloads from
+        # d.officecli.ai with github fallback — validates the production
+        # mirror is reachable AND the in-repo script is syntactically and
+        # logically correct on each platform.
+        if: >-
+          (matrix.rid == 'osx-arm64' && runner.arch == 'ARM64') ||
+          (matrix.rid == 'osx-x64' && runner.arch == 'X64') ||
+          (matrix.rid == 'linux-x64' && runner.os == 'Linux') ||
+          (matrix.rid == 'win-x64' && runner.os == 'Windows')
+        shell: bash
+        env:
+          MSYS_NO_PATHCONV: '1'
+          MSYS2_ARG_CONV_EXCL: '*'
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            pwsh -NoProfile -ExecutionPolicy Bypass -File ./install.ps1
+            test -f "$LOCALAPPDATA/OfficeCLI/officecli.exe" || { echo "FAIL: officecli.exe not installed"; exit 1; }
+            "$LOCALAPPDATA/OfficeCLI/officecli.exe" --version
+          else
+            bash install.sh
+            test -f "$HOME/.local/bin/officecli" || { echo "FAIL: officecli not installed at ~/.local/bin"; exit 1; }
+            "$HOME/.local/bin/officecli" --version
+          fi
+
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:

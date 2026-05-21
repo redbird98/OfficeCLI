@@ -25,7 +25,13 @@ internal static class UpdateChecker
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".officecli");
     private static readonly string ConfigPath = Path.Combine(ConfigDir, "config.json");
     private const string GitHubRepo = "iOfficeAI/OfficeCLI";
-    private const string PrimaryBase = "https://officecli.ai";
+    // PrimaryBase is the project-controlled mirror (Cloudflare-fronted nginx on
+    // a VPS that periodically syncs github releases). FallbackBase is the
+    // upstream of last resort. Order matters: the mirror is exercised on every
+    // daily check so issues surface fast, and CF edge caching makes it the
+    // fastest path for most users; github is the safety net when CF or the
+    // mirror is unreachable.
+    private const string PrimaryBase = "https://d.officecli.ai";
     private const string FallbackBase = "https://github.com/iOfficeAI/OfficeCLI";
     private const int CheckIntervalHours = 24;
 
@@ -92,15 +98,16 @@ internal static class UpdateChecker
             // parsing the version out of the *final* URL (no API, no rate limit).
             //
             // Why follow the whole chain instead of reading the first Location:
-            // officecli.ai is the canonical entry point — today it 302s to
-            // GitHub, but it may later route through its own host. A first-hop
-            // reader only works when that single hop happens to land on
-            // /tag/vX.Y.Z, which is brittle. Cloudflare-style "officecli.ai →
-            // github.com/.../releases/latest → github.com/.../tag/vX.Y.Z" is
-            // a 2-hop chain whose first Location carries no version.
+            // PrimaryBase 302s to /releases/tag/vX.Y.Z (its own URL, served
+            // from a mirror-maintained version file) and FallbackBase 302s
+            // through github's 2-hop release chain. Either way the *final*
+            // URL after redirects carries /tag/vX.Y.Z, so reading the first
+            // Location wouldn't work for the github fallback path.
             using var handler = new HttpClientHandler { AllowAutoRedirect = true };
             using var client = new HttpClient(handler);
-            client.DefaultRequestHeaders.Add("User-Agent", "OfficeCLI-UpdateChecker");
+            // UA carries running version so the mirror can produce a version
+            // distribution from access logs without any extra telemetry.
+            client.DefaultRequestHeaders.Add("User-Agent", $"OfficeCLI-UpdateChecker/{currentVersion}");
             client.Timeout = TimeSpan.FromSeconds(10);
 
             string? latestVersion = null;
@@ -141,12 +148,17 @@ internal static class UpdateChecker
             var exePath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
             if (exePath == null) return;
 
-            // Download binary (use the same base URL that returned the version)
+            // Download binary using the version-pinned URL. This URL is
+            // immutable: the same URL always points at the same bytes, which
+            // lets CF cache it on the edge essentially forever, and removes
+            // the race where /releases/latest/download/X could return v1.0.95
+            // bytes while /releases/latest already reports v1.0.96. Works
+            // identically on the github fallback (canonical github URL form).
             using var downloadClient = new HttpClient();
-            downloadClient.DefaultRequestHeaders.Add("User-Agent", "OfficeCLI-UpdateChecker");
+            downloadClient.DefaultRequestHeaders.Add("User-Agent", $"OfficeCLI-UpdateChecker/{currentVersion}");
             downloadClient.Timeout = TimeSpan.FromMinutes(5);
 
-            var downloadUrl = $"{resolvedBase}/releases/latest/download/{assetName}";
+            var downloadUrl = $"{resolvedBase}/releases/download/v{latestVersion}/{assetName}";
             var finalPath = exePath + ".update";
             // Stage download to .partial so a crashed/killed download never leaves
             // a truncated PE at the canonical .update path that ApplyPendingUpdate would apply.

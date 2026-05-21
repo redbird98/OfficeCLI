@@ -914,14 +914,48 @@ public partial class PowerPointHandler
     private List<string> SetShapeAnimationByPath(Match match, Dictionary<string, string> properties)
     {
         var slideIdx = int.Parse(match.Groups[1].Value);
-        var shapeIdx = int.Parse(match.Groups[2].Value);
-        var animIdx = int.Parse(match.Groups[3].Value);
-
-        var (slidePart, shape) = ResolveShape(slideIdx, shapeIdx);
-        var ctns = EnumerateShapeAnimationCTns(slidePart, shape);
+        // New regex captures 4 groups (slide, kind, idx, animIdx); old 3-group
+        // call sites still work because Groups[3] returns the empty group when
+        // the regex doesn't capture it — but every live call site uses the
+        // 4-group form now.
+        var kindOrIdx = match.Groups[2].Value;
+        SlidePart slidePart;
+        OpenXmlElement targetEl;
+        int elemIdx;
+        int animIdx;
+        bool isChart;
+        if (kindOrIdx is "shape" or "chart")
+        {
+            isChart = kindOrIdx == "chart";
+            elemIdx = int.Parse(match.Groups[3].Value);
+            animIdx = int.Parse(match.Groups[4].Value);
+            if (isChart)
+            {
+                var (sp, gf, _, _) = ResolveChart(slideIdx, elemIdx);
+                slidePart = sp; targetEl = gf;
+            }
+            else
+            {
+                var (sp, sh) = ResolveShape(slideIdx, elemIdx);
+                slidePart = sp; targetEl = sh;
+            }
+        }
+        else
+        {
+            // Legacy 3-group capture (shape implicit) — kept for safety.
+            isChart = false;
+            elemIdx = int.Parse(kindOrIdx);
+            animIdx = int.Parse(match.Groups[3].Value);
+            var (sp, sh) = ResolveShape(slideIdx, elemIdx);
+            slidePart = sp; targetEl = sh;
+        }
+        var ctns = EnumerateShapeAnimationCTns(slidePart, targetEl);
         if (animIdx < 1 || animIdx > ctns.Count)
             throw new ArgumentException(
-                $"Animation {animIdx} not found on shape {shapeIdx} (total: {ctns.Count})");
+                $"Animation {animIdx} not found on {(isChart ? "chart" : "shape")} {elemIdx} (total: {ctns.Count})");
+        if (!isChart && (properties.ContainsKey("chartBuild") || properties.ContainsKey("chartbuild")))
+            throw new ArgumentException(
+                "chartBuild only applies to chart targets. Use /slide[N]/chart[M]/animation[K].");
 
         // Reject schema set:false keys up front. Without this, the merge
         // loop silently dropped them and Set returned success with the
@@ -962,6 +996,26 @@ public partial class PowerPointHandler
             snapshots.Add(d);
         }
 
+        // For chart targets, seed every snapshot with the current chartBuild
+        // value pulled from the slide's <p:bldGraphic>. chartBuild is chart-wide
+        // (one bldGraphic per spid), so all snapshots share the same value;
+        // user override on the target index propagates to every snapshot below
+        // so the replay loop's last-write-wins lands on the user-intended value.
+        string? currentChartBuild = null;
+        if (isChart)
+        {
+            var spIdStr = GetAnimationTargetSpId(targetEl)?.ToString();
+            if (spIdStr != null)
+            {
+                var bldGraphic = slidePart.Slide?.GetFirstChild<Timing>()?.BuildList?
+                    .Elements<BuildGraphics>().FirstOrDefault(b => b.ShapeId?.Value == spIdStr);
+                if (bldGraphic != null)
+                    currentChartBuild = bldGraphic.BuildSubElement?.BuildChart?.Build?.Value ?? "asWhole";
+            }
+            if (currentChartBuild != null)
+                foreach (var snap in snapshots) snap["chartBuild"] = currentChartBuild;
+        }
+
         // Merge caller overrides onto the target index. CONSISTENCY(animation-
         // class-suffix): if the user overrides `effect` with a suffixed form
         // (fly-out, fade-exit, …) and did not also pass an explicit `class`,
@@ -993,13 +1047,21 @@ public partial class PowerPointHandler
         if (target.TryGetValue("restart", out var tRes)) ValidateAnimationRestart(tRes);
         if (target.TryGetValue("autoReverse", out var tAr)) ValidateAnimationAutoReverse(tAr);
         else if (target.TryGetValue("autoreverse", out tAr)) ValidateAnimationAutoReverse(tAr);
+        // chartBuild is chart-wide; if the user overrode it on the target index,
+        // validate and propagate to all snapshots so last-write-wins in the
+        // replay loop reflects the user's choice (not the seeded old value).
+        if (isChart && target.TryGetValue("chartBuild", out var tCb))
+        {
+            ValidateAnimationChartBuild(tCb);
+            foreach (var snap in snapshots) snap["chartBuild"] = tCb;
+        }
 
         // Wipe all animations on the shape, then re-apply each snapshot in order.
         // CONSISTENCY(animation-chain): motion-class snapshots route through
         // AppendMotionPathAnimation; preset (entrance/exit/emphasis) snapshots
         // route through ApplyShapeAnimation. Both append to the MainSequence
         // ChildTimeNodeList in original order so animation[K] indexing holds.
-        var shapeId = shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
+        var shapeId = GetAnimationTargetSpId(targetEl);
         if (shapeId.HasValue)
         {
             RemoveShapeAnimations(slidePart.Slide!, shapeId.Value);
@@ -1007,6 +1069,8 @@ public partial class PowerPointHandler
             // a matching ShapeTarget; motion-path groups land in the same list
             // so they're removed too. Belt-and-suspenders: also drop motion
             // path animations explicitly in case the writer changes.
+            // (Charts don't carry motion-path animations — rejected on Add —
+            // so this is a no-op for chart targets.)
             RemoveAllMotionPathAnimationsForShape(slidePart.Slide!, shapeId.Value);
         }
         for (int i = 0; i < snapshots.Count; i++)
@@ -1015,12 +1079,14 @@ public partial class PowerPointHandler
             if (snap.TryGetValue("class", out var snapCls)
                 && snapCls.Equals("motion", StringComparison.OrdinalIgnoreCase))
             {
-                ReapplyMotionFromSnapshot(slidePart, shape, snap);
+                // Motion snapshots only occur on shape targets — chart Add
+                // hard-rejects class=motion, so the snapshot can't carry it.
+                ReapplyMotionFromSnapshot(slidePart, (Shape)targetEl, snap);
             }
             else
             {
                 var animValue = BuildAnimValueFromProps(snap);
-                ApplyShapeAnimation(slidePart, shape, animValue);
+                ApplyShapeAnimation(slidePart, targetEl, animValue);
             }
         }
         GetSlide(slidePart).Save();
@@ -1142,6 +1208,13 @@ public partial class PowerPointHandler
             : p.TryGetValue("autoreverse", out var ar2) ? ar2 : null;
         if (!string.IsNullOrEmpty(arKey))
             animValue += $"-autoReverse={arKey}";
+        // chartBuild rides the same composite string so chart-target snapshots
+        // re-emit the bldGraphic/bldChart wrapper on replay. Plain shape
+        // snapshots never carry this key (Add hard-rejects it on shapes).
+        if (p.TryGetValue("chartBuild", out var cbVal) && !string.IsNullOrEmpty(cbVal))
+            animValue += $"-chartBuild={cbVal}";
+        else if (p.TryGetValue("chartbuild", out var cbVal2) && !string.IsNullOrEmpty(cbVal2))
+            animValue += $"-chartBuild={cbVal2}";
         return animValue;
     }
 }

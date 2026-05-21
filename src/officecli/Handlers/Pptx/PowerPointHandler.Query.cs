@@ -472,21 +472,57 @@ public partial class PowerPointHandler
             return Model3DToNode(m3dElements[mIdx - 1], sIdx, mIdx);
         }
 
-        // Try animation path: /slide[N]/shape[M]/animation[A]
-        var animPathMatch = Regex.Match(path, @"^/slide\[(\d+)\]/shape\[(\d+)\]/animation\[(\d+)\]$");
+        // Try animation path: /slide[N]/(shape|chart)[M]/animation[A]
+        // CONSISTENCY(animation-target): same enumeration model for shapes and
+        // chart graphicFrames — only the resolver differs.
+        var animPathMatch = Regex.Match(path, @"^/slide\[(\d+)\]/(shape|chart)\[(\d+)\]/animation\[(\d+)\]$");
         if (animPathMatch.Success)
         {
             var sIdx = int.Parse(animPathMatch.Groups[1].Value);
-            var shIdx = int.Parse(animPathMatch.Groups[2].Value);
-            var aIdx = int.Parse(animPathMatch.Groups[3].Value);
-            var (animSlidePart, animShape) = ResolveShape(sIdx, shIdx);
-            var animShapePathSeg = BuildElementPathSegment("shape", animShape, shIdx);
+            var animKind = animPathMatch.Groups[2].Value;
+            var elIdx = int.Parse(animPathMatch.Groups[3].Value);
+            var aIdx = int.Parse(animPathMatch.Groups[4].Value);
 
-            var effectCTns = EnumerateShapeAnimationCTns(animSlidePart, animShape);
+            SlidePart animSlidePart;
+            OpenXmlElement animTargetEl;
+            string animElPathSeg;
+            if (animKind == "chart")
+            {
+                var (sp, gf, _, _) = ResolveChart(sIdx, elIdx);
+                animSlidePart = sp;
+                animTargetEl = gf;
+                animElPathSeg = BuildElementPathSegment("chart", gf, elIdx);
+            }
+            else
+            {
+                var (sp, sh) = ResolveShape(sIdx, elIdx);
+                animSlidePart = sp;
+                animTargetEl = sh;
+                animElPathSeg = BuildElementPathSegment("shape", sh, elIdx);
+            }
+
+            var effectCTns = EnumerateShapeAnimationCTns(animSlidePart, animTargetEl);
             if (aIdx < 1 || aIdx > effectCTns.Count)
-                return new DocumentNode { Path = path, Type = "error", Text = $"animation[{aIdx}] not found (shape has {effectCTns.Count} animation(s))" };
-            var animNode = new DocumentNode { Path = $"/slide[{sIdx}]/{animShapePathSeg}/animation[{aIdx}]", Type = "animation" };
+                return new DocumentNode { Path = path, Type = "error", Text = $"animation[{aIdx}] not found ({animKind} has {effectCTns.Count} animation(s))" };
+            var animNode = new DocumentNode { Path = $"/slide[{sIdx}]/{animElPathSeg}/animation[{aIdx}]", Type = "animation" };
             PopulateAnimationNode(animNode, effectCTns[aIdx - 1]);
+            // chartBuild surfaces on the per-animation node too, mirroring the
+            // chart-parent Get readback. Pulled from the matching BuildGraphics
+            // by spid (one bldGraphic per chart spid in v1).
+            if (animKind == "chart")
+            {
+                var spIdStr = GetAnimationTargetSpId(animTargetEl)?.ToString();
+                if (spIdStr != null)
+                {
+                    var bldGraphic = GetSlide(animSlidePart).GetFirstChild<Timing>()?.BuildList?
+                        .Elements<BuildGraphics>().FirstOrDefault(b => b.ShapeId?.Value == spIdStr);
+                    if (bldGraphic != null)
+                    {
+                        var bldVal = bldGraphic.BuildSubElement?.BuildChart?.Build?.Value;
+                        animNode.Format["chartBuild"] = string.IsNullOrEmpty(bldVal) ? "asWhole" : bldVal;
+                    }
+                }
+            }
             return animNode;
         }
 
@@ -1579,6 +1615,38 @@ public partial class PowerPointHandler
                             results.Add(node);
                     }
                 }
+
+                // CONSISTENCY(animation-target): chart graphicFrames are
+                // first-class animation targets — enumerate them under the
+                // same query so `query animation` returns chart animations too.
+                int animChartIdx = 0;
+                foreach (var animGf in animShapeTree.Elements<GraphicFrame>())
+                {
+                    if (!IsChartGraphicFrame(animGf)) continue;
+                    animChartIdx++;
+                    var effectCTns = EnumerateShapeAnimationCTns(slidePart, animGf);
+                    if (effectCTns.Count == 0) continue;
+                    var chartPathSeg = BuildElementPathSegment("chart", animGf, animChartIdx);
+                    var chartSpId = GetAnimationTargetSpId(animGf)?.ToString();
+                    var bldGraphic = chartSpId == null ? null
+                        : GetSlide(slidePart).GetFirstChild<Timing>()?.BuildList?
+                            .Elements<BuildGraphics>().FirstOrDefault(b => b.ShapeId?.Value == chartSpId);
+                    var chartBuildVal = bldGraphic == null ? null
+                        : (bldGraphic.BuildSubElement?.BuildChart?.Build?.Value
+                            ?? "asWhole");
+                    for (int ai = 0; ai < effectCTns.Count; ai++)
+                    {
+                        var node = new DocumentNode
+                        {
+                            Path = $"/slide[{animSlideNum}]/{chartPathSeg}/animation[{ai + 1}]",
+                            Type = "animation"
+                        };
+                        PopulateAnimationNode(node, effectCTns[ai]);
+                        if (chartBuildVal != null) node.Format["chartBuild"] = chartBuildVal;
+                        if (MatchesGenericAttributes(node, parsed.Attributes))
+                            results.Add(node);
+                    }
+                }
             }
             return results;
         }
@@ -1891,14 +1959,14 @@ public partial class PowerPointHandler
     /// enumeration order — keep the predicate in sync with what each writer
     /// emits (ApplyShapeAnimation + AppendMotionPathAnimation).
     /// </summary>
-    private List<CommonTimeNode> EnumerateShapeAnimationCTns(SlidePart slidePart, Shape shape)
+    private List<CommonTimeNode> EnumerateShapeAnimationCTns(SlidePart slidePart, OpenXmlElement target)
     {
-        var shapeId = shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
+        var shapeId = GetAnimationTargetSpId(target);
         if (shapeId == null) return [];
         var timing = GetSlide(slidePart).GetFirstChild<Timing>();
         if (timing == null) return [];
         var shapeIdStr = shapeId.Value.ToString();
-        return timing.Descendants<CommonTimeNode>()
+        var allEffect = timing.Descendants<CommonTimeNode>()
             .Where(ctn =>
             {
                 if (!ctn.Descendants<ShapeTarget>().Any(st => st.ShapeId?.Value == shapeIdStr))
@@ -1915,6 +1983,61 @@ public partial class PowerPointHandler
                 return false;
             })
             .ToList();
+        // Dedupe by GroupId: one user-visible animation = one grpId. Chart
+        // per-element entrances fan out to N+1 click-groups all sharing one
+        // grpId; the user sees a single "By Series" / "By Category" entry in
+        // PowerPoint's Animation Pane. Pick the first cTn carrying a non-gridLegend
+        // step (so Get/Set surfaces an effect with a meaningful target), falling
+        // back to the first cTn when only a header is present.
+        // Shape animations (each with a unique grpId) collapse to one entry per
+        // grpId — behaviourally unchanged from the pre-fan-out enumeration.
+        // CONSISTENCY(animation-chart-fanout).
+        var byGroup = new Dictionary<uint, CommonTimeNode>();
+        var withoutGroup = new List<CommonTimeNode>();
+        foreach (var ctn in allEffect)
+        {
+            var gid = ctn.GroupId?.Value;
+            if (!gid.HasValue) { withoutGroup.Add(ctn); continue; }
+            if (!byGroup.TryGetValue(gid.Value, out var current))
+            {
+                byGroup[gid.Value] = ctn;
+                continue;
+            }
+            // Prefer a cTn whose target is NOT a gridLegend header (i.e. the
+            // first real data step) so PopulateAnimationNode surfaces the
+            // user-meaningful effect rather than the chart's frame fade-in.
+            bool currentIsHead = HasGridLegendTarget(current);
+            bool candIsHead = HasGridLegendTarget(ctn);
+            if (currentIsHead && !candIsHead) byGroup[gid.Value] = ctn;
+        }
+        // Preserve encounter order across the original list.
+        var result = new List<CommonTimeNode>();
+        var seenGroups = new HashSet<uint>();
+        foreach (var ctn in allEffect)
+        {
+            var gid = ctn.GroupId?.Value;
+            if (!gid.HasValue) continue;
+            if (!seenGroups.Add(gid.Value)) continue;
+            result.Add(byGroup[gid.Value]);
+        }
+        result.AddRange(withoutGroup);
+        return result;
+    }
+
+    // True iff the given effect cTn's animation targets are all the chart's
+    // gridLegend header (seriesIdx=-3, categoryIdx=-3, bldStep="gridLegend").
+    // Used to dedupe chart per-element click-group fan-outs so the user-visible
+    // animation refers to the first real data step, not the header.
+    private static bool HasGridLegendTarget(CommonTimeNode ctn)
+    {
+        // Drawing.Chart (a:chart) is the animation-target chart element, distinct
+        // from Drawing.Charts.Chart (c:chart) which is the chart reference. The
+        // a:chart element appears inside <p:graphicEl> in the timing tree only.
+        return ctn.Descendants<Drawing.Chart>().Any(c =>
+        {
+            var stepEnum = c.BuildStep?.Value;
+            return stepEnum != null && ((IEnumValue)stepEnum).Value == "gridLegend";
+        });
     }
 
     /// <summary>

@@ -208,17 +208,30 @@ public partial class PowerPointHandler
             return null;
         }
 
-        // BUG C-P-4: /slide[N]/shape[M]/animation[K] removal. Mirrors the
-        // enumeration model used by AddAnimation/Get/Set (EnumerateShape-
-        // AnimationCTns) so Add/Get/Set/Remove all share the same indexing.
-        var animRemoveMatch = Regex.Match(path, @"^/slide\[(\d+)\]/shape\[(\d+)\]/animation\[(\d+)\]$");
+        // BUG C-P-4: /slide[N]/(shape|chart)[M]/animation[K] removal. Mirrors
+        // the enumeration model used by AddAnimation/Get/Set so Add/Get/Set/Remove
+        // all share the same indexing. CONSISTENCY(animation-target): chart
+        // graphicFrames participate the same way shapes do.
+        var animRemoveMatch = Regex.Match(path, @"^/slide\[(\d+)\]/(shape|chart)\[(\d+)\]/animation\[(\d+)\]$");
         if (animRemoveMatch.Success)
         {
             var animSlideIdx = int.Parse(animRemoveMatch.Groups[1].Value);
-            var animShapeIdx = int.Parse(animRemoveMatch.Groups[2].Value);
-            var animKIdx = int.Parse(animRemoveMatch.Groups[3].Value);
-            var (animSlidePart, animShape) = ResolveShape(animSlideIdx, animShapeIdx);
-            RemoveSingleShapeAnimation(animSlidePart, animShape, animKIdx);
+            var animKind = animRemoveMatch.Groups[2].Value;
+            var animElIdx = int.Parse(animRemoveMatch.Groups[3].Value);
+            var animKIdx = int.Parse(animRemoveMatch.Groups[4].Value);
+            SlidePart animSlidePart;
+            OpenXmlElement animTargetEl;
+            if (animKind == "chart")
+            {
+                var (sp, gf, _, _) = ResolveChart(animSlideIdx, animElIdx);
+                animSlidePart = sp; animTargetEl = gf;
+            }
+            else
+            {
+                var (sp, sh) = ResolveShape(animSlideIdx, animElIdx);
+                animSlidePart = sp; animTargetEl = sh;
+            }
+            RemoveSingleShapeAnimation(animSlidePart, animTargetEl, animKIdx);
             GetSlide(animSlidePart).Save();
             return null;
         }

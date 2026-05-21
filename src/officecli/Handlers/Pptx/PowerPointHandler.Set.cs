@@ -231,8 +231,10 @@ public partial class PowerPointHandler
         var notesSetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/notes$");
         if (notesSetMatch.Success) return SetNotesByPath(notesSetMatch, properties);
 
-        // Try animation path: /slide[N]/shape[M]/animation[A]
-        var animSetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/shape\[(\d+)\]/animation\[(\d+)\]$");
+        // Try animation path: /slide[N]/(shape|chart)[M]/animation[A].
+        // CONSISTENCY(animation-target): chart graphicFrames route through the
+        // same SetShapeAnimationByPath which now accepts either element kind.
+        var animSetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/(shape|chart)\[(\d+)\]/animation\[(\d+)\]$");
         if (animSetMatch.Success) return SetShapeAnimationByPath(animSetMatch, properties);
 
         // CONSISTENCY(path-aliases): PPT accepts both long-form (`/run[N]`,

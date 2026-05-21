@@ -4,6 +4,28 @@ set -e
 REPO="iOfficeAI/OfficeCLI"
 BINARY_NAME="officecli"
 
+# Mirror primary, github fallback. The mirror is exercised first so issues
+# surface there fast; github is the final safety net. The mirror serves
+# through Cloudflare which has Hong Kong / Singapore PoPs reachable from
+# regions where raw.githubusercontent.com is slow or blocked.
+MIRROR_BASE="https://d.officecli.ai"
+GITHUB_RELEASE_BASE="https://github.com/$REPO/releases/latest/download"
+GITHUB_RAW_BASE="https://raw.githubusercontent.com/$REPO/main"
+
+# fetch_with_fallback <primary_url> <fallback_url> <output_path>
+# Returns 0 if either source delivered the file, non-zero if both failed.
+# Short connect-timeout on primary so a dead mirror doesn't add minutes
+# of stall before falling through.
+fetch_with_fallback() {
+    local primary="$1" fallback="$2" out="$3"
+    if curl -fsSL --max-time 300 --connect-timeout 5 "$primary" -o "$out" 2>/dev/null; then
+        echo "  (via mirror)"
+        return 0
+    fi
+    echo "  mirror unreachable, falling back to github..."
+    curl -fsSL --max-time 300 "$fallback" -o "$out" 2>/dev/null
+}
+
 # Detect platform
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
@@ -51,14 +73,18 @@ esac
 
 SOURCE=""
 
-# Step 1: Try downloading from GitHub
-DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$ASSET"
-CHECKSUM_URL="https://github.com/$REPO/releases/latest/download/SHA256SUMS"
+# Step 1: Try downloading (mirror first, github fallback)
 echo "Downloading OfficeCLI ($ASSET)..."
-if curl -fsSL "$DOWNLOAD_URL" -o "/tmp/$BINARY_NAME" 2>/dev/null; then
+if fetch_with_fallback \
+        "$MIRROR_BASE/releases/latest/download/$ASSET" \
+        "$GITHUB_RELEASE_BASE/$ASSET" \
+        "/tmp/$BINARY_NAME"; then
     # Verify checksum if available
     CHECKSUM_OK=false
-    if curl -fsSL "$CHECKSUM_URL" -o "/tmp/officecli-SHA256SUMS" 2>/dev/null; then
+    if fetch_with_fallback \
+            "$MIRROR_BASE/releases/latest/download/SHA256SUMS" \
+            "$GITHUB_RELEASE_BASE/SHA256SUMS" \
+            "/tmp/officecli-SHA256SUMS"; then
         EXPECTED=$(grep "$ASSET" "/tmp/officecli-SHA256SUMS" | awk '{print $1}')
         if [ -n "$EXPECTED" ]; then
             if command -v sha256sum >/dev/null 2>&1; then
@@ -173,7 +199,10 @@ if [ ! -f "$SKILL_MARKER" ]; then
 
     if [ -n "$SKILL_TARGETS" ]; then
         echo "Downloading officecli skill..."
-        if curl -fsSL "https://raw.githubusercontent.com/$REPO/main/SKILL.md" -o "/tmp/officecli-skill.md" 2>/dev/null; then
+        if fetch_with_fallback \
+                "$MIRROR_BASE/SKILL.md" \
+                "$GITHUB_RAW_BASE/SKILL.md" \
+                "/tmp/officecli-skill.md"; then
             for target in $SKILL_TARGETS; do
                 mkdir -p "$target"
                 cp "/tmp/officecli-skill.md" "$target/SKILL.md"

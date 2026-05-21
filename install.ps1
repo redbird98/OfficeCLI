@@ -2,20 +2,40 @@ $repo = "iOfficeAI/OfficeCLI"
 $asset = "officecli-win-x64.exe"
 $binary = "officecli.exe"
 
+# Mirror primary, github fallback. The mirror is exercised first so issues
+# surface there fast; github is the safety net when CF or the mirror is
+# unreachable.
+$mirrorBase = "https://d.officecli.ai"
+$githubReleaseBase = "https://github.com/$repo/releases/latest/download"
+$githubRawBase = "https://raw.githubusercontent.com/$repo/main"
+
+function Fetch-WithFallback {
+    param([string]$Primary, [string]$Fallback, [string]$OutFile)
+    try {
+        Invoke-WebRequest -Uri $Primary -OutFile $OutFile -TimeoutSec 30 -ErrorAction Stop
+        Write-Host "  (via mirror)"
+        return $true
+    } catch {
+        Write-Host "  mirror unreachable, falling back to github..."
+        try {
+            Invoke-WebRequest -Uri $Fallback -OutFile $OutFile -TimeoutSec 300 -ErrorAction Stop
+            return $true
+        } catch {
+            return $false
+        }
+    }
+}
+
 $source = $null
 
-# Step 1: Try downloading from GitHub
-$url = "https://github.com/$repo/releases/latest/download/$asset"
-$checksumUrl = "https://github.com/$repo/releases/latest/download/SHA256SUMS"
+# Step 1: Try downloading (mirror first, github fallback)
 $tempFile = "$env:TEMP\$binary"
 Write-Host "Downloading OfficeCLI..."
-try {
-    Invoke-WebRequest -Uri $url -OutFile $tempFile
+if (Fetch-WithFallback "$mirrorBase/releases/latest/download/$asset" "$githubReleaseBase/$asset" $tempFile) {
     # Verify checksum if available
     $checksumOk = $false
-    try {
-        $checksumFile = "$env:TEMP\officecli-SHA256SUMS"
-        Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumFile
+    $checksumFile = "$env:TEMP\officecli-SHA256SUMS"
+    if (Fetch-WithFallback "$mirrorBase/releases/latest/download/SHA256SUMS" "$githubReleaseBase/SHA256SUMS" $checksumFile) {
         $checksumContent = Get-Content $checksumFile
         $expectedLine = $checksumContent | Where-Object { $_ -match $asset }
         if ($expectedLine) {
@@ -31,7 +51,7 @@ try {
             }
         }
         Remove-Item -Force $checksumFile -ErrorAction SilentlyContinue
-    } catch {
+    } else {
         Write-Host "Checksum file not available, skipping verification."
     }
     $output = & $tempFile --version 2>&1
@@ -42,7 +62,7 @@ try {
         Write-Host "Downloaded file is not a valid OfficeCLI binary."
         Remove-Item -Force $tempFile -ErrorAction SilentlyContinue
     }
-} catch {
+} else {
     Write-Host "Download failed."
 }
 
@@ -115,15 +135,14 @@ if (-not (Test-Path $skillMarker)) {
     if ($skillTargets.Count -gt 0) {
         Write-Host "Downloading officecli skill..."
         $tempSkill = "$env:TEMP\officecli-skill.md"
-        try {
-            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$repo/main/SKILL.md" -OutFile $tempSkill
+        if (Fetch-WithFallback "$mirrorBase/SKILL.md" "$githubRawBase/SKILL.md" $tempSkill) {
             foreach ($target in $skillTargets) {
                 New-Item -ItemType Directory -Force -Path $target | Out-Null
                 Copy-Item -Force $tempSkill "$target\SKILL.md"
                 Write-Host "  Installed: $target\SKILL.md"
             }
             Remove-Item -Force $tempSkill -ErrorAction SilentlyContinue
-        } catch {}
+        }
     }
     New-Item -ItemType File -Force -Path $skillMarker | Out-Null
 }
