@@ -5,9 +5,7 @@ REPO="iOfficeAI/OfficeCLI"
 BINARY_NAME="officecli"
 
 # Mirror primary, github fallback. The mirror is exercised first so issues
-# surface there fast; github is the final safety net. The mirror serves
-# through Cloudflare which has Hong Kong / Singapore PoPs reachable from
-# regions where raw.githubusercontent.com is slow or blocked.
+# surface there fast; github is the final safety net.
 MIRROR_BASE="https://d.officecli.ai"
 GITHUB_RELEASE_BASE="https://github.com/$REPO/releases/latest/download"
 GITHUB_RAW_BASE="https://raw.githubusercontent.com/$REPO/main"
