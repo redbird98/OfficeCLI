@@ -504,7 +504,7 @@ internal static partial class ChartHelper
         "majorgridlinecolor", "majorgridlinewidth", "majorgridlinedash",
         "minorgridlinecolor", "minorgridlinewidth", "minorgridlinedash",
         "plotareafill", "plotfill", "chartareafill", "chartfill",
-        "linewidth", "linedash", "dash", "marker", "markers", "markersize",
+        "linewidth", "linedash", "dash", "marker", "markers", "markersize", "markercolor",
         "style", "styleid",
         "transparency", "opacity", "alpha",
         "gradient", "gradients", "gradientfill",
@@ -619,7 +619,7 @@ internal static partial class ChartHelper
     private static readonly HashSet<string> DeferredSeriesSubkeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "gradient", "gradientfill",
-        "smooth", "trendline", "marker", "markersize",
+        "smooth", "trendline", "marker", "markersize", "markercolor",
         "invertifneg", "invertifnegative",
         "errbars", "errorbars",
         "explosion", "explode",
