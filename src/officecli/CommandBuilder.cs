@@ -707,7 +707,7 @@ static partial class CommandBuilder
                 if (string.IsNullOrEmpty(item.Parent))
                     throw new ArgumentException("'add-part' command requires 'parent' field. Example: {\"command\": \"add-part\", \"parent\": \"/slide[1]\", \"type\": \"smartart\", \"props\": {\"data\": \"rId2\"}}");
                 if (string.IsNullOrEmpty(item.Type))
-                    throw new ArgumentException("'add-part' command requires 'type' field. Supported (pptx): chart, smartart, video, audio.");
+                    throw new ArgumentException("'add-part' command requires 'type' field. Supported (pptx): chart, smartart, video, audio, model3d.");
                 var (relId, partOut) = handler.AddPart(item.Parent, item.Type, props);
                 return $"Created {item.Type} part: relId={relId} path={partOut}";
             }

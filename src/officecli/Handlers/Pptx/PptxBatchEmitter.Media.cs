@@ -161,4 +161,63 @@ public static partial class PptxBatchEmitter
             });
         }
     }
+
+    // Phase 3c-3d. Mirrors EmitMediaForSlide (Phase 3c-media). Per slide,
+    // scan for <mc:AlternateContent> blocks whose <mc:Choice Requires="am3d">
+    // carries <am3d:model3d>; emit an `add-part model3d` row that creates
+    // the underlying ExtendedPart (.glb via AddExtendedPart, since the SDK
+    // has no typed Model3DPart) + thumbnail ImagePart with SOURCE rIds
+    // pinned via --prop. Then emit a raw-set append on
+    // /p:sld/p:cSld/p:spTree carrying the AlternateContent XML verbatim —
+    // the pinned rIds make the am3d:model3d r:embed, am3d:raster's
+    // am3d:blip r:embed, AND the Fallback p:pic's a:blip r:embed all
+    // resolve to the just-created parts.
+    //
+    // Slice handling: the AlternateContent block is canonicalised via the
+    // same NormalizeSlideRawSlice pass as smartart / media. The am3d
+    // namespace is NOT in the ambient list (p / a / r / mc), so its
+    // xmlns:am3d declaration travels with the slice on the <mc:Choice>
+    // — exactly the source form, so first- and post-replay rounds match.
+    internal static void EmitModel3dForSlide(PowerPointHandler ppt, int slideNum,
+                                              string slidePath, List<BatchItem> items,
+                                              SlideEmitContext ctx)
+    {
+        IReadOnlyList<PowerPointHandler.Model3dInfo> models;
+        try { models = ppt.GetModel3dOnSlide(slideNum); }
+        catch { return; }
+        if (models.Count == 0) return;
+
+        foreach (var m in models)
+        {
+            var props = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["data"] = Convert.ToBase64String(m.Model3dBytes),
+                ["content-type"] = m.Model3dContentType,
+                ["extension"] = m.Model3dExtension,
+                ["model3d-rid"] = m.Model3dRelId,
+                ["thumbnail-data"] = Convert.ToBase64String(m.ThumbnailBytes),
+                ["thumbnail-content-type"] = m.ThumbnailContentType,
+                ["thumbnail-rid"] = m.ThumbnailRelId,
+            };
+            items.Add(new BatchItem
+            {
+                Command = "add-part",
+                Parent = slidePath,
+                Type = "model3d",
+                Props = props,
+            });
+
+            string acCanon;
+            try { acCanon = NormalizeSlideRawSlice(m.AlternateContentXml); }
+            catch { acCanon = m.AlternateContentXml; }
+            items.Add(new BatchItem
+            {
+                Command = "raw-set",
+                Part = slidePath,
+                Xpath = "/p:sld/p:cSld/p:spTree",
+                Action = "append",
+                Xml = acCanon,
+            });
+        }
+    }
 }

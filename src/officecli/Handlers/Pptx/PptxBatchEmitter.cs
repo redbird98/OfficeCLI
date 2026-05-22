@@ -498,12 +498,19 @@ public static partial class PptxBatchEmitter
                     // (EmitPicture would only re-emit the picture shape
                     // without the media wiring).
                     break;
-                case "ole":
                 case "3dmodel":
                 case "model3d":
+                    // Phase 3c-3d: routed through EmitModel3dForSlide (a
+                    // per-slide pass at slide-end) so the <mc:AlternateContent>
+                    // wrapper (Choice am3d:model3d + Fallback p:pic) and
+                    // the underlying ExtendedPart .glb + thumbnail ImagePart
+                    // survive via add-part + raw-set passthrough. The typed
+                    // walk skips them here to avoid double-emit.
+                    break;
+                case "ole":
                 case "zoom":
                     // PR3+ scope. ProbeUnsupportedOnSlide already records the
-                    // OLE/3D markers via raw-XML sniff; this branch catches
+                    // OLE markers via raw-XML sniff; this branch catches
                     // the children that surfaced via the typed Get tree
                     // (when NodeBuilder learns to tag them).
                     ctx.Unsupported.Add(new UnsupportedWarning(
@@ -545,6 +552,12 @@ public static partial class PptxBatchEmitter
         // MediaDataPart + thumbnail ImagePart, mirroring the SmartArt
         // passthrough. The typed walk skipped video/audio children above.
         EmitMediaForSlide(ppt, slideNum, slidePath, items, ctx);
+
+        // Phase 3c-3d: am3d 3D-model AlternateContent blocks with their
+        // underlying ExtendedPart .glb + thumbnail ImagePart, mirroring
+        // the video/audio passthrough. The typed walk skipped
+        // 3dmodel/model3d children above.
+        EmitModel3dForSlide(ppt, slideNum, slidePath, items, ctx);
 
         // Notes body content — stub for PR1. Notes part presence does not
         // surface in the slide subtree's children today (notes live under
@@ -594,16 +607,11 @@ public static partial class PptxBatchEmitter
         // even if the slide carries a <p:video>/<p:audio> timing node, the
         // <p:pic> shape itself surfaces in the typed Get tree as
         // child.Type = "video"/"audio" and is now handled.
-        // Real-world 3D models live inside <mc:AlternateContent>/<mc:Choice
-        // Requires="am3d"> with element <am3d:model3d ...>. The legacy probe
-        // checked only the bare <p:model3d ...> form which never appears in
-        // PowerPoint-authored decks, so a 3D-bearing pptx silently produced
-        // no warning AND no semantic emit AND no raw-set — the part was
-        // dropped without trace. Match both forms.
-        if (xml.Contains("p:model3d", StringComparison.Ordinal) ||
-            xml.Contains("am3d:model3d", StringComparison.Ordinal) ||
-            xml.Contains("am3d=", StringComparison.Ordinal))
-            ctx.Unsupported.Add(new UnsupportedWarning("model3D", slidePath, "3D model present"));
+        // Phase 3c-3d: am3d:model3d AlternateContent blocks round-trip via
+        // EmitModel3dForSlide (add-part model3d + raw-set). No probe warning
+        // is raised — the slice owns the entire emit. The legacy <p:model3d>
+        // bare form never appears in PowerPoint-authored decks, so we no
+        // longer match it either.
 
         // Exotic transitions (morph, p15:prstTrans gallery, p14:* like flip/
         // gallery/conveyor) and exotic animation timing (motion paths,
