@@ -1114,7 +1114,7 @@ public partial class WordHandler
                 pprChange.Date = pTcDt;
             pprChange.Id = !string.IsNullOrEmpty(pTcId)
                 ? pTcId
-                : (GenerateParaId().GetHashCode() & 0x7FFFFFFF).ToString();
+                : GenerateRevisionId();
             pprChange.AppendChild(new PreviousParagraphProperties());
             pProps.AppendChild(pprChange);
         }
@@ -1341,6 +1341,21 @@ public partial class WordHandler
         if (trackChangeDate == null) properties.TryGetValue("trackchange.date", out trackChangeDate);
         properties.TryGetValue("trackChange.id", out trackChangeId);
         if (trackChangeId == null) properties.TryGetValue("trackchange.id", out trackChangeId);
+
+        // High-level inference: if a trackChange.* sub-key is present (author/
+        // date/id) without an explicit trackChange=<kind> literal, default to
+        // "ins" — `add run + trackChange.author=X` means "create a new run as
+        // a tracked insertion". Mirrors Word UI: any edit while track-changes
+        // is on becomes a revision; for an `add run` op the only natural
+        // revision kind is insertion. Format / moveFrom / moveTo still
+        // require the explicit literal because they're not implied by `add`.
+        if (string.IsNullOrEmpty(trackChangeKind)
+            && (!string.IsNullOrEmpty(trackChangeAuthor)
+                || !string.IsNullOrEmpty(trackChangeDate)
+                || !string.IsNullOrEmpty(trackChangeId)))
+        {
+            trackChangeKind = "ins";
+        }
 
         var newRun = new Run();
         var newRProps = new RunProperties();
@@ -1862,7 +1877,7 @@ public partial class WordHandler
                 rprChange.Date = tcfDate;
             rprChange.Id = !string.IsNullOrEmpty(trackChangeId)
                 ? trackChangeId
-                : (GenerateParaId().GetHashCode() & 0x7FFFFFFF).ToString();
+                : GenerateRevisionId();
             // Schema: w:rPrChange child of w:rPr; ECMA-376 §17.13.5.31.
             // Empty inner rPr is schema-valid (means "no recorded prior
             // property set" — minimal marker form).
@@ -1895,9 +1910,10 @@ public partial class WordHandler
                 }
                 else
                 {
-                    // Each ins/del needs a unique w:id. Reuse the paraId
-                    // counter to avoid colliding with anything Word writes.
-                    var fallbackId = (GenerateParaId().GetHashCode() & 0x7FFFFFFF).ToString();
+                    // Each ins/del needs a unique w:id. Allocated from the
+                    // shared paraId pool (decimal form), guaranteed unique
+                    // against all paraId/textId/revision ids in the document.
+                    var fallbackId = GenerateRevisionId();
                     if (wrapper is InsertedRun insW4) insW4.Id = fallbackId;
                     else if (wrapper is DeletedRun delW4) delW4.Id = fallbackId;
                 }

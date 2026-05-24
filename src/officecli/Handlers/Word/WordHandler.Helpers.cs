@@ -3627,6 +3627,43 @@ public partial class WordHandler
     }
 
     /// <summary>
+    /// Generate a unique decimal revision id (w:id on w:ins/w:del/w:moveFrom/
+    /// w:moveTo/w:rPrChange/w:pPrChange/w:sectPrChange/w:tblPrChange/...).
+    /// Reuses the paraId allocator (counter + _usedParaIds HashSet) so
+    /// revision ids are globally unique across the document and never collide
+    /// with paraId/textId or other revision ids ever allocated in this handler
+    /// instance. Replaces the old `(GenerateParaId().GetHashCode() &amp; 0x7FFFFFFF)`
+    /// fallback whose hash output was not actually unique.
+    /// </summary>
+    private string GenerateRevisionId()
+    {
+        // Same allocator as paraId, formatted as decimal (OOXML w:id is xsd:integer).
+        var hexId = GenerateParaId();
+        return int.Parse(hexId, System.Globalization.NumberStyles.HexNumber)
+                  .ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// Enumerate every part root that can hold revision elements
+    /// (body + headers + footers + footnotes + endnotes + comments).
+    /// Mirrors the part fan-out in EnsureAllParaIds for the paraId scan.
+    /// Used by both EnsureAllParaIds (revision id pre-registration) and any
+    /// future revision-iteration logic.
+    /// </summary>
+    private static IEnumerable<OpenXmlElement> EnumerateRevisionRoots(MainDocumentPart mainPart)
+    {
+        if (mainPart.Document != null) yield return mainPart.Document;
+        foreach (var hp in mainPart.HeaderParts)
+            if (hp.Header != null) yield return hp.Header;
+        foreach (var fp in mainPart.FooterParts)
+            if (fp.Footer != null) yield return fp.Footer;
+        if (mainPart.FootnotesPart?.Footnotes != null) yield return mainPart.FootnotesPart.Footnotes;
+        if (mainPart.EndnotesPart?.Endnotes != null) yield return mainPart.EndnotesPart.Endnotes;
+        if (mainPart.WordprocessingCommentsPart?.Comments != null)
+            yield return mainPart.WordprocessingCommentsPart.Comments;
+    }
+
+    /// <summary>
     /// Assign paraId and textId to a paragraph if not already set.
     /// </summary>
     private void AssignParaId(Paragraph para)
@@ -3696,6 +3733,37 @@ public partial class WordHandler
                 _usedParaIds.Add(para.TextId.Value);
                 if (int.TryParse(para.TextId.Value, System.Globalization.NumberStyles.HexNumber, null, out var numId) && numId > maxId)
                     maxId = numId;
+            }
+        }
+
+        // Also collect existing revision w:id values (w:ins/w:del/w:moveFrom/
+        // w:moveTo/w:rPrChange/w:pPrChange/w:sectPrChange/w:tblPrChange and
+        // bare <w:ins>/<w:del> markers inside trPr/tcPr) into the same used-id
+        // pool. Revision ids and paraIds live in different XML attribute slots
+        // so there's no XML collision, but sharing one pool means
+        // GenerateRevisionId() never picks a number that's already taken by
+        // either paraId or another revision id. Decimal revision ids are
+        // converted to the same 8-char hex form the pool uses.
+        foreach (var rootElem in EnumerateRevisionRoots(mainPart))
+        {
+            foreach (var elem in rootElem.Descendants())
+            {
+                if (elem is InsertedRun or DeletedRun or MoveFromRun or MoveToRun
+                    or RunPropertiesChange or ParagraphPropertiesChange
+                    or SectionPropertiesChange or TablePropertiesChange
+                    or TableCellPropertiesChange or TableRowPropertiesChange
+                    or Inserted or Deleted or MoveFrom or MoveTo)
+                {
+                    var idAttr = elem.GetAttributes()
+                        .FirstOrDefault(a => a.LocalName == "id");
+                    if (idAttr.Value != null
+                        && int.TryParse(idAttr.Value, System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture, out var rid))
+                    {
+                        _usedParaIds.Add(rid.ToString("X8"));
+                        if (rid > maxId) maxId = rid;
+                    }
+                }
             }
         }
 
