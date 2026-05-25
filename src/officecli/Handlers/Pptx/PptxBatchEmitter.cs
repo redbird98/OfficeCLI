@@ -763,6 +763,17 @@ public static partial class PptxBatchEmitter
         if (string.IsNullOrEmpty(sliceXml) || !sliceXml.StartsWith("<")) return sliceXml;
         try
         {
+            // The slice is extracted as a raw substring of /p:sld and inherits
+            // its ambient namespace bindings from the slide root — so the
+            // standalone slice text may use prefixes (mc, p, a, r) that aren't
+            // declared on its own root. XDocument.Parse would then throw an
+            // unbound-prefix error and the whole normalize step would silently
+            // bail (catch below), leaving slice bytes drifting between rounds.
+            // Inject the ambient decls onto the slice root tag so parsing
+            // succeeds. The later "drop ambient from root tag" pass strips
+            // them again post-serialize, so the emitted slice still travels
+            // without redundant decls.
+            sliceXml = EnsureAmbientXmlnsOnRootTag(sliceXml);
             var doc = System.Xml.Linq.XDocument.Parse(sliceXml);
             if (doc.Root == null) return sliceXml;
             var ambient = new (string Prefix, System.Xml.Linq.XNamespace Ns)[]
@@ -796,6 +807,37 @@ public static partial class PptxBatchEmitter
                 // Stamp the canonical prefix decl onto the root.
                 doc.Root.SetAttributeValue(System.Xml.Linq.XNamespace.Xmlns + prefix, ns.NamespaceName);
             }
+            // Lift extension prefix declarations (p14, p15, p159, am3d, …) up
+            // to the slice root if any descendant binds them and the root does
+            // not already declare them. The SDK normalizes namespace decls to
+            // the highest needed ancestor on serialize, so a slice that
+            // declares xmlns:p14 on <p:transition> on pass 1 round-trips
+            // through the SDK and comes back with xmlns:p14 on
+            // <mc:AlternateContent> on pass 2 — same semantics, different
+            // bytes. Mirror that transform here so pass-1 and pass-2 slices
+            // are byte-equal. Only lift prefixes that are NOT already in the
+            // ambient set (those were handled above) and only the FIRST
+            // binding seen for each prefix (per-prefix singleton — extensions
+            // never use multiple URIs in one slice).
+            var ambientPrefixes = new HashSet<string>(StringComparer.Ordinal) { "p", "a", "r", "mc" };
+            var liftedPrefixes = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var desc in doc.Root.DescendantsAndSelf())
+            {
+                var nsDecls = desc.Attributes()
+                    .Where(a => a.IsNamespaceDeclaration && !ambientPrefixes.Contains(a.Name.LocalName))
+                    .ToList();
+                foreach (var a in nsDecls)
+                {
+                    var prefix = a.Name.LocalName;
+                    if (!liftedPrefixes.ContainsKey(prefix))
+                        liftedPrefixes[prefix] = a.Value;
+                }
+            }
+            foreach (var (prefix, uri) in liftedPrefixes)
+            {
+                if (doc.Root.GetNamespaceOfPrefix(prefix) != null) continue;
+                doc.Root.SetAttributeValue(System.Xml.Linq.XNamespace.Xmlns + prefix, uri);
+            }
             // Drop redundant prefix decls on descendants that match the root's
             // (mirrors CanonicalizeRawXml but on the post-rewrite tree).
             var rootDecls = doc.Root.Attributes()
@@ -824,6 +866,46 @@ public static partial class PptxBatchEmitter
             return StripAmbientXmlnsFromRootTag(serialized);
         }
         catch { return sliceXml; }
+    }
+
+    private static string EnsureAmbientXmlnsOnRootTag(string xml)
+    {
+        if (string.IsNullOrEmpty(xml) || xml[0] != '<') return xml;
+        var gtIdx = xml.IndexOf('>');
+        if (gtIdx <= 0) return xml;
+        var head = xml[..gtIdx];
+        var tail = xml[gtIdx..];
+        // For each ambient prefix that appears anywhere in the slice text but
+        // is NOT already declared on the root tag, inject the canonical
+        // xmlns:<prefix>="<uri>" pair. Pattern match keeps the helper text-
+        // only so we don't need a parse for the parse precondition.
+        var ambientUris = new (string Prefix, string Uri)[]
+        {
+            ("p",  "http://schemas.openxmlformats.org/presentationml/2006/main"),
+            ("a",  "http://schemas.openxmlformats.org/drawingml/2006/main"),
+            ("r",  "http://schemas.openxmlformats.org/officeDocument/2006/relationships"),
+            ("mc", "http://schemas.openxmlformats.org/markup-compatibility/2006"),
+        };
+        foreach (var (prefix, uri) in ambientUris)
+        {
+            // Already declared somewhere in the head? Look for xmlns:<prefix>=.
+            if (head.Contains($"xmlns:{prefix}=\"", StringComparison.Ordinal)) continue;
+            // Used by an element or attribute name in the slice?
+            if (!xml.Contains($"<{prefix}:", StringComparison.Ordinal)
+                && !xml.Contains($" {prefix}:", StringComparison.Ordinal)) continue;
+            // Inject xmlns:<prefix>="<uri>" inside the root tag, before the '>'.
+            // Be defensive: head might be self-closing ("<tag/>"); place
+            // declaration before the trailing /  if present.
+            if (head.EndsWith('/'))
+            {
+                head = head[..^1] + $" xmlns:{prefix}=\"{uri}\"" + "/";
+            }
+            else
+            {
+                head = head + $" xmlns:{prefix}=\"{uri}\"";
+            }
+        }
+        return head + tail;
     }
 
     private static string StripAmbientXmlnsFromRootTag(string xml)
