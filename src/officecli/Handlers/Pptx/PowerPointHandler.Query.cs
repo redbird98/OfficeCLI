@@ -735,6 +735,7 @@ public partial class PowerPointHandler
             var shapeTree = GetSlide(phSlidePart).CommonSlideData?.ShapeTree;
             var shapeIdx = shapeTree?.Elements<Shape>().ToList().IndexOf(phShape) ?? 0;
             var node = ShapeToNode(phShape, phSlideIdx, shapeIdx + 1, depth, phSlidePart);
+            RebaseDescendantPaths(node, node.Path, path);
             node.Path = path;
             node.Type = "placeholder";
             if (ph?.Type?.HasValue == true) node.Format["phType"] = ph.Type.InnerText;

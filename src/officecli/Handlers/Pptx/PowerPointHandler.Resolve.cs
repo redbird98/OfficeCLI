@@ -413,11 +413,24 @@ public partial class PowerPointHandler
             .GetFirstChild<PlaceholderShape>()!;
 
         var node = ShapeToNode(shape, slideIdx, phIdx, depth);
-        node.Path = $"/slide[{slideIdx}]/placeholder[{phIdx}]";
+        var phPath = $"/slide[{slideIdx}]/placeholder[{phIdx}]";
+        RebaseDescendantPaths(node, node.Path, phPath);
+        node.Path = phPath;
         node.Type = "placeholder";
         if (ph.Type?.HasValue == true) node.Format["phType"] = ph.Type.InnerText;
         if (ph.Index?.HasValue == true) node.Format["phIndex"] = ph.Index.Value;
         return node;
+    }
+
+    private static void RebaseDescendantPaths(DocumentNode node, string oldPrefix, string newPrefix)
+    {
+        if (oldPrefix == newPrefix) return;
+        foreach (var child in node.Children)
+        {
+            if (child.Path.StartsWith(oldPrefix, StringComparison.Ordinal))
+                child.Path = newPrefix + child.Path.Substring(oldPrefix.Length);
+            RebaseDescendantPaths(child, oldPrefix, newPrefix);
+        }
     }
 
     // ==================== Media Timing Lookup ====================
