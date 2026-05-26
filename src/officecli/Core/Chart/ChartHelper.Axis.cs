@@ -259,8 +259,9 @@ internal static partial class ChartHelper
                 case "crosses":
                     if (normalizedRole == "value2" && targetAxis is OpenXmlCompositeElement crsAx2)
                     {
+                        // Same-type only — see ChartHelper.Setter.cs case "crosses"
+                        // for the mutual-remove bug rationale.
                         crsAx2.RemoveAllChildren<C.Crosses>();
-                        crsAx2.RemoveAllChildren<C.CrossesAt>();
                         var crossVal = value.ToLowerInvariant() switch
                         {
                             "max" => C.CrossesValues.Maximum,
@@ -268,8 +269,9 @@ internal static partial class ChartHelper
                             _ => C.CrossesValues.AutoZero
                         };
                         var newCrosses = new C.Crosses { Val = crossVal };
-                        var cbBefore = crsAx2.GetFirstChild<C.CrossBetween>();
-                        if (cbBefore != null) crsAx2.InsertBefore(newCrosses, cbBefore);
+                        var crsAnchor = crsAx2.GetFirstChild<C.CrossesAt>() as OpenXmlElement
+                            ?? crsAx2.GetFirstChild<C.CrossBetween>() as OpenXmlElement;
+                        if (crsAnchor != null) crsAx2.InsertBefore(newCrosses, crsAnchor);
                         else crsAx2.AppendChild(newCrosses);
                         directlyHandled.Add(key);
                     }
@@ -282,7 +284,7 @@ internal static partial class ChartHelper
                 case "crossesat":
                     if (normalizedRole == "value2" && targetAxis is OpenXmlCompositeElement crsAtAx2)
                     {
-                        crsAtAx2.RemoveAllChildren<C.Crosses>();
+                        // Same-type only.
                         crsAtAx2.RemoveAllChildren<C.CrossesAt>();
                         var newCrossesAt = new C.CrossesAt { Val = ParseHelpers.SafeParseDouble(value, "crossesAt") };
                         var cbBefore2 = crsAtAx2.GetFirstChild<C.CrossBetween>();

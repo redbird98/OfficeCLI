@@ -1454,8 +1454,13 @@ internal static partial class ChartHelper
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     var valAx = plotArea2?.GetFirstChild<C.ValueAxis>();
                     if (valAx == null) { unsupported.Add(key); break; }
+                    // Remove only same-type predecessors. The pre-fix code also
+                    // removed C.CrossesAt here, which silently wiped a sibling
+                    // crossesAt value when both keys arrived in the same Set
+                    // call (e.g. crosses + crossesAt + crossBetween together):
+                    // the second branch reset both children and the first
+                    // branch's write disappeared.
                     valAx.RemoveAllChildren<C.Crosses>();
-                    valAx.RemoveAllChildren<C.CrossesAt>();
                     var crossVal = value.ToLowerInvariant() switch
                     {
                         "max" => C.CrossesValues.Maximum,
@@ -1463,12 +1468,12 @@ internal static partial class ChartHelper
                         _ => C.CrossesValues.AutoZero
                     };
                     // CONSISTENCY(chart/crosses-schema-order): CT_ValAx requires
-                    // crossAx → crosses → crossBetween. BuildValueAxis emits
-                    // CrossBetween last; AppendChild here would land after it and
-                    // PowerPoint silently rejects the file. Insert before CrossBetween.
+                    // crossAx → crosses → crossesAt → crossBetween. Insert
+                    // before whichever later sibling exists.
                     var newCrosses = new C.Crosses { Val = crossVal };
-                    var cbBefore = valAx.GetFirstChild<C.CrossBetween>();
-                    if (cbBefore != null) valAx.InsertBefore(newCrosses, cbBefore);
+                    var crossesAnchor = valAx.GetFirstChild<C.CrossesAt>() as OpenXmlElement
+                        ?? valAx.GetFirstChild<C.CrossBetween>() as OpenXmlElement;
+                    if (crossesAnchor != null) valAx.InsertBefore(newCrosses, crossesAnchor);
                     else valAx.AppendChild(newCrosses);
                     break;
                 }
@@ -1478,12 +1483,14 @@ internal static partial class ChartHelper
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     var valAx = plotArea2?.GetFirstChild<C.ValueAxis>();
                     if (valAx == null) { unsupported.Add(key); break; }
-                    valAx.RemoveAllChildren<C.Crosses>();
+                    // Same-type only — see comment on the crosses branch above.
                     valAx.RemoveAllChildren<C.CrossesAt>();
-                    // CONSISTENCY(chart/crosses-schema-order): same as crosses above.
                     var newCrossesAt = new C.CrossesAt { Val = ParseHelpers.SafeParseDouble(value, "crossesAt") };
-                    var cbBefore2 = valAx.GetFirstChild<C.CrossBetween>();
-                    if (cbBefore2 != null) valAx.InsertBefore(newCrossesAt, cbBefore2);
+                    // CONSISTENCY(chart/crosses-schema-order): crossesAt sits
+                    // between crosses and crossBetween. Insert before
+                    // crossBetween if present; otherwise append.
+                    var crossAtAnchor = valAx.GetFirstChild<C.CrossBetween>();
+                    if (crossAtAnchor != null) valAx.InsertBefore(newCrossesAt, crossAtAnchor);
                     else valAx.AppendChild(newCrossesAt);
                     break;
                 }
@@ -3084,14 +3091,20 @@ internal static partial class ChartHelper
         // (sysDashDot / lgDashDot / lgDashDotDot / sysDashDotDot) — the
         // Reader emits the camelCase form to mirror the schema spelling,
         // so dump→replay would otherwise hit the `_ => Solid` fallback.
+        //
+        // Friendly aliases (dash / dot / dashDot / longDash) all map to the
+        // sys*/lg* variants per schemas/help/_shared/chart-series.json lineDash:
+        // "Set accepts user-friendly aliases; Get returns OOXML token
+        // (sysDash/sysDot/sysDashDot/lgDash). 'solid' is the only round-trip-
+        // stable value." The literal Dash/Dot/DashDot enum members are
+        // obscure variants Excel rarely emits — friendly callers expect the
+        // sys* result, not the literal one.
         return dash.ToLowerInvariant() switch
         {
             "solid" => Drawing.PresetLineDashValues.Solid,
-            "dot" => Drawing.PresetLineDashValues.Dot,
-            "sysdot" => Drawing.PresetLineDashValues.SystemDot,
-            "dash" => Drawing.PresetLineDashValues.Dash,
-            "sysdash" => Drawing.PresetLineDashValues.SystemDash,
-            "dashdot" => Drawing.PresetLineDashValues.DashDot,
+            "dot" or "sysdot" => Drawing.PresetLineDashValues.SystemDot,
+            "dash" or "sysdash" => Drawing.PresetLineDashValues.SystemDash,
+            "dashdot" or "sysdashdot" or "sysdash_dot" => Drawing.PresetLineDashValues.SystemDashDot,
             // dashDotDot has no native CT_PresetLineDashValues enum member —
             // ECMA-376 (DrawingML) defines only dash/dashDot plus the sys*/lg*
             // dot-dot variants. Tolerate the natural extrapolation as an
@@ -3101,7 +3114,6 @@ internal static partial class ChartHelper
             // shape/connector lineDash so users know Get readback will be
             // sysDashDotDot, not dashDotDot.
             "dashdotdot" => Drawing.PresetLineDashValues.SystemDashDotDot,
-            "sysdashdot" or "sysdash_dot" => Drawing.PresetLineDashValues.SystemDashDot,
             "sysdashdotdot" or "sysdash_dot_dot" => Drawing.PresetLineDashValues.SystemDashDotDot,
             "longdash" or "lgdash" => Drawing.PresetLineDashValues.LargeDash,
             "longdashdot" or "lgdashdot" => Drawing.PresetLineDashValues.LargeDashDot,
