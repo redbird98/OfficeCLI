@@ -250,8 +250,6 @@ public partial class ExcelHandler : IDocumentHandler
     {
         Modified = true;
         if (partPath == null) throw new ArgumentNullException(nameof(partPath));
-        if (xpath == null) throw new ArgumentNullException(nameof(xpath));
-        if (action == null) throw new ArgumentNullException(nameof(action));
         var workbookPart = _doc.WorkbookPart
             ?? throw new InvalidOperationException("No workbook part");
 

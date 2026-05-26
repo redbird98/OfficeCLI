@@ -204,8 +204,6 @@ public partial class WordHandler : IDocumentHandler
     {
         Modified = true;
         if (partPath == null) throw new ArgumentNullException(nameof(partPath));
-        if (xpath == null) throw new ArgumentNullException(nameof(xpath));
-        if (action == null) throw new ArgumentNullException(nameof(action));
         var mainPart = _doc.MainDocumentPart
             ?? throw new InvalidOperationException("No main document part");
 
