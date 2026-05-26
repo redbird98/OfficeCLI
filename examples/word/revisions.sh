@@ -259,7 +259,7 @@ echo "  -> Section 7: find + revision (Word-style Find&Replace with Track Change
 officecli add "$DOCX" /body --type paragraph --prop text="7. Find + Replace + Revision" --prop style=Heading2
 
 # Helper: add a paragraph and echo the path the handler assigned (e.g.
-# /body/p[@paraId=00100012]) so subsequent `set --prop find=…` calls don't
+# /body/p[@paraId=00100012]) so subsequent `set --find …` calls don't
 # need to hand-count positional indices. The handler-assigned paraId path
 # is stable across content shifts in the body, unlike /body/p[N] which
 # drifts every time the section count above changes.
@@ -269,7 +269,7 @@ add_para_capture() {
 }
 
 # 7a. find + replace + revision via REGEX — track only the FIRST occurrence
-#     of "fox", leave subsequent ones alone. The bare `find=fox` would match
+#     of "fox", leave subsequent ones alone. The bare `--find fox` would match
 #     every occurrence; controlling which match to track is a job for the
 #     regex pattern.
 #
@@ -283,9 +283,9 @@ add_para_capture() {
 #           tracked: del+ins          untouched
 P7A=$(add_para_capture "7a. The fox jumped and another fox ran fast. (regex tracks only the 1st 'fox'→'cat')")
 officecli set "$DOCX" "$P7A" \
-    --prop 'find=(?<!fox.*)fox' \
+    --find '(?<!fox.*)fox' \
     --prop regex=true \
-    --prop replace=cat \
+    --replace cat \
     --prop revision.author=Iris \
     --prop revision.date=2026-05-25T10:50:00Z
 
@@ -293,7 +293,7 @@ officecli set "$DOCX" "$P7A" \
 #     text keeps its content; each match becomes a tracked format change.
 P7B=$(add_para_capture "7b. Color red apples and the red barn. (tracked bold on every 'red')")
 officecli set "$DOCX" "$P7B" \
-    --prop find=red \
+    --find red \
     --prop bold=true \
     --prop revision.author=Jack \
     --prop revision.date=2026-05-25T10:51:00Z
@@ -302,8 +302,8 @@ officecli set "$DOCX" "$P7B" \
 #     original rPr from the matched text AND has the new format layered on.
 P7C=$(add_para_capture "7c. Replace bar with FOO. (find target → bold-green replacement)")
 officecli set "$DOCX" "$P7C" \
-    --prop find=bar \
-    --prop replace=BAZ \
+    --find bar \
+    --replace BAZ \
     --prop bold=true \
     --prop font.color=00B050 \
     --prop revision.author=Kelly \
@@ -312,7 +312,7 @@ officecli set "$DOCX" "$P7C" \
 # 7d. find + regex + revision — multiple matches each get their own marker.
 P7D=$(add_para_capture "7d. Prices: \$100, \$250, \$999 (regex \\\$\\d+ → tracked bold)")
 officecli set "$DOCX" "$P7D" \
-    --prop 'find=\$\d+' \
+    --find '\$\d+' \
     --prop regex=true \
     --prop bold=true \
     --prop revision.author=Liam \
@@ -332,8 +332,8 @@ officecli add "$DOCX" /body --type paragraph --prop text="8. Find variants" --pr
 #     Useful for "scrub this token from the doc but keep an audit trail".
 P8A=$(add_para_capture "8a. Remove the OBSOLETE token here. (delete-only via find — no insertion)")
 officecli set "$DOCX" "$P8A" \
-    --prop find=OBSOLETE \
-    --prop replace= \
+    --find OBSOLETE \
+    --replace "" \
     --prop revision.author=Mira \
     --prop revision.date=2026-05-25T10:54:00Z
 
@@ -342,7 +342,7 @@ officecli set "$DOCX" "$P8A" \
 #     but filtered to ONLY the paragraphs whose text actually matched the find.
 P8B=$(add_para_capture "8b. This paragraph contains MARK so its alignment gets tracked-centered.")
 officecli set "$DOCX" "$P8B" \
-    --prop find=MARK \
+    --find MARK \
     --prop align=center \
     --prop revision.author=Nora \
     --prop revision.date=2026-05-25T10:55:00Z
