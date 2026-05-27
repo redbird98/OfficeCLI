@@ -69,7 +69,7 @@ public partial class ExcelHandler
             case "cell":
                 return AddCell(parentPath, type, position, properties);
 
-            case "namedrange" or "definedname":
+            case "namedrange" or "definedname" or "name":
                 return AddNamedRange(parentPath, type, position, properties);
 
             case "comment" or "note":
