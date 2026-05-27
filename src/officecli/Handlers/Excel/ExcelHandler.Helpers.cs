@@ -1139,10 +1139,25 @@ public partial class ExcelHandler
             var cell = firstSparkline.ReferenceSequence?.Text ?? "";
             node.Format["location"] = cell;
 
-            // Strip sheet prefix from range (Sheet1!A1:E1 → A1:E1)
+            // Strip the sheet prefix only when it names this sparkline's OWN
+            // sheet (Add auto-qualifies a bare 'A1:E1' to 'Sheet1!A1:E1'), so
+            // same-sheet ranges read back in the bare form the user supplied.
+            // A prefix naming a DIFFERENT sheet is a genuine cross-sheet
+            // qualifier and must be preserved (R3-8) so the range stays
+            // unambiguous and round-trips.
             var formulaText = firstSparkline.Formula?.Text ?? "";
             var excl = formulaText.IndexOf('!');
-            node.Format["dataRange"] = excl >= 0 ? formulaText[(excl + 1)..] : formulaText;
+            if (excl >= 0)
+            {
+                var prefix = formulaText[..excl].Trim('\'');
+                node.Format["dataRange"] = prefix.Equals(sheetName, StringComparison.OrdinalIgnoreCase)
+                    ? formulaText[(excl + 1)..]
+                    : formulaText;
+            }
+            else
+            {
+                node.Format["dataRange"] = formulaText;
+            }
         }
 
         return node;
