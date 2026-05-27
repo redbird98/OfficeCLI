@@ -139,6 +139,20 @@ public partial class WordHandler
             if (revNode != null) return revNode;
         }
 
+        // Document-level singletons reject an indexed form /<type>[N] with a
+        // redirect, rather than silently ignoring the index (settings/styles/
+        // numbering in NavigateToElement) or emitting a bare "Path not found"
+        // (watermark/docDefaults). Mirrors the pptx notes[N]/theme[N] and xlsx
+        // workbook[N] redirects. The canonical path is /<type> with no index.
+        var singletonGuard = System.Text.RegularExpressions.Regex.Match(
+            path, @"^/(watermark|settings|styles|numbering|docDefaults)\[\d+\]$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (singletonGuard.Success)
+        {
+            var t = singletonGuard.Groups[1].Value;
+            throw new ArgumentException($"{t} is a singleton; use /{t} (no index).");
+        }
+
         // Handle /watermark path
         if (path.Equals("/watermark", StringComparison.OrdinalIgnoreCase))
         {

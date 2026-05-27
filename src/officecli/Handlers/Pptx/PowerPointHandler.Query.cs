@@ -1032,6 +1032,19 @@ public partial class PowerPointHandler
             return giNode;
         }
 
+        // theme is a singleton — reject an indexed /theme[N] with a redirect
+        // rather than letting it fall to the slide-path fallback below, which
+        // would wrongly claim the path must start with /slide[N]. Mirrors the
+        // notes[N] redirect and the xlsx workbook[N] / docx watermark[N] ones.
+        if (Regex.IsMatch(path, @"^/theme\[\d+\]$", RegexOptions.IgnoreCase))
+            throw new ArgumentException("theme is a singleton; use /theme (no index).");
+
+        // The pptx document root is "/" (there is no "/presentation" node). An
+        // indexed /presentation[N] would otherwise hit the same wrong slide-path
+        // fallback as /theme[N]; redirect to the root instead.
+        if (Regex.IsMatch(path, @"^/presentation\[\d+\]$", RegexOptions.IgnoreCase))
+            throw new ArgumentException("presentation is the pptx root; use / (no index).");
+
         // Parse /slide[N] or /slide[N]/shape[M]
         var match = Regex.Match(path, @"^/slide\[(\d+)\](?:/(\w+)\[(\d+)\])?$");
         if (!match.Success)
@@ -1119,6 +1132,16 @@ public partial class PowerPointHandler
                 throw new ArgumentException($"Comment {elementIdx} not found (total: {comments.Count})");
             return CommentToNode(targetSlidePart, slideIdx, comments[elementIdx - 1], elementIdx);
         }
+
+        // Notes are a singleton per slide, stored in the NotesSlidePart — never
+        // in the ShapeTree. The canonical path is /slide[N]/notes (no index),
+        // handled earlier. An indexed /slide[N]/notes[K] would otherwise fall to
+        // the generic ShapeTree fallback below and emit a doubly-misleading
+        // "notes K not found (total: 0). Slide N contains: ..." (notes exist;
+        // they just aren't ShapeTree children). Redirect to the canonical form.
+        if (elementType.Equals("notes", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException(
+                $"notes is a singleton per slide; use /slide[{slideIdx}]/notes (no index).");
 
         // Modern p188 threaded comments live in PowerPointCommentPart(s).
         if (elementType == "moderncomment")

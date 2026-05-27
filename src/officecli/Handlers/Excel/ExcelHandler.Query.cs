@@ -216,6 +216,15 @@ public partial class ExcelHandler
         // Parse path: /SheetName or /SheetName/A1 or /SheetName/A1:D10
         var segments = path.TrimStart('/').Split('/', 2);
         var sheetNameFromPath = segments[0];
+        // workbook is a singleton at the document root — reject an indexed
+        // /workbook[N] with a redirect rather than treating "workbook[N]" as a
+        // sheet name (which fires a misleading SheetNotFoundException). Mirrors
+        // the pptx notes[N]/theme[N] and docx watermark[N] redirects.
+        if (Regex.IsMatch(sheetNameFromPath, @"^workbook\[\d+\]$", RegexOptions.IgnoreCase))
+            throw new ArgumentException("workbook is a singleton; use /workbook or / (no index).");
+        // docProps is a document-level part, not a sheet — same redirect class.
+        if (Regex.IsMatch(sheetNameFromPath, @"^docProps\[\d+\]$", RegexOptions.IgnoreCase))
+            throw new ArgumentException("docProps is a singleton; use /docProps or / (no index).");
         var worksheet = FindWorksheet(sheetNameFromPath);
         if (worksheet == null)
             throw SheetNotFoundException(sheetNameFromPath);
