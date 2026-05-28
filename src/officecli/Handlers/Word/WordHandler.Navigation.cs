@@ -1302,6 +1302,24 @@ public partial class WordHandler
             node.Text = GetFootnoteText(fnEl);
             if (fnEl.Id?.Value != null) node.Format["id"] = fnEl.Id.Value;
             if (fnEl.Type?.Value != null) node.Format["type"] = fnEl.Type.InnerText;
+            // R44 minor-5: surface first-run formatting on footnote node so
+            // bold/italic/size/color set via Add/Set round-trip through Get.
+            // Mirrors the hyperlink firstRun pattern at line ~2746 above.
+            var fnFirstRun = fnEl.Descendants<Run>().FirstOrDefault(r => r.GetFirstChild<Text>() != null);
+            if (fnFirstRun?.RunProperties != null)
+            {
+                var rp = fnFirstRun.RunProperties;
+                if (rp.RunFonts?.Ascii?.Value != null) node.Format["font"] = rp.RunFonts.Ascii.Value;
+                if (rp.FontSize?.Val?.Value != null)
+                    node.Format["size"] = $"{int.Parse(rp.FontSize.Val.Value) / 2.0:0.##}pt";
+                if (rp.Bold != null) node.Format["bold"] = IsToggleOn(rp.Bold);
+                if (rp.Italic != null) node.Format["italic"] = IsToggleOn(rp.Italic);
+                if (rp.Color?.ThemeColor?.HasValue == true) node.Format["color"] = rp.Color.ThemeColor.InnerText;
+                else if (rp.Color?.Val?.Value != null) node.Format["color"] = ParseHelpers.FormatHexColor(rp.Color.Val.Value);
+                if (rp.Underline?.Val != null) node.Format["underline"] = rp.Underline.Val.InnerText;
+                if (rp.Strike != null) node.Format["strike"] = IsToggleOn(rp.Strike);
+                if (rp.Highlight?.Val != null) node.Format["highlight"] = rp.Highlight.Val.InnerText;
+            }
             // R20-wbt-1: surface direction from the first content paragraph's
             // pPr.BiDi so the cascade (already applied by ApplyFootnoteEndnoteFormatKeys)
             // round-trips through Get. Mirrors the paragraph readback below.
@@ -1347,6 +1365,22 @@ public partial class WordHandler
             node.Text = GetFootnoteText(enEl);
             if (enEl.Id?.Value != null) node.Format["id"] = enEl.Id.Value;
             if (enEl.Type?.Value != null) node.Format["type"] = enEl.Type.InnerText;
+            // R44 minor-5: mirror footnote firstRun readback for endnote.
+            var enFirstRun = enEl.Descendants<Run>().FirstOrDefault(r => r.GetFirstChild<Text>() != null);
+            if (enFirstRun?.RunProperties != null)
+            {
+                var rp = enFirstRun.RunProperties;
+                if (rp.RunFonts?.Ascii?.Value != null) node.Format["font"] = rp.RunFonts.Ascii.Value;
+                if (rp.FontSize?.Val?.Value != null)
+                    node.Format["size"] = $"{int.Parse(rp.FontSize.Val.Value) / 2.0:0.##}pt";
+                if (rp.Bold != null) node.Format["bold"] = IsToggleOn(rp.Bold);
+                if (rp.Italic != null) node.Format["italic"] = IsToggleOn(rp.Italic);
+                if (rp.Color?.ThemeColor?.HasValue == true) node.Format["color"] = rp.Color.ThemeColor.InnerText;
+                else if (rp.Color?.Val?.Value != null) node.Format["color"] = ParseHelpers.FormatHexColor(rp.Color.Val.Value);
+                if (rp.Underline?.Val != null) node.Format["underline"] = rp.Underline.Val.InnerText;
+                if (rp.Strike != null) node.Format["strike"] = IsToggleOn(rp.Strike);
+                if (rp.Highlight?.Val != null) node.Format["highlight"] = rp.Highlight.Val.InnerText;
+            }
             var enBidi = enEl.Descendants<Paragraph>().FirstOrDefault()?.ParagraphProperties?.GetFirstChild<BiDi>();
             if (enBidi != null)
                 node.Format["direction"] = TryReadOnOff(enBidi.Val) == true ? "rtl" : "ltr";
