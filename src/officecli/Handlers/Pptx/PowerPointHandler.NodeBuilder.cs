@@ -1177,14 +1177,22 @@ public partial class PowerPointHandler
                     node.Format["margin"] = $"{FormatEmu(lIns ?? 91440)},{FormatEmu(tIns ?? 45720)},{FormatEmu(rIns ?? 91440)},{FormatEmu(bIns ?? 45720)}";
             }
 
-            // Vertical alignment — map XML enum to user-friendly name
+            // Vertical alignment — map XML enum to user-friendly name.
+            // CONSISTENCY(valign-vocab): shape vertical-anchor input accepts both
+            // "middle" and "center" (see ExcelHandler.Add.Drawings.cs:693 etc.),
+            // but the OOXML enum is "ctr" — historically readback emitted "center"
+            // which broke `set valign=middle` → `get valign=middle` round-trips.
+            // Emit "middle" to match the canonical input alias users actually type
+            // for the vertical axis. Table-cell valign (NodeBuilder.cs:391-394)
+            // is a separate code path and keeps "center" since cells share the
+            // halign/valign vocabulary.
             if (bodyPr.Anchor?.HasValue == true)
             {
                 var vaInner = bodyPr.Anchor.InnerText;
                 node.Format["valign"] = vaInner switch
                 {
                     "t" => "top",
-                    "ctr" => "center",
+                    "ctr" => "middle",
                     "b" => "bottom",
                     _ => vaInner
                 };
