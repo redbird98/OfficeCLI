@@ -98,6 +98,13 @@ public partial class PowerPointHandler
             // discriminates).
             "moderncomment" or "modern-comment" or "thread" or "threadedcomment"
                 => AddModernComment(parentPath, index, properties),
+            // A slide transition is a per-slide property, not a child element. Without
+            // an explicit case it would fall to AddDefault → GenericXmlQuery and write a
+            // bare <p:transition/> that the transition Get path can't resolve (phantom
+            // element, false success). Reject with a redirect to the Set API.
+            "transition" => throw new ArgumentException(
+                "Transition is a slide property, not an element type. " +
+                "Use: Set /slide[N] --prop transition=<effect> (e.g. transition=fade) to set a slide transition."),
             _ => AddDefault(parentPath, index, properties, type)
         };
     }
