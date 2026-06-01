@@ -262,7 +262,16 @@ public partial class PowerPointHandler
                     pProps.AppendChild(new Drawing.SpaceAfter(new Drawing.SpacingPoints { Val = SpacingConverter.ParsePptSpacing(pSaVal) }));
                 }
 
-                newPara.ParagraphProperties = pProps;
+                // CONSISTENCY(pptx-no-empty-ppr): only attach paragraph
+                // properties when at least one was set. Empty <a:pPr/>
+                // is a real OOXML node — it doesn't affect rendering but
+                // bloats every paragraph after the first on dump→replay
+                // (the seeded first paragraph already has no pPr by
+                // default, so the bloat is one xml element per added
+                // paragraph). Skip when pProps has no attribute and no
+                // child element.
+                if (pProps.HasAttributes || pProps.HasChildren)
+                    newPara.ParagraphProperties = pProps;
 
                 // Create initial run with text and run-level properties
                 var paraText = properties.GetValueOrDefault("text", "");
