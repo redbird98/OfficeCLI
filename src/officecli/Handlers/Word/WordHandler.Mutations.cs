@@ -1,7 +1,6 @@
 // Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
-using System.Text;
 using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
@@ -246,9 +245,10 @@ public partial class WordHandler
             var mainPart = _doc.MainDocumentPart
                 ?? throw new InvalidOperationException("MainDocumentPart not found");
             int? fnId = parts[0].Index;
-            if (fnId == null && parts[0].StringIndex != null
-                && parts[0].StringIndex.StartsWith("@footnoteId=", StringComparison.OrdinalIgnoreCase)
-                && int.TryParse(parts[0].StringIndex["@footnoteId=".Length..], out var fnIdv))
+            var fnStrIdx = parts[0].StringIndex;
+            if (fnId == null && fnStrIdx != null
+                && fnStrIdx.StartsWith("@footnoteId=", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(fnStrIdx["@footnoteId=".Length..], out var fnIdv))
             {
                 fnId = fnIdv;
             }
@@ -271,9 +271,10 @@ public partial class WordHandler
             var mainPart = _doc.MainDocumentPart
                 ?? throw new InvalidOperationException("MainDocumentPart not found");
             int? enId = parts[0].Index;
-            if (enId == null && parts[0].StringIndex != null
-                && parts[0].StringIndex.StartsWith("@endnoteId=", StringComparison.OrdinalIgnoreCase)
-                && int.TryParse(parts[0].StringIndex["@endnoteId=".Length..], out var enIdv))
+            var enStrIdx = parts[0].StringIndex;
+            if (enId == null && enStrIdx != null
+                && enStrIdx.StartsWith("@endnoteId=", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(enStrIdx["@endnoteId=".Length..], out var enIdv))
             {
                 enId = enIdv;
             }
