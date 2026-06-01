@@ -187,6 +187,15 @@ public partial class ExcelHandler
         var cfSetMatch = Regex.Match(cellRef, @"^(?:cf|conditionalformatting)\[(\d+)\]$", RegexOptions.IgnoreCase);
         if (cfSetMatch.Success) return SetCfByPath(cfSetMatch, worksheet, properties);
 
+        // Handle /SheetName/rowbreak[N] or /SheetName/colbreak[N] — reposition
+        // (row/col) and toggle manual. Mirrors the Get readback keys so a queried
+        // page break round-trips into set.
+        var brkSetMatch = Regex.Match(cellRef, @"^(rowbreak|colbreak)\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (brkSetMatch.Success)
+            return SetPageBreak(worksheet,
+                brkSetMatch.Groups[1].Value.Equals("rowbreak", StringComparison.OrdinalIgnoreCase),
+                int.Parse(brkSetMatch.Groups[2].Value), properties);
+
         // Handle /SheetName/col[X] where X is a column letter (A) or numeric index (1)
         var colMatch = Regex.Match(cellRef, @"^col\[([A-Za-z0-9]+)\]$", RegexOptions.IgnoreCase);
         if (colMatch.Success)
@@ -660,6 +669,11 @@ public partial class ExcelHandler
                     cell.CellValue = null;
                     break;
                 }
+                // CONSISTENCY(xlsx-hyperlink-cell-backed): `query hyperlink` emits
+                // the backing cell path with Format["url"]; accept `url` as an
+                // alias for the canonical cell `link` so that query result round-
+                // trips into set (set "/Sheet1/A1" --prop url=...).
+                case "url":
                 case "link":
                 {
                     var ws = GetSheet(worksheet);
@@ -2721,6 +2735,50 @@ public partial class ExcelHandler
     }
 
     // ==================== Row Set (height, hidden) ====================
+
+    // Set a manual page break's position / span / manual flag, keeping the
+    // parent's manualBreakCount in sync. Page breaks are otherwise add/remove
+    // markers; this gives the queried /Sheet/{row,col}break[N] a Set target so
+    // query→set round-trips (e.g. reposition via row=N / col=N).
+    private List<string> SetPageBreak(WorksheetPart worksheet, bool isRow, int index, Dictionary<string, string> properties)
+    {
+        var ws = GetSheet(worksheet);
+        var rowBreaks = isRow ? ws.GetFirstChild<RowBreaks>() : null;
+        var colBreaks = isRow ? null : ws.GetFirstChild<ColumnBreaks>();
+        var breaks = (isRow ? rowBreaks?.Elements<Break>() : colBreaks?.Elements<Break>())?.ToList()
+            ?? new List<Break>();
+        var kind = isRow ? "rowbreak" : "colbreak";
+        if (index < 1 || index > breaks.Count)
+            throw new ArgumentException($"{kind}[{index}] not found (sheet has {breaks.Count} {(isRow ? "row" : "column")} break(s)).");
+
+        var brk = breaks[index - 1];
+        var unsupported = new List<string>();
+        bool changed = false;
+        foreach (var (key, value) in properties)
+        {
+            switch (key.ToLowerInvariant())
+            {
+                case "row" when isRow:
+                case "col" when !isRow:
+                case "index":
+                    brk.Id = uint.Parse(value); changed = true; break;
+                case "manual":
+                    brk.ManualPageBreak = ParseHelpers.IsTruthySafe(value); changed = true; break;
+                case "max": brk.Max = uint.Parse(value); changed = true; break;
+                case "min": brk.Min = uint.Parse(value); changed = true; break;
+                default: unsupported.Add(key); break;
+            }
+        }
+
+        if (changed)
+        {
+            var manCount = (uint)breaks.Count(b => b.ManualPageBreak?.Value == true);
+            if (isRow) rowBreaks!.ManualBreakCount = manCount;
+            else colBreaks!.ManualBreakCount = manCount;
+            SaveWorksheet(worksheet);
+        }
+        return unsupported;
+    }
 
     private List<string> SetRow(WorksheetPart worksheet, uint rowIdx, Dictionary<string, string> properties)
     {
