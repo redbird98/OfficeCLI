@@ -396,6 +396,19 @@ public static partial class PptxBatchEmitter
                                        "advanceTime", "advanceClick" })
                 slideProps.Remove(k);
         }
+        if (exotic.BgXml != null)
+        {
+            // Same shape as the exotic-transition strip above. The raw-set
+            // prepend of <p:bg> below is the authoritative payload; if we
+            // also let `add slide background=...` semantic-set fire, the
+            // replay slide ends up with TWO <p:bg> blocks under <p:cSld>
+            // (semantic Set appends, raw-set prepends — both survive). The
+            // <p:cSld> schema permits at most one <p:bg>; PowerPoint silently
+            // keeps the first and discards the second, so the lost block
+            // depends on order. Strip the slide-level background prop here
+            // so only the raw-set passthrough lands.
+            slideProps.Remove("background");
+        }
 
         items.Add(new BatchItem
         {
