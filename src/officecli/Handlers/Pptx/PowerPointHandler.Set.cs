@@ -24,13 +24,14 @@ public partial class PowerPointHandler
         if (!string.IsNullOrEmpty(path) && !path.StartsWith("/"))
         {
             var unsupported = new List<string>();
-            var targets = Query(path);
-            // Narrow by the shared comparison post-filter so >, <, >=, <= (which
-            // the handler selector drops) match exactly, not over-broadly — the
-            // same fix Excel's selector set uses. applyAll:false leaves = / != to
-            // the handler. Without this, set "shape[width>5cm]" sets every shape.
-            targets = OfficeCli.Core.AttributeFilter.Apply(
-                targets, OfficeCli.Core.AttributeFilter.Parse(path), applyAll: false);
+            // FilterSelector narrows with the shared engine: a pure-AND selector
+            // takes the flat path with applyAll:false (comparison ops only — the
+            // handler already matched = / != with its looser semantics, so
+            // set "shape[width>5cm]" no longer sets every shape); a selector with
+            // `or` is queried bracket-stripped (handler returns broadly) then
+            // narrowed by the boolean expression tree, which applies every predicate.
+            var (targets, _) = OfficeCli.Core.AttributeFilter.FilterSelector(
+                path, Query, keyResolver: null, applyAll: false);
             if (targets.Count == 0)
                 throw new ArgumentException($"No elements matched selector: {path}");
             LastSelectorSetCount = targets.Count;

@@ -672,15 +672,24 @@ internal static class AttributeFilter
     /// own pre-filter cannot understand booleans. <paramref name="keyResolver"/>
     /// (when non-null) rewrites alias keys, e.g. cell bold → font.bold.
     /// </summary>
+    /// <param name="applyAll">
+    /// Governs the FLAT path only. true (query, Excel set) re-applies every
+    /// condition. false (Word/Pptx set) re-applies only the comparison/contains/
+    /// exists ops the handler selector drops, leaving = / != to the handler — so
+    /// the handler's looser equality matching is preserved. The boolean path
+    /// always applies all conditions: stripping the bracket means the handler did
+    /// not pre-filter, so the tree must evaluate every predicate itself.
+    /// </param>
     public static (List<DocumentNode> Results, List<string> Warnings) FilterSelector(
-        string selector, Func<string, List<DocumentNode>> query, Func<string, string>? keyResolver = null)
+        string selector, Func<string, List<DocumentNode>> query, Func<string, string>? keyResolver = null,
+        bool applyAll = true)
     {
         var expr = ParseExpr(selector);
         if (expr != null && keyResolver != null)
             expr = NormalizeKeysExpr(expr, keyResolver);
 
         if (TryFlatten(expr) is { } flat)
-            return ApplyWithWarnings(query(selector), flat);
+            return ApplyWithWarnings(query(selector), flat, applyAll);
 
         return ApplyExprWithWarnings(query(StripFilterBrackets(selector)), expr);
     }
