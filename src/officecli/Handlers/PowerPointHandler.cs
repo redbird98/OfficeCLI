@@ -1796,6 +1796,58 @@ public partial class PowerPointHandler : IDocumentHandler
         return (true, url, tip);
     }
 
+    // Return the verbatim <p:style> outer XML on a shape (the lnRef / fillRef
+    // / effectRef / fontRef theme-reference block) plus the shape's ordinal
+    // among <p:sp> siblings in its parent shapeTree/group, or null when
+    // either the shape has no <p:style> or the path doesn't resolve. Used by
+    // PptxBatchEmitter.EmitShape to round-trip the style reference block
+    // through a raw-set passthrough — there is no typed Add/Set vocabulary
+    // for these theme-style refs today and the source block was silently
+    // dropped on dump->replay before this hook.
+    // CONSISTENCY: mirrors GetShapeCNvPrHyperlinkInfo's path-resolution
+    // preamble (group-chain + @id= / positional shape index).
+    internal (string Xml, int SpOrdinal)? GetShapeStyleXmlWithOrdinal(string shapePath)
+    {
+        var m = Regex.Match(shapePath,
+            @"^/slide\[(\d+)\]((?:/group\[\d+\])*)/(?:shape|textbox|title|equation|placeholder)\[(@id=)?(\d+)\]$");
+        if (!m.Success) return null;
+        var slideIdx = int.Parse(m.Groups[1].Value);
+        var grpChain = m.Groups[2].Value;
+        var byId = m.Groups[3].Value.Length > 0;
+        var shapeIdx = int.Parse(m.Groups[4].Value);
+        var parts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > parts.Count) return null;
+        var slidePart = parts[slideIdx - 1];
+        OpenXmlCompositeElement? scope = GetSlide(slidePart).CommonSlideData?.ShapeTree;
+        if (scope == null) return null;
+        foreach (Match gm in Regex.Matches(grpChain, @"/group\[(\d+)\]"))
+        {
+            var gIdx = int.Parse(gm.Groups[1].Value);
+            var groupsHere = scope.Elements<GroupShape>().ToList();
+            if (gIdx < 1 || gIdx > groupsHere.Count) return null;
+            scope = groupsHere[gIdx - 1];
+        }
+        var shapes = scope.Elements<Shape>().ToList();
+        Shape? shape;
+        int ordinal;
+        if (byId)
+        {
+            shape = shapes.FirstOrDefault(
+                s => s.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value == (uint)shapeIdx);
+            if (shape == null) return null;
+            ordinal = shapes.IndexOf(shape) + 1;
+        }
+        else
+        {
+            if (shapeIdx < 1 || shapeIdx > shapes.Count) return null;
+            shape = shapes[shapeIdx - 1];
+            ordinal = shapeIdx;
+        }
+        var styleEl = shape.GetFirstChild<ShapeStyle>();
+        if (styleEl == null) return null;
+        return (styleEl.OuterXml, ordinal);
+    }
+
     // Resolve a shape path's blipFill image bytes (image fill on a non-Picture
     // <p:sp>). Mirrors GetImageBinary but walks <p:sp> (Shape) instead of
     // <p:pic> (Picture). Accepts /slide[N]/shape[K] and /slide[N]/shape[@id=ID]

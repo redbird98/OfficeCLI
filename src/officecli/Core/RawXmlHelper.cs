@@ -280,6 +280,12 @@ internal static class RawXmlHelper
             // p:sldMaster — CT_SlideMaster
             [("http://schemas.openxmlformats.org/presentationml/2006/main", "sldMaster")] =
                 new[] { "cSld", "clrMap", "sldLayoutIdLst", "transition", "timing", "hf", "txStyles", "extLst" },
+            // p:sp — CT_Shape: nvSpPr, spPr, style?, txBody?, extLst?
+            // The dump->replay path raw-set appends <p:style> after the shape
+            // is created with its txBody; without reorder, style lands AFTER
+            // txBody and strict consumers reject the file.
+            [("http://schemas.openxmlformats.org/presentationml/2006/main", "sp")] =
+                new[] { "nvSpPr", "spPr", "style", "txBody", "extLst" },
         };
 
     private static void EnforceKnownSchemaOrder(XDocument xDoc)

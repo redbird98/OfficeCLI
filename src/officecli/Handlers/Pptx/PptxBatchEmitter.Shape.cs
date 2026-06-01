@@ -217,6 +217,35 @@ public static partial class PptxBatchEmitter
             Props = shapeProps.Count > 0 ? shapeProps : null,
         });
 
+        // CONSISTENCY(shape-style-rawset): the <p:style> theme-reference
+        // block (<a:lnRef>/<a:fillRef>/<a:effectRef>/<a:fontRef>) sits as a
+        // sibling of <p:txBody> under <p:sp> and has no typed Add/Set
+        // vocabulary. NodeBuilder doesn't surface it either, so the source
+        // block was silently dropped on dump->replay before this hook. Pull
+        // the verbatim outer XML from the source and re-inject it via a
+        // raw-set append on the freshly added shape's <p:sp>. Slide-root
+        // shapes only (mirrors the picture clrChange xpath scope); group-
+        // nested shapes fall through unchanged — the xpath form would need
+        // to walk <p:grpSp> ancestors, deferred to a follow-up.
+        if (System.Text.RegularExpressions.Regex.Match(replayPath,
+                @"^/slide\[\d+\]/(?:shape|textbox|title|equation|placeholder)\[(\d+)\]$")
+            is { Success: true } shStyleM)
+        {
+            var styleProbe = ppt.GetShapeStyleXmlWithOrdinal(shapeNode.Path ?? "");
+            if (styleProbe.HasValue)
+            {
+                var (styleXml, spOrd) = styleProbe.Value;
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = parentSlidePath,
+                    Xpath = $"/p:sld/p:cSld/p:spTree/p:sp[{spOrd}]",
+                    Action = "append",
+                    Xml = styleXml,
+                });
+            }
+        }
+
         // Equation shapes' text body is AlternateContent (a14:m + readable
         // fallback run); the math content is fully captured by `formula`.
         // Emitting paragraphs/runs here would inject the fallback string as
