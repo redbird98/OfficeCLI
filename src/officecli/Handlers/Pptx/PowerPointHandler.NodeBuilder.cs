@@ -1241,10 +1241,15 @@ public partial class PowerPointHandler
             if (prstTxWarp?.Preset?.HasValue == true)
                 node.Format["textWarp"] = prstTxWarp.Preset.InnerText;
 
-            // AutoFit
+            // AutoFit — surface only when the source bodyPr carries an
+            // explicit child. An empty <a:bodyPr/> inherits from the
+            // layout/master cascade; emitting "none" as the default forces
+            // <a:noAutoFit/> on replay (Add/Set autoFit=none injects the
+            // child), breaking shrink-to-fit on every placeholder dump→
+            // replay cycle. CONSISTENCY(empty-bodyPr-inherits).
             if (bodyPr.GetFirstChild<Drawing.NormalAutoFit>() != null) node.Format["autoFit"] = "normal";
             else if (bodyPr.GetFirstChild<Drawing.ShapeAutoFit>() != null) node.Format["autoFit"] = "shape";
-            else node.Format["autoFit"] = "none";
+            else if (bodyPr.GetFirstChild<Drawing.NoAutoFit>() != null) node.Format["autoFit"] = "none";
         }
 
         // Text alignment (from first paragraph). Only surface when explicitly
