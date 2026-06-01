@@ -744,6 +744,8 @@ public partial class PowerPointHandler
                       "rotx", "roty", "rotz", "bevel", "beveltop", "bevelbottom",
                       "depth", "extrusion", "material", "lighting", "lightrig",
                       "camera", "camerapreset", "cameraprst",
+                      "extrusioncolor", "extrusionclr",
+                      "contourcolor", "contourclr",
                       "spacing", "charspacing", "letterspacing",
                       "indent", "marginleft", "marl", "marginright", "marr",
                       "textfill", "textgradient", "geometry",

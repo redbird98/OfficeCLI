@@ -496,6 +496,34 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
+    /// Set the extrusion color (<a:extrusionClr>) or contour color
+    /// (<a:contourClr>) on the shape's sp3d child. Accepts the same
+    /// color forms the rest of the handler accepts (hex with or without
+    /// '#', named scheme colors, etc.). "none" removes the element.
+    /// </summary>
+    private static void ApplySp3DColor(ShapeProperties spPr, string value, bool isExtrusion)
+    {
+        var sp3d = spPr.GetFirstChild<Drawing.Shape3DType>();
+        if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
+        {
+            if (sp3d == null) return;
+            if (isExtrusion) sp3d.ExtrusionColor = null;
+            else sp3d.ContourColor = null;
+            return;
+        }
+        sp3d ??= EnsureShape3D(spPr);
+        var colorEl = DrawingColorBuilder.BuildColorElement(value);
+        if (isExtrusion)
+        {
+            sp3d.ExtrusionColor = new Drawing.ExtrusionColor(colorEl);
+        }
+        else
+        {
+            sp3d.ContourColor = new Drawing.ContourColor(colorEl);
+        }
+    }
+
+    /// <summary>
     /// Set the camera preset on a scene3d/camera (a:scene3d/a:camera/@prst).
     /// Value is the OOXML inner-text name (orthographicFront,
     /// perspectiveContrastingRightFacing, isometricTopUp, …). The

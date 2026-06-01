@@ -1185,6 +1185,16 @@ public partial class PowerPointHandler
             if (bevelT != null) node.Format["bevel"] = FormatBevel(bevelT);
             var bevelB = sp3d.BevelBottom;
             if (bevelB != null) node.Format["bevelBottom"] = FormatBevel(bevelB);
+            // extrusionClr / contourClr — additional sp3d children. The
+            // sp3d emit dropped them silently before this readback; with no
+            // Format key surfacing the value, the Setter had nothing to
+            // round-trip and the colored extrusion edge rendered black.
+            var extColor = ReadColorFromElement(sp3d.ExtrusionColor);
+            if (!string.IsNullOrEmpty(extColor))
+                node.Format["extrusionColor"] = extColor;
+            var contColor = ReadColorFromElement(sp3d.ContourColor);
+            if (!string.IsNullOrEmpty(contColor))
+                node.Format["contourColor"] = contColor;
         }
 
         // Flip

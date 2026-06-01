@@ -1371,6 +1371,22 @@ public partial class PowerPointHandler
                     break;
                 }
 
+                case "extrusioncolor" or "extrusionclr":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    ApplySp3DColor(spPr, value, isExtrusion: true);
+                    break;
+                }
+
+                case "contourcolor" or "contourclr":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    ApplySp3DColor(spPr, value, isExtrusion: false);
+                    break;
+                }
+
                 case "camera" or "camerapreset" or "cameraprst":
                 {
                     // a:scene3d/a:camera/@prst. Accept the raw OOXML name
