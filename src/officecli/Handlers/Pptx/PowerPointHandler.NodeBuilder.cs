@@ -1111,6 +1111,21 @@ public partial class PowerPointHandler
                 var firstRunUColor = ReadColorFromFill(firstRunUFill.GetFirstChild<Drawing.SolidFill>());
                 if (firstRunUColor != null) node.Format["underline.color"] = firstRunUColor;
             }
+            // R57 bt-1: <a:uLn> companion reader — see run-level emit below
+            // for the rationale. Mirrors uFill at shape level so a single-run
+            // shape with <a:uLn w=…> on the only run round-trips both color
+            // and width through dump→replay.
+            var firstRunULn = firstRun.RunProperties.GetFirstChild<Drawing.Underline>();
+            if (firstRunULn != null)
+            {
+                if (!node.Format.ContainsKey("underline.color"))
+                {
+                    var firstRunULnColor = ReadColorFromFill(firstRunULn.GetFirstChild<Drawing.SolidFill>());
+                    if (firstRunULnColor != null) node.Format["underline.color"] = firstRunULnColor;
+                }
+                if (firstRunULn.Width?.HasValue == true)
+                    node.Format["underline.width"] = EmuConverter.FormatLineWidth(firstRunULn.Width.Value);
+            }
             if (firstRun.RunProperties.Strike?.HasValue == true)
             {
                 // Emit explicit "none" too, so a round-trip Add(strike=none) → Get
@@ -1873,6 +1888,26 @@ public partial class PowerPointHandler
             {
                 var uFillColor = ReadColorFromFill(uFill.GetFirstChild<Drawing.SolidFill>());
                 if (uFillColor != null) node.Format["underline.color"] = uFillColor;
+            }
+            // R57 bt-1: <a:uLn> (Drawing.Underline) carries underline-LINE
+            // styling — width (`w` EMU) plus a SolidFill child that paints
+            // the stroke. Distinct from <a:uFill> above (uFill paints the
+            // same stroke via a different schema slot — both are valid
+            // OOXML; source decks often pick uLn when they also want a
+            // custom width since uFill has no w attribute). Without reading
+            // uLn, a run with <a:uLn w="38100"><a:solidFill>FF0000</a:solidFill></a:uLn>
+            // round-trips as bare `underline=single` and loses both the
+            // colour and the 3pt width.
+            var uLn = run.RunProperties.GetFirstChild<Drawing.Underline>();
+            if (uLn != null)
+            {
+                if (!node.Format.ContainsKey("underline.color"))
+                {
+                    var uLnColor = ReadColorFromFill(uLn.GetFirstChild<Drawing.SolidFill>());
+                    if (uLnColor != null) node.Format["underline.color"] = uLnColor;
+                }
+                if (uLn.Width?.HasValue == true)
+                    node.Format["underline.width"] = EmuConverter.FormatLineWidth(uLn.Width.Value);
             }
             if (run.RunProperties.Strike?.HasValue == true)
             {
