@@ -1014,24 +1014,46 @@ internal static partial class ChartHelper
                             "percentage" => "percent",
                             _ => errValType.InnerText  // OOXML camelCase: stdDev, stdErr, cust
                         };
-                        // Magnitude lives in either <c:val>, or shared
-                        // <c:plus>/<c:minus> NumericLiteral first point.
-                        string? mag = null;
-                        var valEl = errBars.GetFirstChild<C.ErrorBarValue>()?.Val?.Value;
-                        if (valEl.HasValue && valEl.Value != 0)
-                            mag = valEl.Value.ToString("G",
-                                System.Globalization.CultureInfo.InvariantCulture);
+
+                        // R55 bt-6: cust errBars carry per-direction value
+                        // arrays under <c:plus>/<c:minus> via NumberReference
+                        // (numCache) OR NumberLiteral (literal point list).
+                        // The previous reader took only the first NumberLiteral
+                        // point and collapsed multi-point cust down to a single
+                        // magnitude, then the BuildErrorBars setter (with no
+                        // "cust" arm) re-emitted it as fixedVal:0 — the entire
+                        // cust spec was lost on dump-replay. Emit cust as
+                        // "cust:<direction>:<plusCSV>:<minusCSV>" so Build can
+                        // reconstruct both arrays.
+                        if (typeName == "cust")
+                        {
+                            var direction = errBars.GetFirstChild<C.ErrorBarType>()?.Val?.InnerText
+                                            ?? "both";
+                            var plusCsv = ReadErrorBarSideCsv(errBars.GetFirstChild<C.Plus>());
+                            var minusCsv = ReadErrorBarSideCsv(errBars.GetFirstChild<C.Minus>());
+                            seriesNode.Format["errBars"] = $"cust:{direction}:{plusCsv}:{minusCsv}";
+                        }
                         else
                         {
-                            var plusLit = errBars.GetFirstChild<C.Plus>()
-                                ?.GetFirstChild<C.NumberLiteral>();
-                            var firstPt = plusLit?.Elements<C.NumericPoint>().FirstOrDefault();
-                            var numStr = firstPt?.GetFirstChild<C.NumericValue>()?.Text;
-                            if (!string.IsNullOrEmpty(numStr)) mag = numStr;
+                            // Magnitude lives in either <c:val>, or shared
+                            // <c:plus>/<c:minus> NumericLiteral first point.
+                            string? mag = null;
+                            var valEl = errBars.GetFirstChild<C.ErrorBarValue>()?.Val?.Value;
+                            if (valEl.HasValue && valEl.Value != 0)
+                                mag = valEl.Value.ToString("G",
+                                    System.Globalization.CultureInfo.InvariantCulture);
+                            else
+                            {
+                                var plusLit = errBars.GetFirstChild<C.Plus>()
+                                    ?.GetFirstChild<C.NumberLiteral>();
+                                var firstPt = plusLit?.Elements<C.NumericPoint>().FirstOrDefault();
+                                var numStr = firstPt?.GetFirstChild<C.NumericValue>()?.Text;
+                                if (!string.IsNullOrEmpty(numStr)) mag = numStr;
+                            }
+                            seriesNode.Format["errBars"] = mag != null
+                                ? $"{typeName}:{mag}"
+                                : typeName;
                         }
-                        seriesNode.Format["errBars"] = mag != null
-                            ? $"{typeName}:{mag}"
-                            : typeName;
                     }
                 }
                 // InvertIfNegative
@@ -1120,6 +1142,43 @@ internal static partial class ChartHelper
         {
             node.ChildCount = seriesCount;
         }
+    }
+
+    /// <summary>
+    /// R55 bt-6: read one side of a cust errBars (<c:plus> or <c:minus>) as a
+    /// comma-separated value list. Prefers the numCache inside <c:numRef>
+    /// (PowerPoint always writes the cached values alongside the formula);
+    /// falls back to <c:numLit> (literal point list) when the side is bound
+    /// to inline values rather than a sheet reference. Empty when no side
+    /// element was supplied.
+    /// </summary>
+    private static string ReadErrorBarSideCsv(OpenXmlCompositeElement? side)
+    {
+        if (side == null) return "";
+        // numRef.numCache first — numRef is the common cust authoring form.
+        var numRef = side.GetFirstChild<C.NumberReference>();
+        var cache = numRef?.NumberingCache;
+        if (cache != null)
+        {
+            var ptCount = cache.Elements<C.NumericPoint>().Count();
+            if (ptCount > 0)
+            {
+                return string.Join(",",
+                    cache.Elements<C.NumericPoint>()
+                        .OrderBy(p => p.Index?.Value ?? 0u)
+                        .Select(p => p.GetFirstChild<C.NumericValue>()?.Text ?? ""));
+            }
+        }
+        // Fallback to inline numLit.
+        var numLit = side.GetFirstChild<C.NumberLiteral>();
+        if (numLit != null)
+        {
+            return string.Join(",",
+                numLit.Elements<C.NumericPoint>()
+                    .OrderBy(p => p.Index?.Value ?? 0u)
+                    .Select(p => p.GetFirstChild<C.NumericValue>()?.Text ?? ""));
+        }
+        return "";
     }
 
     internal static string? DetectChartType(C.PlotArea plotArea)

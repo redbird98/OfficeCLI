@@ -210,6 +210,11 @@ internal static partial class ChartHelper
     internal static C.ErrorBars BuildErrorBars(string spec)
     {
         // Format: "type" or "type:value" e.g. "fixed:5", "percent:10", "stddev", "stderr"
+        // R55 bt-6: cust spec is "cust:<direction>:<plusCSV>:<minusCSV>" — emit
+        // per-direction <c:plus>/<c:minus> NumberLiteral arrays. The Reader
+        // pairs with this form (ReadErrorBarSideCsv) so dump-replay of cust
+        // error bars round-trips through the inline numLit cache, not numRef
+        // (which would need a live cell reference on the embedded workbook).
         // CONSISTENCY(errorbars-bare-number): bare number (e.g. "5") is taken as
         // fixed:<N>, mirroring how other chart numeric specs accept a value-only
         // shorthand. Without this, "5" matched no type-name arm and fell through
@@ -227,6 +232,41 @@ internal static partial class ChartHelper
 
         var errBars = new C.ErrorBars();
         errBars.AppendChild(new C.ErrorDirection { Val = C.ErrorBarDirectionValues.Y });
+
+        // R55 bt-6: cust path. parts = ["cust", direction, plusCSV, minusCSV].
+        if (typeStr == "cust" && parts.Length >= 4)
+        {
+            var direction = (parts[1].Trim().ToLowerInvariant()) switch
+            {
+                "plus" => C.ErrorBarValues.Plus,
+                "minus" => C.ErrorBarValues.Minus,
+                _ => C.ErrorBarValues.Both
+            };
+            errBars.AppendChild(new C.ErrorBarType { Val = direction });
+            errBars.AppendChild(new C.ErrorBarValueType { Val = C.ErrorValues.Custom });
+
+            static C.NumberLiteral BuildLit(string csv)
+            {
+                var lit = new C.NumberLiteral(new C.FormatCode("General"));
+                var values = csv.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(v => v.Trim()).ToList();
+                lit.AppendChild(new C.PointCount { Val = (uint)values.Count });
+                uint idx = 0;
+                foreach (var v in values)
+                {
+                    lit.AppendChild(new C.NumericPoint(new C.NumericValue(v)) { Index = idx++ });
+                }
+                return lit;
+            }
+
+            // Schema order: <c:plus> before <c:minus>.
+            if (!string.IsNullOrEmpty(parts[2]))
+                errBars.AppendChild(new C.Plus(BuildLit(parts[2])));
+            if (!string.IsNullOrEmpty(parts[3]))
+                errBars.AppendChild(new C.Minus(BuildLit(parts[3])));
+            return errBars;
+        }
+
         errBars.AppendChild(new C.ErrorBarType { Val = C.ErrorBarValues.Both });
 
         var errValType = typeStr switch

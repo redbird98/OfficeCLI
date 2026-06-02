@@ -150,7 +150,10 @@ public static partial class PptxBatchEmitter
                     // Setter's per-series shadow case reconstructs it.
                     "shadow",
                     "trendline", "trendline.dispRSqr", "trendline.dispEq",
-                    "errbars",
+                    // Reader emits camelCase "errBars" (per the dotted /
+                    // CSV convention); the chart-level Setter dispatch is
+                    // case-insensitive on "errbars"/"errorbars".
+                    "errBars",
                     // R52 bt-3: bubble series per-point sizes. ParseSeriesData
                     // Extended accepts both literal (comma-separated) and
                     // range-reference values via series{N}.bubbleSize, and
