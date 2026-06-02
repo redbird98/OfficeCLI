@@ -434,6 +434,17 @@ public static partial class PptxBatchEmitter
             // so only the raw-set passthrough lands.
             slideProps.Remove("background");
         }
+        if (exotic.MultiHfXmls != null)
+        {
+            // R55 bt-3: multi-hf source. Strip the semantic showX flags so
+            // SetSlideByPath doesn't synthesize an additional single <p:hf>
+            // alongside the raw-emitted siblings. Each captured slice replays
+            // verbatim via raw-set append below.
+            slideProps.Remove("showFooter");
+            slideProps.Remove("showSlideNumber");
+            slideProps.Remove("showDate");
+            slideProps.Remove("showHeader");
+        }
 
         items.Add(new BatchItem
         {
@@ -661,6 +672,16 @@ public static partial class PptxBatchEmitter
             EmitRawSlideSlice(slidePath, "p:extLst", exotic.ExtLstXml, items, ctx);
         if (exotic.TrailingTransitionXml != null)
             EmitRawSlideSlice(slidePath, "p:transition", exotic.TrailingTransitionXml, items, ctx);
+        if (exotic.MultiHfXmls != null)
+        {
+            // R55 bt-3: append each captured <p:hf .../> sibling verbatim. We
+            // intentionally do NOT canonicalise (NormalizeSlideRawSlice's SDK
+            // round-trip resolves namespace prefixes from the original part
+            // root, but a bare <p:hf .../> has no nested content and only
+            // attribute tokens — the source slice is already canonical).
+            foreach (var hfXml in exotic.MultiHfXmls)
+                EmitRawSlideSlice(slidePath, "p:hf", hfXml, items, ctx);
+        }
 
         // SmartArt graphicFrames live in /p:sld/p:cSld/p:spTree but are
         // skipped by NodeBuilder (table/chart-only routing). Phase 3b emits
@@ -805,7 +826,18 @@ public static partial class PptxBatchEmitter
         // and never inspects the trailing element. Captured as its own
         // verbatim slice and raw-set appended on /p:sld so both transitions
         // round-trip in source order.
-        string? TrailingTransitionXml);
+        string? TrailingTransitionXml,
+        // R55 bt-3: 2+ <p:hf .../> siblings in source <p:sld>. PowerPoint's
+        // semantic Set surface only writes one <p:hf> per slide
+        // (GetFirstChild<HeaderFooter>), so the semantic showFooter /
+        // showSlideNumber / showDate / showHeader emit collapses a multi-hf
+        // source down to a single block. When the source has more than one
+        // bare <p:hf .../> sibling, capture each verbatim and raw-set append
+        // them onto /p:sld in source order; strip the semantic hf props
+        // upstream so the replay slide carries exactly the source's hf set.
+        // The single-hf common case stays on the semantic showFooter /
+        // showSlideNumber / showDate / showHeader emit (this list is empty).
+        IReadOnlyList<string>? MultiHfXmls);
 
     private static SlideExoticContent ScanSlideExoticContent(PowerPointHandler ppt, string slidePath)
     {
@@ -1071,8 +1103,28 @@ public static partial class PptxBatchEmitter
             }
         }
 
+        // R55 bt-3: scan for 2+ bare <p:hf .../> siblings under <p:sld>.
+        // Skip <p:hf nested inside <p:hdr>/<p:ftr>/<p:dt>/<p:sldNum> placeholder
+        // text bodies — those are not the slide-level header/footer flags
+        // element. The legal slide-level form is <p:hf ... /> self-closed
+        // (attributes ftr/sldNum/dt/hdr); collect each occurrence verbatim.
+        List<string>? multiHfXmls = null;
+        if (sldEnd > 0)
+        {
+            var spTreeEnd = xml.LastIndexOf("</p:spTree>", sldEnd, StringComparison.Ordinal);
+            if (spTreeEnd > 0)
+            {
+                var hfRegex = new System.Text.RegularExpressions.Regex(@"<p:hf\b[^>]*/>");
+                var hfMatches = hfRegex.Matches(xml, spTreeEnd);
+                if (hfMatches.Count >= 2)
+                {
+                    multiHfXmls = hfMatches.Select(m => m.Value).ToList();
+                }
+            }
+        }
+
         return new SlideExoticContent(transExotic, transXml, timingExotic, timingXml,
-            clrMapOvrXml, extLstXml, bgXml, trailingTransXml);
+            clrMapOvrXml, extLstXml, bgXml, trailingTransXml, multiHfXmls);
     }
 
     // Normalize a slide raw slice into a stable textual form so the first-pass
