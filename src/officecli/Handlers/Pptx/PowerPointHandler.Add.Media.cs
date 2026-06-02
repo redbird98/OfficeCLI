@@ -115,25 +115,26 @@ public partial class PowerPointHandler
 
                 var imgShapeId = AcquireShapeId(imgShapeTree, properties);
                 var imgName = properties.GetValueOrDefault("name", $"Picture {imgShapeTree.Elements<Picture>().Count() + 1}");
-                // BUG-R5-02: data URIs / raw base64 blobs make Path.GetFileName
-                // return a meaningless tail (e.g. "png;base64,iVBOR..."). Use a
-                // placeholder unless the caller supplied an explicit alt=.
-                string DefaultPictureAlt()
-                {
-                    if (string.IsNullOrEmpty(imgPath)) return imgName;
-                    if (imgPath.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) return imgName;
-                    if (imgPath.Length > 256 && imgPath.IndexOf('/') < 0 && imgPath.IndexOf('\\') < 0) return imgName;
-                    try { return Path.GetFileName(imgPath); } catch { return imgName; }
-                }
+                // R63 bt-5: emit cNvPr/@descr ONLY when the caller explicitly
+                // provided alt=. Defaulting descr from the picture's filename
+                // (or `name`) silently masks an a11y gap on dump→batch round-
+                // trip: a source picture with no descr (Get reports
+                // alt="(missing)" + view issues flags it) would be rebuilt
+                // with descr="<filename>", erasing the warning. PowerPoint's
+                // own behavior matches: inserting a picture leaves descr
+                // absent until the user fills the alt-text dialog. Mirrors
+                // AddShape which never auto-populates descr.
                 var altText = properties.TryGetValue("alt", out var altOverride) && !string.IsNullOrEmpty(altOverride)
                     ? altOverride
-                    : DefaultPictureAlt();
+                    : null;
 
                 // Build Picture element following Open-XML-SDK conventions
                 var picture = new Picture();
 
+                var nvDrawingProps = new NonVisualDrawingProperties { Id = imgShapeId, Name = imgName };
+                if (altText != null) nvDrawingProps.Description = altText;
                 picture.NonVisualPictureProperties = new NonVisualPictureProperties(
-                    new NonVisualDrawingProperties { Id = imgShapeId, Name = imgName, Description = altText },
+                    nvDrawingProps,
                     new NonVisualPictureDrawingProperties(
                         new Drawing.PictureLocks { NoChangeAspect = true }
                     ),
