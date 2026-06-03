@@ -682,8 +682,8 @@
     "effective.spaceAfter.src": { "type": "string", "description": "path of the cascade layer that wrote effective.spaceAfter.", "add": false, "set": false, "get": true, "readback": "path string", "enforcement": "report" },
     "id": {
       "type": "number",
-      "description": "OOXML shape id; source of the @id in the stable path /shape[@id=ID].",
-      "add": false,
+      "description": "OOXML shape id; source of the @id in the stable path /shape[@id=ID]. Accepted on add: AddShape honors a caller-supplied id (AcquireShapeId), and dump-replay re-emits it so the cNvPr id stays stable instead of drifting to the 100000+ range and breaking spTgt animation references. Cannot be changed after creation (set: false).",
+      "add": true,
       "set": false,
       "get": true,
       "readback": "integer shape id",

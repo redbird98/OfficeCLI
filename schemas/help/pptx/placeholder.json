@@ -15,6 +15,15 @@
   },
   "note": "Aliases: ph. Inserts a Shape with PlaceholderShape nonVisual properties — geometry comes from the slide layout. Add returns /slide[N]/shape[M] (placeholder is a shape at the OOXML layer). effective.* keys behave as documented in pptx/shape.json.",
   "properties": {
+    "id": {
+      "type": "number",
+      "description": "OOXML placeholder shape id (cNvPr id). Accepted on add: AddPlaceholder honors a caller-supplied id (AcquireShapeId), and dump-replay re-emits it so the cNvPr id stays stable across round-trips instead of drifting to the 100000+ range and breaking spTgt animation references. Cannot be changed after creation (set: false).",
+      "add": true,
+      "set": false,
+      "get": true,
+      "readback": "integer shape id (cNvPr)",
+      "enforcement": "report"
+    },
     "phType": {
       "type": "enum",
       "description": "placeholder type. Required at Add. Set is intentionally not supported: phType binds the placeholder to a slide-layout slot for style/position inheritance, so changing it after creation would produce a half-bound shape rather than a typed placeholder. To change a placeholder's role, remove it and re-add with the new phType.",

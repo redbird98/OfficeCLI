@@ -22,6 +22,15 @@
     "_shared/picture.pptx-xlsx"
   ],
   "properties": {
+    "id": {
+      "type": "number",
+      "description": "OOXML picture shape id (cNvPr id); source of the @id in the stable path /picture[@id=ID]. Accepted on add: AddPicture honors a caller-supplied id (AcquireShapeId), and dump-replay re-emits it so the cNvPr id stays stable instead of drifting to the 100000+ range and breaking spTgt animation references. Cannot be changed after creation (set: false).",
+      "add": true,
+      "set": false,
+      "get": true,
+      "readback": "integer shape id (cNvPr)",
+      "enforcement": "report"
+    },
     "mediaType": {
       "type": "string",
       "description": "logical media kind derived from VideoFromFile / AudioFromFile presence under the picture. One of `picture`, `video`, `audio`. Surfaces only via the `image`/`video`/`audio`/`media` selectors.",
