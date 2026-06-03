@@ -216,7 +216,8 @@
     },
     "link": {
       "type": "string",
-      "description": "hyperlink target attached to the cell. Accepts external URL (https://, http://, mailto:, file://, onenote:, tel:) or internal anchor (#Sheet!Cell, #NamedRange). Use link=none on Set to remove. Parity with Set.",
+      "description": "hyperlink target attached to the cell. Accepts external URL (https://, http://, mailto:, file://, onenote:, tel:) or internal anchor (#Sheet!Cell, #NamedRange). Use link=none on Set to remove. Parity with Set. Alias: url.",
+      "aliases": ["url"],
       "add": true, "set": true, "get": true,
       "examples": [
         "--prop link=https://example.com",

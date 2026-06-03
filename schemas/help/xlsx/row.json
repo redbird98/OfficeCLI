@@ -15,6 +15,18 @@
   },
   "note": "Row index N is 1-based. Add/Set asymmetry: all formatting props are currently Set-only. Insert/move/clone at an occupied slot shifts every row at or past the slot down by one, and every range-bearing structure on the sheet (mergeCells, CF/DV sqref, autoFilter, hyperlink/table refs, named ranges, formula cell-refs) follows the displacement. 'add --from /SheetName/row[K]' with --before/--after clones cells + single-row mergeCells; relative formula refs are delta-shifted to the new anchor (Excel 'Insert Copied Cells' parity).",
   "properties": {
+    "matchedTable": {
+      "type": "string",
+      "description": "label of the table whose column predicate this row matched (emitted on row nodes returned by a row[Col op val] selector). Get-only.",
+      "add": false, "set": false, "get": true,
+      "enforcement": "report"
+    },
+    "tableSource": {
+      "type": "string",
+      "description": "`detected` when matchedTable came from a header-sniffed (not real listObject) table. Get-only.",
+      "add": false, "set": false, "get": true,
+      "enforcement": "report"
+    },
     "cols": {
       "type": "int",
       "description": "number of empty cells to seed in the new row.",

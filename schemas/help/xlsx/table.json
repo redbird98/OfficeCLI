@@ -21,6 +21,24 @@
     "_shared/table.pptx-xlsx"
   ],
   "properties": {
+    "source": {
+      "type": "string",
+      "description": "provenance of the table node. `header-sniff` for a heuristically-detected (unstructured) block surfaced by query outline; absent for a real listObject table.",
+      "add": false, "set": false, "get": true,
+      "enforcement": "report"
+    },
+    "stable": {
+      "type": "bool",
+      "description": "false on a heuristically-detected (header-sniff) table whose boundaries may shift; absent/true for a real listObject. Get-only.",
+      "add": false, "set": false, "get": true,
+      "enforcement": "report"
+    },
+    "dataRange": {
+      "type": "string",
+      "description": "A1 range of the detected table's data body (header-sniff outline node). Get-only.",
+      "add": false, "set": false, "get": true,
+      "enforcement": "report"
+    },
     "ref": {
       "type": "string",
       "description": "cell range reference (A1:C10). Required. Alias: range.",

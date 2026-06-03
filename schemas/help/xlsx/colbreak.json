@@ -19,9 +19,27 @@
       "type": "string",
       "description": "column index or letter. Aliases: column, index.",
       "aliases": ["column", "index"],
-      "add": true, "set": false, "get": false,
+      "add": true, "set": true, "get": false,
       "examples": ["--prop col=F"],
       "readback": "n/a (see sheet.colBreaks)",
+      "enforcement": "report"
+    },
+    "manual": {
+      "type": "bool",
+      "description": "true ⇒ user-inserted (manual) break; false ⇒ automatic.",
+      "add": false, "set": true, "get": false,
+      "enforcement": "report"
+    },
+    "min": {
+      "type": "int",
+      "description": "zero-based start row the break spans (OOXML brk@min).",
+      "add": false, "set": true, "get": false,
+      "enforcement": "report"
+    },
+    "max": {
+      "type": "int",
+      "description": "zero-based end row the break spans (OOXML brk@max).",
+      "add": false, "set": true, "get": false,
       "enforcement": "report"
     }
   }
