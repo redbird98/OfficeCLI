@@ -239,18 +239,20 @@ officecli add shapes-typography.pptx '/slide[5]' --type shape --prop geometry=ro
   --prop text="margin=0.4in  — large inner padding" --prop size=16 \
   --prop margin=0.4in
 
-# list=bullet — shape-level bullet applied to all paragraphs
+# list=bullet — shape-level bullet applied to all paragraphs. Pass every item
+# as ONE multiline text block so the list style covers all paragraphs;
+# paragraphs added after creation do NOT inherit the shape's list style.
 officecli add shapes-typography.pptx '/slide[5]' --type shape --prop geometry=rect \
-  --prop x=6in --prop y=4.9in --prop width=4.5in --prop height=2.5in \
+  --prop x=5in --prop y=4.8in --prop width=4.2in --prop height=1.5in \
   --prop fill=F4A261 --prop color=000000 --prop size=14 \
-  --prop text="First item" \
-  --prop list=bullet
-officecli add shapes-typography.pptx '/slide[5]/shape[8]' --type paragraph --prop text="Second item"
-officecli add shapes-typography.pptx '/slide[5]/shape[8]' --type paragraph --prop text="Third item"
+  --prop list=bullet \
+  --prop text="First item
+Second item
+Third item"
 
 # lineOpacity — outline transparency (0=opaque, 1=invisible); requires a non-none line
 officecli add shapes-typography.pptx '/slide[5]' --type shape --prop geometry=rect \
-  --prop x=0.5in --prop y=6.5in --prop width=3.5in --prop height=1in \
+  --prop x=0.5in --prop y=6.4in --prop width=4in --prop height=0.95in \
   --prop fill=4472C4 --prop lineColor=E63946 --prop lineWidth=6pt \
   --prop lineOpacity=0.35 \
   --prop text="lineOpacity=0.35" --prop color=FFFFFF --prop size=14

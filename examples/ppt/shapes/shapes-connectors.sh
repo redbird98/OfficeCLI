@@ -204,36 +204,22 @@ officecli add "$PPTX" '/slide[4]' --type textbox \
     --prop size=14 --prop bold=true \
     --prop x=0.5in --prop y=4.6in --prop width=12in --prop height=0.4in
 
-# Two shapes to connect with elbows so the corner join is visible
-SX=$(add_shape_get_path '/slide[4]' --type shape --prop geometry=rect \
-    --prop x=0.5in --prop y=5.2in --prop width=1in --prop height=1in --prop fill=4472C4)
-SY=$(add_shape_get_path '/slide[4]' --type shape --prop geometry=rect \
-    --prop x=4in --prop y=6.8in --prop width=1in --prop height=1in --prop fill=4472C4)
-
-X=0.0
-for join in round bevel miter; do
-    OX=$(echo "$X + 0.5" | bc -l)
+# Three elbow connectors, one per column, so each join style at the bend is
+# clearly visible. The third uses the compound lineJoin=miter:<lim> form
+# (limit in 1/1000ths of a percent) to also exercise miterLimit.
+add_elbow() { # $1=x(in)  $2=color  $3=lineJoin  $4=label
     officecli add "$PPTX" '/slide[4]' --type connector \
         --prop shape=elbow \
-        --prop x="${OX}in" --prop y=5.2in \
-        --prop width=4in --prop height=2in \
-        --prop color=E63946 --prop lineWidth=4pt \
-        --prop lineJoin="$join"
+        --prop x="${1}in" --prop y=5.2in --prop width=3.4in --prop height=1.6in \
+        --prop color="$2" --prop lineWidth=5pt \
+        --prop lineJoin="$3"
     officecli add "$PPTX" '/slide[4]' --type textbox \
-        --prop text="lineJoin=$join" --prop size=12 \
-        --prop x="${OX}in" --prop y=7.3in --prop width=3in --prop height=0.4in
-    X=$(echo "$X + 4.5" | bc -l)
-done
-
-# miterLimit — via compound lineJoin=miter:<lim> (1/1000ths of %)
-officecli add "$PPTX" '/slide[4]' --type connector \
-    --prop shape=elbow \
-    --prop x=9.5in --prop y=5.2in --prop width=3in --prop height=2in \
-    --prop color=2A9D8F --prop lineWidth=6pt \
-    --prop lineJoin="miter:800000"
-officecli add "$PPTX" '/slide[4]' --type textbox \
-    --prop text='lineJoin="miter:800000"  (miter + 800% limit)' --prop size=12 \
-    --prop x=9.5in --prop y=7.3in --prop width=4in --prop height=0.4in
+        --prop text="$4" --prop size=12 \
+        --prop x="${1}in" --prop y=7.0in --prop width=4in --prop height=0.4in
+}
+add_elbow 0.5 E63946 round          "lineJoin=round"
+add_elbow 4.7 E63946 bevel          "lineJoin=bevel"
+add_elbow 8.9 2A9D8F "miter:800000" "lineJoin=miter:800000 (800% limit)"
 
 officecli close "$PPTX"
 officecli validate "$PPTX"

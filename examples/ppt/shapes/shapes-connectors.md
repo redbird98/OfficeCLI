@@ -187,27 +187,22 @@ officecli add shapes-connectors.pptx '/slide[4]' --type connector \
 # lineJoin on elbow connectors (affects the bend corner geometry)
 officecli add shapes-connectors.pptx '/slide[4]' --type connector \
   --prop shape=elbow \
-  --prop x=0.5in --prop y=5.2in --prop width=4in --prop height=2in \
-  --prop color=E63946 --prop lineWidth=4pt \
+  --prop x=0.5in --prop y=5.2in --prop width=3.4in --prop height=1.6in \
+  --prop color=E63946 --prop lineWidth=5pt \
   --prop lineJoin=round
 
 officecli add shapes-connectors.pptx '/slide[4]' --type connector \
   --prop shape=elbow \
-  --prop x=5in --prop y=5.2in --prop width=4in --prop height=2in \
-  --prop color=E63946 --prop lineWidth=4pt \
+  --prop x=4.7in --prop y=5.2in --prop width=3.4in --prop height=1.6in \
+  --prop color=E63946 --prop lineWidth=5pt \
   --prop lineJoin=bevel
 
+# Third column uses the compound lineJoin=miter:<lim> form (1/1000ths of %)
+# to set the join style AND the miter limit in one prop.
 officecli add shapes-connectors.pptx '/slide[4]' --type connector \
   --prop shape=elbow \
-  --prop x=9.5in --prop y=5.2in --prop width=3in --prop height=2in \
-  --prop color=E63946 --prop lineWidth=4pt \
-  --prop lineJoin=miter
-
-# miterLimit — compound lineJoin=miter:<lim> form (1/1000ths of %)
-officecli add shapes-connectors.pptx '/slide[4]' --type connector \
-  --prop shape=elbow \
-  --prop x=9.5in --prop y=5.2in --prop width=3in --prop height=2in \
-  --prop color=2A9D8F --prop lineWidth=6pt \
+  --prop x=8.9in --prop y=5.2in --prop width=3.4in --prop height=1.6in \
+  --prop color=2A9D8F --prop lineWidth=5pt \
   --prop lineJoin="miter:800000"
 
 officecli close shapes-connectors.pptx

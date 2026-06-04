@@ -229,27 +229,27 @@ done
 # Expressed in 1/1000ths of a percent; 800000 = 800%. Supplied as the compound
 # lineJoin=miter:<lim> form which sets both join style and limit in one prop.
 officecli add "$PPTX" '/slide[5]' --type shape --prop geometry=triangle \
-    --prop x=0.5in --prop y=5.5in --prop width=2.5in --prop height=1.8in \
+    --prop x=0.5in --prop y=5.1in --prop width=2.5in --prop height=1.6in \
     --prop fill=A8DADC --prop lineColor=E63946 --prop lineWidth=8pt \
     --prop lineJoin="miter:800000"
 officecli add "$PPTX" '/slide[5]' --type shape \
     --prop text='lineJoin="miter:800000"  (limit 800%)' --prop size=12 \
-    --prop x=0.5in --prop y=7.4in --prop width=4in --prop height=0.5in \
+    --prop x=0.5in --prop y=6.9in --prop width=4in --prop height=0.4in \
     --prop fill=none --prop line="000000:0:solid"
 
 # lineAlign — stroke alignment relative to the path: ctr (centered) vs in (inset).
 # Same shape, same border width, only the alignment of the stroke differs.
-X=9
+X=8.9
 for algn in ctr in; do
     officecli add "$PPTX" '/slide[5]' --type shape --prop geometry=rect \
-        --prop x="${X}in" --prop y=2.8in --prop width=2in --prop height=2in \
+        --prop x="${X}in" --prop y=2.8in --prop width=1.9in --prop height=2in \
         --prop fill=F4A261 --prop lineColor=1D3557 --prop lineWidth=12pt \
         --prop lineAlign="$algn"
     officecli add "$PPTX" '/slide[5]' --type shape \
         --prop text="lineAlign=$algn" --prop size=12 \
-        --prop x="${X}in" --prop y=4.9in --prop width=2.5in --prop height=0.4in \
+        --prop x="${X}in" --prop y=4.9in --prop width=2in --prop height=0.4in \
         --prop fill=none --prop line="000000:0:solid"
-    X=$(echo "$X + 2.5" | bc -l)
+    X=$(echo "$X + 2.1" | bc -l)
 done
 
 officecli close "$PPTX"

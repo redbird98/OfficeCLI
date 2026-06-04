@@ -243,32 +243,37 @@ for va in top middle bottom; do
         --prop valign="$va"
 done
 
+# Bottom area laid out as a 2x2 grid (left column x=0.5, right column x=5.0)
+# so no boxes overlap.
+
 # margin — inner text padding (uniform; also accepts per-edge via marginLeft etc.)
 officecli add "$PPTX" '/slide[5]' --type shape --prop geometry=roundRect \
-    --prop x=0.5in --prop y=4.9in --prop width=5in --prop height=1.4in \
+    --prop x=0.5in --prop y=4.8in --prop width=4in --prop height=1.3in \
     --prop fill=F1FAEE --prop lineColor=2A9D8F --prop lineWidth=2pt \
     --prop text="margin=0.4in  — large inner padding" --prop size=16 \
     --prop margin=0.4in
 
-# list — shape-level bullet or numbered list (applies to all paragraphs)
+# list — shape-level bullet/numbered list. Pass every item as ONE multiline
+# text block so the list style applies to all paragraphs; paragraphs added
+# after creation do NOT inherit the shape's list style.
 officecli add "$PPTX" '/slide[5]' --type shape --prop geometry=rect \
-    --prop x=6in --prop y=4.9in --prop width=4.5in --prop height=2.5in \
+    --prop x=5in --prop y=4.8in --prop width=4.2in --prop height=1.5in \
     --prop fill=F4A261 --prop color=000000 --prop size=14 \
-    --prop text="First item" \
-    --prop list=bullet
-officecli add "$PPTX" '/slide[5]/shape[8]' --type paragraph --prop text="Second item"
-officecli add "$PPTX" '/slide[5]/shape[8]' --type paragraph --prop text="Third item"
+    --prop list=bullet \
+    --prop text="First item
+Second item
+Third item"
 
 # lineOpacity — outline transparency (0=opaque … 1=invisible); needs a non-none line
 officecli add "$PPTX" '/slide[5]' --type shape --prop geometry=rect \
-    --prop x=0.5in --prop y=6.5in --prop width=3.5in --prop height=1in \
+    --prop x=0.5in --prop y=6.4in --prop width=4in --prop height=0.95in \
     --prop fill=4472C4 --prop lineColor=E63946 --prop lineWidth=6pt \
     --prop lineOpacity=0.35 \
     --prop text="lineOpacity=0.35" --prop color=FFFFFF --prop size=14
 
 # animation — shape entrance animation (see animations.sh for full coverage)
 officecli add "$PPTX" '/slide[5]' --type shape --prop geometry=roundRect \
-    --prop x=4.3in --prop y=6.5in --prop width=3.5in --prop height=1in \
+    --prop x=5in --prop y=6.4in --prop width=4.2in --prop height=0.95in \
     --prop fill=E63946 --prop color=FFFFFF --prop size=14 --prop bold=true \
     --prop text="animation=fadeIn" \
     --prop animation=fadeIn
