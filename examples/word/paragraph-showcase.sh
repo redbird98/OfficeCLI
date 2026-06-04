@@ -109,6 +109,15 @@ officecli add "$DOCX" /body --type paragraph --prop "text=mark: italic/strike/un
     --prop markRPr.size=14pt --prop markRPr.highlight=yellow \
     --prop markRPr.font.latin=Georgia --prop markRPr.font.ea=SimSun --prop markRPr.font.cs=Arial
 
+# --- text frame / drop-cap frame (framePr) ---
+# A framed paragraph floats in its own box (twips for w/h/hSpace/vSpace);
+# wrap=around lets body text flow around it, anchored to the margin.
+heading "Text frame (framePr)"
+officecli add "$DOCX" /body --type paragraph --prop "text=Framed paragraph — floats in a 3-inch box with text wrapping around it, anchored to the margin." \
+    --prop framePr.w=4320 --prop framePr.h=720 --prop framePr.wrap=around \
+    --prop framePr.hAnchor=margin --prop framePr.vAnchor=text \
+    --prop framePr.hSpace=180 --prop framePr.vSpace=180
+
 # --- list numbering (auto-created via listStyle; numId/numLevel reference it) ---
 heading "List numbering"
 officecli add "$DOCX" /body --type paragraph --prop "text=Bulleted item" --prop listStyle=bullet

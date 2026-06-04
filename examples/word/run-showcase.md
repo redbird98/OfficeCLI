@@ -33,8 +33,12 @@ bash run-showcase.sh
 | Per-script fonts | `font` (all), `font.latin`, `font.ea`, `font.cs` |
 | Run shading / hidden | `shading`, `vanish`, `noproof` |
 | w14 text effects | `textFill`, `textOutline`, `w14glow`, `w14reflection`, `w14shadow` |
+| Border / kerning / layout | `bdr` (text border), `kern` (kerning), `eastAsianLayout.vert`/`.combine`, `rStyle` (character style) |
 
-This trio exercises **all 43 settable run properties** (verified by a coverage check).
+This trio exercises the full settable run property surface — the 43
+schema-declared run keys **plus** handler-supported keys that the schema does
+not yet enumerate (`kern`, `bdr`, `eastAsianLayout.*`, run-level `rStyle`,
+`position`, `underline.color`). All of them round-trip through `add` → `get`.
 
 ## Mixed runs (super/subscript)
 
@@ -49,8 +53,10 @@ officecli add file.docx "/body/p[last()]" --type run --prop text=2 --prop supers
 > The paragraph path `/body/p[last()]` must be quoted in the shell — `[` / `(`
 > are shell metacharacters.
 
-> `kern` is **not** a docx run property (only `charSpacing` is); use
-> `charSpacing` for inter-character spacing.
+> `charSpacing` and `kern` are distinct docx run properties: `charSpacing`
+> (w:spacing) adds a fixed gap between every character, while `kern` (w:kern)
+> sets the *minimum font size* (in half-points; 28 = 14pt) above which Word
+> applies pair kerning. Both round-trip on runs.
 
 > w14 text effects (`textFill`, `textOutline`, `w14*`) now apply via
 > `add paragraph --prop ...` too (routed to the implicit run), matching how

@@ -113,5 +113,18 @@ officecli add "$DOCX" /body --type paragraph --prop "text=w14 glow" --prop w14gl
 officecli add "$DOCX" /body --type paragraph --prop "text=w14 reflection" --prop w14reflection=true --prop size=16
 officecli add "$DOCX" /body --type paragraph --prop "text=w14 shadow" --prop w14shadow=FF0000 --prop size=16
 
+# --- character border, kerning, EastAsian layout, run style ---
+# kern / eastAsianLayout route to the paragraph's implicit run; bdr and a
+# run-level rStyle must be set on explicit `--type run` children (on a
+# paragraph, `bdr`/`rStyle` bind the paragraph border / paragraph-mark style).
+heading "Border, kerning, EastAsian layout, run style"
+officecli add "$DOCX" /body --type paragraph --prop "text=Kerning on (28 = 14pt threshold)" --prop kern=28
+officecli add "$DOCX" /body --type paragraph --prop "text=EastAsian layout 縦中横 (vert + combine)" --prop eastAsianLayout.vert=true --prop eastAsianLayout.combine=true
+officecli add "$DOCX" /body --type paragraph --prop "text=Boxed run: "
+officecli add "$DOCX" "/body/p[last()]" --type run --prop "text=single border" --prop bdr=single
+officecli add "$DOCX" "/body/p[last()]" --type run --prop "text=  red 0.5pt" --prop "bdr=single;4;FF0000;0"
+officecli add "$DOCX" /body --type paragraph --prop "text=Run character style: "
+officecli add "$DOCX" "/body/p[last()]" --type run --prop "text=Emphasis" --prop rStyle=Emphasis
+
 officecli validate "$DOCX"
 echo "Created: $DOCX"

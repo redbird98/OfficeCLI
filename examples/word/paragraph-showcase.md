@@ -33,9 +33,13 @@ bash paragraph-showcase.sh
 | Styles | `style` (paragraph), `rStyle` (character) |
 | Shading variants | `shd`, `shading.val`, `shading.fill`, `shading.color` |
 | Tab stops | `tabs` |
+| Text frame | `framePr.w/.h/.wrap/.hAnchor/.vAnchor/.hSpace/.vSpace` (floating frame / drop-cap) |
 | List numbering | `listStyle`, `start`, `numId`, `numLevel` |
 
-This trio exercises **all 60 settable paragraph properties** (verified by a coverage check).
+This trio exercises the full settable paragraph property surface — the 60
+schema-declared paragraph keys **plus** the handler-supported `framePr.*` text
+frame, which the schema does not yet enumerate. All of them round-trip through
+`add` → `get`.
 
 ## Two kinds of "bold" on a paragraph
 
