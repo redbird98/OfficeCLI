@@ -141,6 +141,10 @@ heading "Line & indent flags"
 officecli add "$DOCX" /body --type paragraph --prop "text=suppressLineNumbers + suppressAutoHyphens" --prop suppressLineNumbers=true --prop suppressAutoHyphens=true
 officecli add "$DOCX" /body --type paragraph --prop "text=mirrorIndents on, adjustRightInd off, snapToGrid off" --prop mirrorIndents=true --prop adjustRightInd=false --prop snapToGrid=false
 
+# --- web / textbox layout hints ---
+heading "Web / textbox hints"
+officecli add "$DOCX" /body --type paragraph --prop "text=divId (web division id) + textboxTightWrap=allLines" --prop divId=123456 --prop textboxTightWrap=allLines
+
 # --- list numbering (auto-created via listStyle; numId/numLevel reference it) ---
 heading "List numbering"
 officecli add "$DOCX" /body --type paragraph --prop "text=Bulleted item" --prop listStyle=bullet

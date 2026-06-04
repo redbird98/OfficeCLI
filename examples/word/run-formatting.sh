@@ -137,6 +137,11 @@ officecli add "$DOCX" /body --type paragraph --prop "text=Circle emphasis (em=ci
 officecli add "$DOCX" /body --type paragraph --prop "text=Legacy text animation (effect=blinkBackground)" --prop effect=blinkBackground
 officecli add "$DOCX" /body --type paragraph --prop "text=Hidden in web layout (webHidden)" --prop webHidden=true
 officecli add "$DOCX" /body --type paragraph --prop "text=Fit run to 1 inch (fitText=1440 twips)" --prop fitText=1440
+# snapToGrid is also a paragraph property, so set it on an explicit run child to
+# demonstrate the run-level flag unambiguously; specVanish is run-only.
+officecli add "$DOCX" /body --type paragraph --prop "text=Layout grid + special vanish: "
+officecli add "$DOCX" "/body/p[last()]" --type run --prop "text=snapToGrid=false" --prop snapToGrid=false
+officecli add "$DOCX" "/body/p[last()]" --type run --prop "text=  specVanish" --prop specVanish=true
 
 officecli validate "$DOCX"
 echo "Created: $DOCX"

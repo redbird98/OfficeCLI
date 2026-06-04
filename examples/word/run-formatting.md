@@ -34,7 +34,7 @@ bash run-formatting.sh
 | Run shading / hidden | `shading`, `vanish`, `noproof` |
 | w14 text effects | `textFill`, `textOutline`, `w14glow`, `w14reflection`, `w14shadow` |
 | Border / kerning / layout | `bdr` (text border), `kern` (kerning), `eastAsianLayout.vert`/`.combine`, `rStyle` (character style) |
-| Emphasis & visibility | `em` (着重号 dot/underDot/circle), `effect` (legacy animation), `webHidden`, `fitText` |
+| Emphasis & visibility | `em` (着重号 dot/underDot/circle), `effect` (legacy animation), `webHidden`, `fitText`, `snapToGrid`, `specVanish` |
 
 This trio exercises the full settable run property surface — the 43
 schema-declared run keys **plus** handler-supported keys that the schema does

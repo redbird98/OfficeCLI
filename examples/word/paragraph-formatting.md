@@ -38,14 +38,15 @@ bash paragraph-formatting.sh
 | Vertical text alignment | `textAlignment=top\|center\|baseline\|bottom` |
 | EastAsian typography | `kinsoku`, `autoSpaceDE`, `autoSpaceDN`, `overflowPunct`, `topLinePunct` |
 | Line / indent flags | `suppressLineNumbers`, `suppressAutoHyphens`, `mirrorIndents`, `adjustRightInd`, `snapToGrid` |
+| Web / textbox hints | `divId`, `textboxTightWrap` |
 | List numbering | `listStyle`, `start`, `numId`, `numLevel` |
 
 This trio exercises the full settable paragraph property surface — the 60
 schema-declared paragraph keys **plus** the handler-supported `framePr.*` text
 frame, **plus** long-tail OOXML pPr children handled by the generic
 typed-attribute fallback (`pBdr` borders, `textAlignment`, the EastAsian
-typography toggles, and the line/indent flags). All of them round-trip through
-`add` → `get`.
+typography toggles, the line/indent flags, and `divId` / `textboxTightWrap`).
+All of them round-trip through `add` → `get`.
 
 ## Two kinds of "bold" on a paragraph
 
