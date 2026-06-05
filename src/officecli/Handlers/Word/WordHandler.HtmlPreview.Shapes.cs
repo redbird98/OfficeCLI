@@ -243,6 +243,19 @@ public partial class WordHandler
                 var hAlign = hPos?.Descendants().FirstOrDefault(e => e.LocalName == "align")?.InnerText;
                 var hPosFrom = hPos?.RelativeFrom?.Value;
 
+                // wrapNone → image floats over (or under) the text rather than
+                // wrapping it. behindDoc="1" paints behind the body text like a
+                // watermark (negative z-index); behindDoc="0" paints on top
+                // (positive z-index). Either way the image is absolutely
+                // positioned relative to the .page box (which is position:relative)
+                // at the anchored hPosition/vPosition, so the text column flows
+                // independently and visually overlaps the image — matching Word.
+                if (anchor.Elements().Any(e => e.LocalName == "wrapNone"))
+                {
+                    RenderWrapNoneOverlayImage(sb, drawing, anchor, dataUri, alt, widthPx, heightPx);
+                    return;
+                }
+
                 // wrapTopAndBottom → centered block image (no text beside it)
                 var wrapTopBottom = anchor.Elements().Any(e => e.LocalName == "wrapTopAndBottom");
                 if (wrapTopBottom)
@@ -378,6 +391,59 @@ public partial class WordHandler
         {
             sb.Append("<span class=\"img-error\">[Image]</span>");
         }
+    }
+
+    /// <summary>
+    /// Render a wrapNone anchored image as an absolutely-positioned overlay so
+    /// the body text flows independently of it. behindDoc="1" paints the image
+    /// behind the text (negative z-index, watermark-style); behindDoc="0" paints
+    /// it on top (positive z-index). Position is computed from the anchor's
+    /// hPosition/vPosition offsets relative to the .page box (position:relative).
+    /// margin/column/paragraph offsets are measured from the page content edge,
+    /// so the page margins are added; page-relative offsets are absolute from
+    /// the physical page edge (= the .page padding-box origin).
+    /// </summary>
+    private void RenderWrapNoneOverlayImage(StringBuilder sb, Drawing drawing, DW.Anchor anchor,
+        string dataUri, string alt, long widthPx, long heightPx)
+    {
+        var pg = GetPageLayout();
+
+        var hPos = anchor.GetFirstChild<DW.HorizontalPosition>();
+        var vPos = anchor.GetFirstChild<DW.VerticalPosition>();
+        var hFrom = hPos?.RelativeFrom?.Value;
+        var vFrom = vPos?.RelativeFrom?.Value;
+
+        double leftPt = pg.MarginLeftPt;
+        var hOffEl = hPos?.Descendants().FirstOrDefault(e => e.LocalName == "posOffset");
+        if (hOffEl != null && long.TryParse(hOffEl.InnerText, out var hOffEmu))
+        {
+            leftPt = hFrom == DW.HorizontalRelativePositionValues.Page
+                ? hOffEmu / EmuConverter.EmuPerPointF
+                : pg.MarginLeftPt + hOffEmu / EmuConverter.EmuPerPointF;
+        }
+
+        double topPt = pg.MarginTopPt;
+        var vOffEl = vPos?.Descendants().FirstOrDefault(e => e.LocalName == "posOffset");
+        if (vOffEl != null && long.TryParse(vOffEl.InnerText, out var vOffEmu))
+        {
+            topPt = vFrom == DW.VerticalRelativePositionValues.Page
+                ? vOffEmu / EmuConverter.EmuPerPointF
+                : pg.MarginTopPt + vOffEmu / EmuConverter.EmuPerPointF;
+        }
+
+        // behindDoc="1" → behind text (watermark); else in front.
+        bool behind = anchor.BehindDoc?.Value == true;
+        var zIndex = behind ? "-1" : "10";
+
+        var widthAttr = widthPx > 0 ? $" width=\"{widthPx}\"" : "";
+        var heightAttr = heightPx > 0 ? $" height=\"{heightPx}\"" : "";
+        var style = $"position:absolute;left:{leftPt:0.#}pt;top:{topPt:0.#}pt;z-index:{zIndex}";
+
+        var crop = GetCropPercents(drawing);
+        if (crop.HasValue)
+            RenderCroppedImage(sb, dataUri, widthPx, heightPx, crop.Value.l, crop.Value.t, crop.Value.r, crop.Value.b, HtmlEncodeAttr(alt), style);
+        else
+            sb.Append($"<img src=\"{dataUri}\" alt=\"{HtmlEncodeAttr(alt)}\"{widthAttr}{heightAttr} style=\"{style}\">");
     }
 
     /// <summary>
