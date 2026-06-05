@@ -2348,6 +2348,9 @@ public partial class ExcelHandler
             return rawValue;
         }
 
+        // Normalize negative zero to positive zero — real Excel renders -0 as "0".
+        if (numVal == 0) { numVal = 0.0; rawValue = "0"; }
+
         // Clean up floating point artifacts for display (e.g. 25300000.000000004 → 25300000)
         var cleanVal = numVal;
         var rounded = Math.Round(numVal, 10);
@@ -2385,12 +2388,50 @@ public partial class ExcelHandler
 
         // Mantissa with up to 5 fractional digits (Excel General caps at ~6
         // significant figures in scientific), trailing zeros trimmed.
-        var mantissa = value / Math.Pow(10, exp);
-        var mantStr = mantissa.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture);
+        //
+        // Derive mantissa+exponent from the value's own shortest round-trippable
+        // string (.NET Core default ToString) rather than value / 10^exp, which
+        // overflows to Infinity for extreme exponents (e.g. the min positive
+        // subnormal 5E-324, where Math.Pow(10, -324) underflows toward 0). The
+        // shortest form gives Excel's "5E-324" instead of the exact-bits
+        // "4.94066E-324", and for normal magnitudes still rounds to ~6 sig figs.
+        var (m, e) = NormalizeScientific(value);
+        var mantStr = m.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture);
+        exp = e;
         var expStr = exp >= 0
             ? $"+{exp.ToString("00", System.Globalization.CultureInfo.InvariantCulture)}"
             : $"-{Math.Abs(exp).ToString("00", System.Globalization.CultureInfo.InvariantCulture)}";
         return $"{mantStr}E{expStr}";
+    }
+
+    /// <summary>
+    /// Decompose a non-zero finite double into (mantissa, base-10 exponent) where
+    /// 1 &lt;= |mantissa| &lt; 10, using the shortest round-trippable decimal string
+    /// (.NET Core default ToString) so extreme magnitudes never overflow and the
+    /// shortest sane mantissa is used (5E-324, not 4.94066E-324). Never divides by
+    /// a power of 10, so it is overflow/underflow safe.
+    /// </summary>
+    private static (double mantissa, int exp) NormalizeScientific(double value)
+    {
+        // "R"/default round-trip in scientific form, e.g. "5E-324", "1.2345E+20".
+        var s = value.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+        var ePos = s.IndexOfAny(new[] { 'E', 'e' });
+        double mant;
+        int exp;
+        if (ePos >= 0)
+        {
+            mant = double.Parse(s.Substring(0, ePos), System.Globalization.CultureInfo.InvariantCulture);
+            exp = int.Parse(s.Substring(ePos + 1), System.Globalization.CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            mant = double.Parse(s, System.Globalization.CultureInfo.InvariantCulture);
+            exp = 0;
+        }
+        // Renormalize so 1 <= |mant| < 10 (the round-trip mantissa may be e.g. 12.3).
+        while (Math.Abs(mant) >= 10.0) { mant /= 10.0; exp++; }
+        while (mant != 0 && Math.Abs(mant) < 1.0) { mant *= 10.0; exp--; }
+        return (mant, exp);
     }
 
     /// <summary>
@@ -3387,7 +3428,20 @@ public partial class ExcelHandler
     private static string CellHtml(string text)
     {
         var encoded = HtmlEncode(text);
-        return encoded.Contains('\n') ? encoded.Replace("\n", "<br>") : encoded;
+        if (encoded.Contains('\n')) encoded = encoded.Replace("\n", "<br>");
+        // Browsers collapse runs of literal spaces; real Excel preserves them.
+        // Encode leading spaces and runs of 2+ spaces as &nbsp; so the cell text
+        // keeps its original spacing (single interior spaces left as-is to allow
+        // normal wrapping). Cheap fast-path: only touch strings that actually
+        // contain a double space or start with one.
+        if (encoded.StartsWith(" ") || encoded.Contains("  "))
+        {
+            // Any leading-space run, or any interior run of 2+ spaces, becomes
+            // that many &nbsp;. A lone interior space stays a normal space.
+            encoded = Regex.Replace(encoded, @"^ +|  +",
+                m => string.Concat(System.Linq.Enumerable.Repeat("&nbsp;", m.Length)));
+        }
+        return encoded;
     }
 
     /// <summary>
