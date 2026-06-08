@@ -1458,9 +1458,14 @@ public partial class WordHandler
     private string AddWatermark(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
         var wmText = properties.GetValueOrDefault("text", "DRAFT");
-        // VML watermarks accept named colors (silver, red, etc.) or hex — don't sanitize
+        // BUG-R5A(BUG1): route the Add color through the same sanitizer the Set
+        // path uses (SanitizeHex → ParseHelpers.SanitizeColorForOoxml) so CSS
+        // RRGGBBAA (#FF000040) and bare AARRGGBB inputs are normalized to 6-digit
+        // RGB before hitting VML fillcolor. The previous TrimStart('#') passed
+        // 8-digit hex straight through, producing a wrong color (#FF000040 →
+        // #000040). Named colors (silver, red…) survive SanitizeHex unchanged.
         var wmColor = properties.TryGetValue("color", out var wmcVal)
-            ? wmcVal.TrimStart('#') : "silver";
+            ? SanitizeHex(wmcVal) : "silver";
         var wmFont = properties.GetValueOrDefault("font", OfficeDefaultFonts.MinorLatin);
         var wmSize = properties.GetValueOrDefault("size", "1pt");
         if (!wmSize.EndsWith("pt")) wmSize += "pt";
