@@ -250,6 +250,113 @@ public partial class WordHandler : IDocumentHandler
         }
     }
 
+    // dump→batch round-trip carrier for a Word OLE object run. The dump emits
+    // these so AddOle can rebuild the embedded part + icon + VML frame without
+    // an external src file. EmbeddedBytes is the payload exactly as stored
+    // (raw package, or CFB-wrapped Ole10Native) — fed back verbatim.
+    internal sealed record OleEmitData(
+        byte[] EmbeddedBytes, string OleKind, string EmbeddedContentType, string EmbeddedExt,
+        byte[]? IconBytes, string? IconContentType,
+        string? ProgId, string? Display, string? Width, string? Height, string? Name);
+
+    private const string RelNs = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+    /// <summary>
+    /// dump→batch: extract everything needed to faithfully re-add an OLE object
+    /// run — the embedded payload bytes (raw) plus part kind / content type /
+    /// target extension, the icon image bytes, and the VML display metadata
+    /// (progId, drawAspect→display, width/height, friendly name). Returns null
+    /// when the run is not an OLE object or its parts can't be resolved, so the
+    /// emitter falls back to the warn-and-drop path.
+    /// </summary>
+    internal OleEmitData? GetOleEmitData(string runPath)
+    {
+        OpenXmlElement? element;
+        try { element = NavigateToElement(ParsePath(runPath)); }
+        catch { return null; }
+        if (element is not Run run) return null;
+        var oleObj = run.GetFirstChild<EmbeddedObject>();
+        if (oleObj == null) return null;
+
+        var oleElement = oleObj.Descendants().FirstOrDefault(e => e.LocalName == "OLEObject");
+        if (oleElement == null) return null;
+        string? embedRelId = null, progId = null, drawAspect = null;
+        foreach (var a in oleElement.GetAttributes())
+        {
+            if (a.LocalName == "ProgID") progId = a.Value;
+            else if (a.LocalName == "DrawAspect") drawAspect = a.Value;
+            else if (a.LocalName == "id" && a.NamespaceUri == RelNs) embedRelId = a.Value;
+        }
+        if (string.IsNullOrEmpty(embedRelId)) return null;
+
+        var hostPart = ResolveImageHostPart(run);
+        OpenXmlPart embedPart;
+        try { embedPart = hostPart.GetPartById(embedRelId); }
+        catch { return null; }
+        byte[] embeddedBytes;
+        try
+        {
+            using var s = embedPart.GetStream();
+            using var ms = new MemoryStream();
+            s.CopyTo(ms);
+            embeddedBytes = ms.ToArray();
+        }
+        catch { return null; }
+        var oleKind = embedPart is EmbeddedPackagePart ? "package" : "object";
+        var embedExt = System.IO.Path.GetExtension(embedPart.Uri.ToString()).TrimStart('.');
+
+        byte[]? iconBytes = null;
+        string? iconCt = null;
+        var imageData = oleObj.Descendants().FirstOrDefault(e => e.LocalName == "imagedata");
+        if (imageData != null)
+        {
+            var iconRelId = imageData.GetAttributes()
+                .FirstOrDefault(a => a.LocalName == "id" && a.NamespaceUri == RelNs).Value;
+            if (!string.IsNullOrEmpty(iconRelId))
+            {
+                try
+                {
+                    var ip = hostPart.GetPartById(iconRelId);
+                    using var s = ip.GetStream();
+                    using var ms = new MemoryStream();
+                    s.CopyTo(ms);
+                    iconBytes = ms.ToArray();
+                    iconCt = ip.ContentType;
+                }
+                catch { /* icon is best-effort; AddOle falls back to placeholder */ }
+            }
+        }
+
+        string? display = string.IsNullOrEmpty(drawAspect)
+            ? null
+            : (drawAspect.Equals("Content", StringComparison.OrdinalIgnoreCase) ? "content" : "icon");
+
+        string? width = null, height = null, name = null;
+        var shape = oleObj.Descendants().FirstOrDefault(e => e.LocalName == "shape");
+        if (shape != null)
+        {
+            var alt = shape.GetAttributes().FirstOrDefault(a => a.LocalName == "alt").Value;
+            if (!string.IsNullOrEmpty(alt)) name = alt;
+            var style = shape.GetAttributes().FirstOrDefault(a => a.LocalName == "style").Value;
+            if (!string.IsNullOrEmpty(style))
+            {
+                foreach (var seg in style.Split(';', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var kv = seg.Split(':', 2);
+                    if (kv.Length != 2) continue;
+                    var k = kv[0].Trim().ToLowerInvariant();
+                    // Keep the raw VML literal (e.g. "77pt") — AddOle's ParseEmu
+                    // accepts pt/cm/in, so the frame dimensions round-trip exactly.
+                    if (k == "width") width = kv[1].Trim();
+                    else if (k == "height") height = kv[1].Trim();
+                }
+            }
+        }
+
+        return new OleEmitData(embeddedBytes, oleKind, embedPart.ContentType, embedExt,
+            iconBytes, iconCt, progId, display, width, height, name);
+    }
+
     private OpenXmlPart ResolveImageHostPart(Run run)
     {
         var headerAncestor = run.Ancestors<Header>().FirstOrDefault();

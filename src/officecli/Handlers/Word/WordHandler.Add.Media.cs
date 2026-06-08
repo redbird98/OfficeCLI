@@ -608,10 +608,41 @@ public partial class WordHandler
         }
 
         // 1. Create the embedded binary payload part and rel id on the host part.
-        var (embedRelId, _) = OfficeCli.Core.OleHelper.AddEmbeddedPart(hostPart, srcPath, _filePath);
-
-        // 2. Resolve ProgID (explicit > auto-detected from extension).
-        var progId = OfficeCli.Core.OleHelper.ResolveProgId(properties, srcPath);
+        // 2. Resolve ProgID.
+        string embedRelId;
+        string progId;
+        if (OfficeCli.Core.OleHelper.TryDecodeDataUri(srcPath, out var embedBytes, out var dataCt))
+        {
+            // dump→batch round-trip: src is a data: URI carrying the embedded
+            // payload exactly as stored (raw package, or CFB-wrapped Ole10Native
+            // for generic objects). The dump also forwards oleKind / contentType
+            // / embedExt so we rebuild the same part class + content type +
+            // target extension and feed the bytes verbatim (no extension sniffing,
+            // no CFB re-wrap).
+            var oleKind = properties.GetValueOrDefault("oleKind")
+                ?? properties.GetValueOrDefault("olekind")
+                ?? (dataCt.Contains("oleObject", StringComparison.OrdinalIgnoreCase) ? "object" : "package");
+            var contentType = properties.GetValueOrDefault("contentType")
+                ?? properties.GetValueOrDefault("contenttype")
+                ?? (string.IsNullOrEmpty(dataCt) ? "application/octet-stream" : dataCt);
+            var embedExt = properties.GetValueOrDefault("embedExt")
+                ?? properties.GetValueOrDefault("embedext");
+            (embedRelId, _) = OfficeCli.Core.OleHelper.AddEmbeddedPartFromBytes(
+                hostPart, embedBytes, oleKind, contentType, embedExt);
+            // No file extension to sniff ProgID from — the dump always forwards
+            // it, so require it explicitly rather than guessing.
+            progId = properties.GetValueOrDefault("progId")
+                ?? properties.GetValueOrDefault("progid")
+                ?? throw new ArgumentException(
+                    "inline ole payload (data: src) requires an explicit --prop progId");
+            OfficeCli.Core.OleHelper.ValidateProgId(progId);
+        }
+        else
+        {
+            (embedRelId, _) = OfficeCli.Core.OleHelper.AddEmbeddedPart(hostPart, srcPath, _filePath);
+            // ProgID: explicit > auto-detected from extension.
+            progId = OfficeCli.Core.OleHelper.ResolveProgId(properties, srcPath);
+        }
 
         // 3. Create the icon preview ImagePart on the host part (same part
         //    that owns the OLE element itself). Attaching to MainDocumentPart

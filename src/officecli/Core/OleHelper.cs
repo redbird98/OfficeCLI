@@ -276,6 +276,100 @@ internal static class OleHelper
     }
 
     /// <summary>
+    /// dump→batch round-trip: create the embedded payload part from raw bytes
+    /// that are ALREADY in their final embedded form (a raw Office package for
+    /// EmbeddedPackagePart, or CFB-wrapped Ole10Native for EmbeddedObjectPart).
+    /// Unlike <see cref="AddEmbeddedPart"/>, this feeds the bytes verbatim — no
+    /// extension-based classification and no CFB re-wrapping — because the
+    /// source bytes captured by the dump are exactly what must be written back.
+    /// <paramref name="oleKind"/> ("package"/"object"), <paramref name="contentType"/>
+    /// and <paramref name="embedExt"/> come from the source part so the rebuilt
+    /// relationship type, content type and target extension match byte-for-byte.
+    /// </summary>
+    public static (string RelId, OpenXmlPart Part) AddEmbeddedPartFromBytes(
+        OpenXmlPart host, byte[] raw, string oleKind, string contentType, string? embedExt)
+    {
+        var isPackage = string.Equals(oleKind, "package", StringComparison.OrdinalIgnoreCase);
+        OpenXmlPart part;
+        if (isPackage)
+        {
+            // Reconstruct the exact package part type from the source content
+            // type + target extension (PartTypeInfo's public (ct, ext) ctor),
+            // so legacy (.xls → application/vnd.ms-excel) and modern formats
+            // alike round-trip without a hardcoded content-type table.
+            var pt = new PartTypeInfo(contentType, string.IsNullOrEmpty(embedExt) ? "bin" : embedExt);
+            part = host switch
+            {
+                MainDocumentPart mdp => mdp.AddEmbeddedPackagePart(pt),
+                WorksheetPart wp => wp.AddEmbeddedPackagePart(pt),
+                SlidePart sp => sp.AddEmbeddedPackagePart(pt),
+                HeaderPart hp => hp.AddEmbeddedPackagePart(pt),
+                FooterPart fp => fp.AddEmbeddedPackagePart(pt),
+                _ => throw new InvalidOperationException(
+                    $"Host part type {host.GetType().Name} does not support embedded packages"),
+            };
+        }
+        else
+        {
+            var ct = string.IsNullOrEmpty(contentType)
+                ? "application/vnd.openxmlformats-officedocument.oleObject"
+                : contentType;
+            part = host switch
+            {
+                MainDocumentPart mdp => mdp.AddEmbeddedObjectPart(ct),
+                WorksheetPart wp => wp.AddEmbeddedObjectPart(ct),
+                SlidePart sp => sp.AddEmbeddedObjectPart(ct),
+                HeaderPart hp => hp.AddEmbeddedObjectPart(ct),
+                FooterPart fp => fp.AddEmbeddedObjectPart(ct),
+                _ => throw new InvalidOperationException(
+                    $"Host part type {host.GetType().Name} does not support embedded objects"),
+            };
+        }
+        try
+        {
+            using var ms = new MemoryStream(raw);
+            part.FeedData(ms);
+        }
+        catch
+        {
+            try { host.DeletePart(part); } catch { /* best effort */ }
+            throw;
+        }
+        return (host.GetIdOfPart(part), part);
+    }
+
+    /// <summary>
+    /// Parse a <c>data:&lt;contentType&gt;;base64,&lt;payload&gt;</c> URI into its
+    /// content type and decoded bytes. Returns false for any non-data-URI or
+    /// malformed input (caller falls back to file-path handling).
+    /// </summary>
+    public static bool TryDecodeDataUri(string? src, out byte[] bytes, out string contentType)
+    {
+        bytes = Array.Empty<byte>();
+        contentType = "";
+        if (string.IsNullOrEmpty(src) || !src.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            return false;
+        var comma = src.IndexOf(',');
+        if (comma < 0) return false;
+        var meta = src.Substring(5, comma - 5); // between "data:" and ","
+        var payload = src[(comma + 1)..];
+        var isBase64 = meta.EndsWith(";base64", StringComparison.OrdinalIgnoreCase);
+        if (isBase64) meta = meta[..^7];
+        contentType = meta; // may be empty
+        try
+        {
+            bytes = isBase64
+                ? Convert.FromBase64String(payload)
+                : System.Text.Encoding.UTF8.GetBytes(Uri.UnescapeDataString(payload));
+        }
+        catch
+        {
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>
     /// Returns true if <paramref name="candidatePath"/> resolves to the same
     /// file as <paramref name="hostDocumentPath"/>. Used by handlers to
     /// detect self-embed Set(src=hostPath) so they can substitute a
@@ -429,6 +523,11 @@ internal static class OleHelper
         "width", "height", "x", "y",
         "icon", "preview", "display", "name",
         "anchor",
+        // dump→batch round-trip carrier keys: when src is a data: URI the
+        // payload bytes are already in final embedded form, so oleKind +
+        // contentType + embedExt let AddOle rebuild the exact part class /
+        // content type / target extension without classifying by file ext.
+        "oleKind", "olekind", "contentType", "contenttype", "embedExt", "embedext",
     };
 
     /// <summary>

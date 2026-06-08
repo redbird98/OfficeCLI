@@ -287,17 +287,13 @@ public static partial class WordBatchEmitter
             if (TryEmitEquationRun(run, paraTargetPath, items)) continue;
             if (TryEmitFormFieldRun(run, paraTargetPath, items)) continue;
             if (TryEmitFieldRun(run, paraTargetPath, items, ctx)) continue;
-            // R10-bug1: OLE/embedded-object runs surface as type="ole" (see
-            // CreateOleNode in WordHandler.ImageHelpers.cs). The Add side
-            // requires --prop src=<external file> to recreate the embedded
-            // payload, but the emitted batch has no carrier for that file —
-            // base64-inlining the contentType+bytes the way picture runs do
-            // is a backlog item (needs round-trip on the host part-rel +
-            // VML shape geometry + ProgID + DrawAspect + alt-name; see
-            // bug1 follow-up). Until then, surface a deterministic
-            // warning so the dump envelope flags the silent loss instead
-            // of producing an OLE-stripped paragraph that looks complete.
-            if (TryEmitOleRun(run, paraTargetPath, items, ctx)) continue;
+            // OLE/embedded-object runs surface as type="ole" (see CreateOleNode
+            // in WordHandler.ImageHelpers.cs). TryEmitOleRun base64-inlines the
+            // embedded payload + icon and the VML frame metadata into a
+            // self-contained `add ole` (picture-run style), so the object
+            // round-trips with no external file; it warns only when the payload
+            // can't be resolved.
+            if (TryEmitOleRun(run, paraTargetPath, items, ctx, word)) continue;
             if (TryEmitPictureRun(word, run, paraTargetPath, parentPath, targetIndex, items, ctx, sharedAttachPara)) continue;
             if (TryEmitNoteRefRun(run, paraTargetPath, items, ctx)) continue;
             EmitPlainOrHyperlinkRun(run, paraTargetPath, items, ctx);
@@ -1367,34 +1363,54 @@ public static partial class WordBatchEmitter
     }
 
     /// <summary>
-    /// R10-bug1: detect OLE / embedded-object runs (Type=="ole") and emit
-    /// a warning into <see cref="BodyEmitContext.Warnings"/> instead of
-    /// silently dropping the run.
+    /// R10-bug1: OLE / embedded-object runs (Type=="ole"). Full round-trip:
+    /// pull the embedded payload + VML icon binaries and the frame metadata
+    /// (progId / DrawAspect / dimensions / alt-name) and emit a self-contained
+    /// `add ole` carrying the bytes as data: URIs (mirrors picture-run base64
+    /// inlining). AddOle rebuilds the embedded part, icon part and &lt;w:object&gt;
+    /// wrapper from these — no external src file needed.
     ///
-    /// Full round-trip would require carrying the embedded payload
-    /// (Excel/.docx/.pptx/etc binary) plus the VML icon image plus VML
-    /// shape geometry plus ProgID plus DrawAspect plus alt-name through
-    /// the batch stream — picture-run-style base64 inlining is the
-    /// reasonable model but the Add side currently only accepts
-    /// `--prop src=<file>` (real on-disk path) for OLE. Until that gap
-    /// closes, the warning surface is the right call: the host paragraph
-    /// still emits (so the surrounding text is intact), only the OLE
-    /// child is omitted, and the dump envelope's `warnings` array names
-    /// the affected path so the caller can decide whether to bail.
+    /// If the payload can't be resolved (orphaned relationship / unreadable
+    /// part), fall back to keeping the host paragraph and emitting a warning
+    /// naming the path, rather than silently dropping the object.
     /// </summary>
-    private static bool TryEmitOleRun(DocumentNode run, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx)
+    private static bool TryEmitOleRun(DocumentNode run, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx, WordHandler word)
     {
         if (run.Type != "ole") return false;
+
+        var data = word.GetOleEmitData(run.Path);
+        if (data != null)
+        {
+            var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["src"] = $"data:{data.EmbeddedContentType};base64,{Convert.ToBase64String(data.EmbeddedBytes)}",
+                ["oleKind"] = data.OleKind,
+                ["contentType"] = data.EmbeddedContentType,
+            };
+            if (!string.IsNullOrEmpty(data.EmbeddedExt)) props["embedExt"] = data.EmbeddedExt;
+            if (!string.IsNullOrEmpty(data.ProgId)) props["progId"] = data.ProgId!;
+            if (!string.IsNullOrEmpty(data.Display)) props["display"] = data.Display!;
+            if (!string.IsNullOrEmpty(data.Width)) props["width"] = data.Width!;
+            if (!string.IsNullOrEmpty(data.Height)) props["height"] = data.Height!;
+            if (!string.IsNullOrEmpty(data.Name)) props["name"] = data.Name!;
+            if (data.IconBytes is { Length: > 0 })
+                props["icon"] = $"data:{data.IconContentType ?? "image/png"};base64,{Convert.ToBase64String(data.IconBytes)}";
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = paraTargetPath,
+                Type = "ole",
+                Props = props,
+            });
+            return true;
+        }
+
         if (ctx != null)
         {
-            // Surface ProgID when available — it's the most useful single
-            // identifier for the caller (Excel.Sheet.12, Word.Document.12,
-            // Package, …) and lets them grep the source for the original
-            // embedded file.
             var progId = run.Format.TryGetValue("progId", out var pid) ? pid?.ToString() : null;
             var reason = progId != null
-                ? $"ole run dropped (progId={progId}); add-side requires --prop src=<external file> and the batch stream has no carrier for the embedded payload"
-                : "ole run dropped; add-side requires --prop src=<external file> and the batch stream has no carrier for the embedded payload";
+                ? $"ole run dropped (progId={progId}); embedded payload could not be resolved for round-trip"
+                : "ole run dropped; embedded payload could not be resolved for round-trip";
             ctx.Warnings.Add(new DocxUnsupportedWarning(
                 Element: "ole",
                 Path: run.Path,

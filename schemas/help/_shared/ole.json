@@ -46,6 +46,40 @@
       ],
       "readback": "add/set-only input; not echoed by Get. Use Format[\"relId\"] to inspect the embedded relationship.",
       "enforcement": "report"
+    },
+    "oleKind": {
+      "type": "enum",
+      "description": "dump→batch round-trip carrier: whether the embedded payload is an Office package ('package' → EmbeddedPackagePart) or a generic object ('object' → EmbeddedObjectPart). Emitted by dump alongside a data-URI src; lets add rebuild the exact part class. Add-time only.",
+      "values": ["package", "object"],
+      "aliases": ["olekind"],
+      "add": true,
+      "set": false,
+      "get": false,
+      "examples": ["--prop oleKind=package"],
+      "readback": "n/a (add-only round-trip carrier)",
+      "enforcement": "report"
+    },
+    "contentType": {
+      "type": "string",
+      "description": "dump→batch round-trip carrier: MIME content type of the embedded payload part (e.g. 'application/vnd.ms-excel'). Paired with a data-URI src + oleKind so add restores the exact part content type. Add-time only.",
+      "aliases": ["contenttype"],
+      "add": true,
+      "set": false,
+      "get": false,
+      "examples": ["--prop contentType=application/vnd.ms-excel"],
+      "readback": "n/a (add-only round-trip carrier)",
+      "enforcement": "report"
+    },
+    "embedExt": {
+      "type": "string",
+      "description": "dump→batch round-trip carrier: target file extension for the embedded package part (e.g. 'xls'). Add-time only.",
+      "aliases": ["embedext"],
+      "add": true,
+      "set": false,
+      "get": false,
+      "examples": ["--prop embedExt=xls"],
+      "readback": "n/a (add-only round-trip carrier)",
+      "enforcement": "report"
     }
   }
 }
