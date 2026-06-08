@@ -63,9 +63,51 @@ jobs:
             mv publish/officecli publish/${{ matrix.name }}
           fi
 
-      - name: Ad-hoc codesign (macOS)
+      - name: Setup macOS code signing
         if: startsWith(matrix.rid, 'osx-')
-        run: codesign -s - -f publish/${{ matrix.name }}
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          CERT_PATH="$RUNNER_TEMP/build_certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          rm -f "$CERT_PATH"
+
+      - name: Codesign (macOS)
+        if: startsWith(matrix.rid, 'osx-')
+        run: |
+          IDENTITY=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -n 1 | sed -E 's/.*"(.+)"/\1/')
+          echo "Signing with: $IDENTITY"
+          codesign --force --options runtime --timestamp --sign "$IDENTITY" publish/${{ matrix.name }}
+          codesign --verify --strict --verbose=2 publish/${{ matrix.name }}
+
+      - name: Notarize (macOS)
+        if: startsWith(matrix.rid, 'osx-')
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APP_SPECIFIC_PASSWORD: ${{ secrets.APP_SPECIFIC_PASSWORD }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: |
+          # A bare Mach-O binary cannot be stapled; notarytool requires a
+          # zip/pkg/dmg container. Submit a zip — the notarization ticket is
+          # recorded on Apple's servers and Gatekeeper validates online.
+          ditto -c -k --keepParent publish/${{ matrix.name }} "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$TEAM_ID" \
+            --password "$APP_SPECIFIC_PASSWORD" \
+            --wait
+          rm -f "$RUNNER_TEMP/notarize.zip"
 
       - name: Smoke test - create document
         if: >-
