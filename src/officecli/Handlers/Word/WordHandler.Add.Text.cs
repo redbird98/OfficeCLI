@@ -1261,8 +1261,15 @@ public partial class WordHandler
             var author = string.IsNullOrEmpty(pmdAuthor) ? "OfficeCLI" : pmdAuthor!;
             DateTime date = !string.IsNullOrEmpty(pmdDate) && DateTime.TryParse(pmdDate, out var hd2)
                 ? hd2 : DateTime.UtcNow;
+            // Append (not prepend) the paragraph-mark rPr. In CT_PPr the
+            // paragraph-mark <w:rPr> sits near the END of the sequence (after
+            // pStyle / numPr / jc / …); PrependChild forced it to position 0,
+            // ahead of a pStyle already set above, producing schema-invalid
+            // `<w:pPr><w:rPr/><w:pStyle/></w:pPr>` that Word rejects on open.
+            // AppendChild matches every other ParagraphMarkRunProperties site
+            // in this file and lands the rPr after pStyle. CONSISTENCY(pmrp-append).
             var pMarkRPr2 = pProps.ParagraphMarkRunProperties
-                          ?? pProps.PrependChild(new ParagraphMarkRunProperties());
+                          ?? pProps.AppendChild(new ParagraphMarkRunProperties());
             // Don't double-emit if a Deleted element already lives here.
             if (pMarkRPr2.GetFirstChild<Deleted>() == null)
             {
