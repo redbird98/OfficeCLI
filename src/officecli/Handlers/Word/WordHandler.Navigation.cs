@@ -2285,8 +2285,9 @@ public partial class WordHandler
                 node.Format["underline.color"] = ParseHelpers.FormatHexColor(rp.Underline.Color.Value);
             if (rp.Strike != null) node.Format["strike"] = IsToggleOn(rp.Strike);
             if (rp.Highlight?.Val != null) node.Format["highlight"] = rp.Highlight.Val.InnerText;
-            if (rp.GetFirstChild<RunStyle>()?.Val?.Value != null)
-                node.Format["rStyle"] = rp.GetFirstChild<RunStyle>().Val.Value;
+            var rStyle = rp.GetFirstChild<RunStyle>();
+            if (rStyle?.Val?.Value != null)
+                node.Format["rStyle"] = rStyle.Val.Value;
         }
         return node;
     }
@@ -4298,9 +4299,12 @@ public partial class WordHandler
                     // long-tail toggles match curated booleans (bold/keepNext → true/false)
                     // instead of the raw "1"/"0" the XML carries. Enum/string children
                     // (em, effect, textAlignment, …) keep their literal val.
-                    var valProp = child.GetType().GetProperty("Val");
+                    //
+                    // Every CT_OnOff element derives from the shared OnOffType base, so a
+                    // direct `is` check is equivalent to inspecting Val's runtime type —
+                    // and is trim/AOT-safe where GetType().GetProperty("Val") (IL2075) is not.
                     node.Format[name] =
-                        valProp?.PropertyType == typeof(DocumentFormat.OpenXml.OnOffValue)
+                        child is DocumentFormat.OpenXml.Wordprocessing.OnOffType
                             ? OfficeCli.Core.ParseHelpers.IsTruthySafe(raw)
                             : raw;
                 }

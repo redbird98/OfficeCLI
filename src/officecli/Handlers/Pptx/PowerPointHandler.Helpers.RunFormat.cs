@@ -56,7 +56,7 @@ public partial class PowerPointHandler
         var parts = new List<string>(tabs.Count);
         foreach (var tab in tabs)
         {
-            if (!tab.Position.HasValue) continue;
+            if (tab.Position?.HasValue != true) continue;
             var posPt = FormatPptIndentPoints(tab.Position.Value);
             // Default alignment in OOXML schema is `l` when @algn is absent.
             var algn = tab.Alignment?.HasValue == true
