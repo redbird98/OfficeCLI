@@ -1526,10 +1526,14 @@ internal partial class ChartSvgRenderer
         var suffix = "";
         var f = fmt;
 
-        // Extract literal prefix (e.g. "$")
+        // Extract literal prefix (e.g. "$"). The format code comes from the
+        // chart XML (attacker-controlled in a crafted file) and the prefix is
+        // emitted into SVG <text>; escape it so a format like "<#,##0" can't
+        // inject markup. Value labels/axis ticks are otherwise emitted raw,
+        // unlike category labels which are already HtmlEncode'd.
         if (f.Length > 0 && !char.IsDigit(f[0]) && f[0] != '#' && f[0] != '0' && f[0] != '.')
         {
-            prefix = f[0].ToString();
+            prefix = HtmlEncode(f[0].ToString());
             f = f[1..];
         }
         // Extract literal suffix (e.g. "%")
