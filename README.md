@@ -123,6 +123,9 @@ officecli view deck.pptx html
 
 # Get structured JSON for any element
 officecli get deck.pptx '/slide[1]/shape[1]' --json
+
+# Save and close — flushes the resident session to disk
+officecli close deck.pptx
 ```
 
 ```json
