@@ -89,6 +89,34 @@ public partial class WordHandler
             var vAlign = sectPr.GetFirstChild<VerticalTextAlignmentOnPage>();
             if (vAlign?.Val != null)
                 node.Format["vAlign"] = vAlign.Val.InnerText;
+
+            // BUG-DUMP-SECT-FOOTNOTE: body-section footnote/endnote numbering
+            // (<w:footnotePr>/<w:endnotePr>). Mirror BuildSectionNode so the
+            // trailing sectPr's numbering survives dump→batch (set / path).
+            var fnPr = sectPr.GetFirstChild<FootnoteProperties>();
+            if (fnPr != null)
+            {
+                if (fnPr.NumberingFormat?.Val != null)
+                    node.Format["footnotePr.numFmt"] = fnPr.NumberingFormat.Val.InnerText;
+                if (fnPr.NumberingRestart?.Val != null)
+                    node.Format["footnotePr.numRestart"] = fnPr.NumberingRestart.Val.InnerText;
+                if (fnPr.NumberingStart?.Val != null)
+                    node.Format["footnotePr.numStart"] = (int)fnPr.NumberingStart.Val.Value;
+                if (fnPr.FootnotePosition?.Val != null)
+                    node.Format["footnotePr.pos"] = fnPr.FootnotePosition.Val.InnerText;
+            }
+            var enPr = sectPr.GetFirstChild<EndnoteProperties>();
+            if (enPr != null)
+            {
+                if (enPr.NumberingFormat?.Val != null)
+                    node.Format["endnotePr.numFmt"] = enPr.NumberingFormat.Val.InnerText;
+                if (enPr.NumberingRestart?.Val != null)
+                    node.Format["endnotePr.numRestart"] = enPr.NumberingRestart.Val.InnerText;
+                if (enPr.NumberingStart?.Val != null)
+                    node.Format["endnotePr.numStart"] = (int)enPr.NumberingStart.Val.Value;
+                if (enPr.EndnotePosition?.Val != null)
+                    node.Format["endnotePr.pos"] = enPr.EndnotePosition.Val.InnerText;
+            }
         }
 
         // ==================== CJK Layout (from DocDefaults ParagraphProperties) ====================

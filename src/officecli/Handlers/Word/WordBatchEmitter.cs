@@ -304,6 +304,10 @@ public static partial class WordBatchEmitter
         // BUG-DUMP11-01: chapter-numbering attributes on w:pgNumType.
         "chapStyle", "chapSep",
         "titlePage", "direction", "rtlGutter",
+        // BUG-DUMP-SECT-VALIGN: vertical text alignment on page (w:vAlign).
+        // Set / accepts it; without inclusion here the body section reverted
+        // to top on round-trip.
+        "vAlign",
         // pgBorders shorthand ('box' / 'none') — Set materialises four
         // matching sides; Get/Navigation surfaces the presence. Without
         // this key the round-trip silently dropped page borders.
@@ -363,6 +367,12 @@ public static partial class WordBatchEmitter
         // case expects. Without this prefix the detailed keys were dropped and
         // page borders collapsed to the box default on round-trip.
         "pgBorders.",
+        // BUG-DUMP-SECT-FOOTNOTE: section-level footnote/endnote numbering
+        // (footnotePr.numFmt / .numRestart / .numStart / .pos, same for
+        // endnotePr). Get/Navigation surfaces these dotted keys; Set / routes
+        // them through TrySetFootnoteEndnoteNumProps. Without this prefix the
+        // trailing section's footnote numbering reverted to decimal/continuous.
+        "footnotePr.", "endnotePr.",
     };
 
     // Captured once per process: blank doc's `Get("/")` root Format, normalized

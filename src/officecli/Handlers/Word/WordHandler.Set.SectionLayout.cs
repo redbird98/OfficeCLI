@@ -1,6 +1,7 @@
 // Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeCli.Core;
 
@@ -431,6 +432,16 @@ public partial class WordHandler
                 return true;
             }
 
+            // ==================== Footnote / endnote numbering ====================
+            // BUG-DUMP-SECT-FOOTNOTE: footnotePr.* / endnotePr.* on the body-level
+            // section (`set /`). Shared with the per-section and AddSection paths.
+            case "footnotepr.numfmt" or "footnotepr.numrestart" or "footnotepr.numstart" or "footnotepr.pos"
+              or "endnotepr.numfmt" or "endnotepr.numrestart" or "endnotepr.numstart" or "endnotepr.pos":
+            {
+                var sectPr = EnsureSectionProperties();
+                return TrySetFootnoteEndnoteNumProps(sectPr, key, value);
+            }
+
             default:
                 return false;
         }
@@ -456,5 +467,108 @@ public partial class WordHandler
             InsertSectPrChildInOrder(sectPr, pb);
         }
         return pb;
+    }
+
+    // ==================== footnotePr / endnotePr ====================
+    // BUG-DUMP-SECT-FOOTNOTE: section-level footnote/endnote numbering lived
+    // in <w:footnotePr>/<w:endnotePr> at the START of sectPr (before <w:type>)
+    // but had no Add/Set/Get path, so dump→batch dropped it and footnote
+    // markers reverted from i/ii (lowerRoman) to 1/2 (decimal).
+    //
+    // Canonical keys (mirrors pgBorders.* dotted style; both <w:footnotePr> and
+    // <w:endnotePr> share the same CT_FtnEdnNumProps child set):
+    //   footnotePr.numFmt   → <w:numFmt w:val="lowerRoman"/>
+    //   footnotePr.numRestart → <w:numRestart w:val="eachPage|eachSect|continuous"/>
+    //   footnotePr.numStart → <w:numStart w:val="N"/>
+    //   footnotePr.pos      → <w:pos w:val="pageBottom|beneath|sectEnd"/> (footnote only)
+    //   endnotePr.* (same, pos → <w:pos w:val="sectEnd|docEnd"/>)
+    //
+    // The SDK property setters (NumberingFormat/NumberingStart/NumberingRestart/
+    // FootnotePosition) enforce the internal CT_FtnEdnNumProps child order
+    // (pos, numFmt, numStart, numRestart) automatically; the container itself
+    // is placed via InsertSectPrChildInOrder at rank 2/3 (before <w:type>).
+    //
+    // Routing: shared static so the body-level (set /), the per-section
+    // (set /section[N]), and AddSection (add section) paths apply identical
+    // semantics. Returns true when the key was a footnotePr.*/endnotePr.* key.
+    private static bool TrySetFootnoteEndnoteNumProps(SectionProperties sectPr, string key, string value)
+    {
+        var lower = key.ToLowerInvariant();
+        bool isFootnote = lower.StartsWith("footnotepr.");
+        bool isEndnote = lower.StartsWith("endnotepr.");
+        if (!isFootnote && !isEndnote) return false;
+
+        var sub = lower[(isFootnote ? "footnotepr.".Length : "endnotepr.".Length)..];
+
+        // Get-or-create the container in schema order (footnotePr rank 2,
+        // endnotePr rank 3 — both ahead of <w:type>).
+        OpenXmlElement container = isFootnote
+            ? sectPr.GetFirstChild<FootnoteProperties>() ?? Add(new FootnoteProperties())
+            : sectPr.GetFirstChild<EndnoteProperties>() ?? Add(new EndnoteProperties());
+
+        OpenXmlElement Add(OpenXmlElement el) { InsertSectPrChildInOrder(sectPr, el); return el; }
+
+        switch (sub)
+        {
+            case "numfmt" or "format":
+            {
+                var fmt = ParseNumberFormat(value);
+                if (container is FootnoteProperties fp) fp.NumberingFormat = new NumberingFormat { Val = fmt };
+                else ((EndnoteProperties)container).NumberingFormat = new NumberingFormat { Val = fmt };
+                return true;
+            }
+            case "numrestart" or "restart":
+            {
+                var rv = value.ToLowerInvariant() switch
+                {
+                    "eachpage" or "page" => RestartNumberValues.EachPage,
+                    "eachsect" or "eachsection" or "section" => RestartNumberValues.EachSection,
+                    "continuous" or "continue" => RestartNumberValues.Continuous,
+                    _ => throw new ArgumentException(
+                        $"Invalid {(isFootnote ? "footnotePr" : "endnotePr")}.numRestart value: '{value}'. Valid: continuous, eachSect, eachPage.")
+                };
+                if (container is FootnoteProperties fp) fp.NumberingRestart = new NumberingRestart { Val = rv };
+                else ((EndnoteProperties)container).NumberingRestart = new NumberingRestart { Val = rv };
+                return true;
+            }
+            case "numstart" or "start":
+            {
+                if (!ushort.TryParse(value, out var n))
+                    throw new ArgumentException(
+                        $"Invalid {(isFootnote ? "footnotePr" : "endnotePr")}.numStart value: '{value}'. Must be a non-negative integer.");
+                if (container is FootnoteProperties fp) fp.NumberingStart = new NumberingStart { Val = n };
+                else ((EndnoteProperties)container).NumberingStart = new NumberingStart { Val = n };
+                return true;
+            }
+            case "pos" or "position":
+            {
+                if (isFootnote)
+                {
+                    var pv = value.ToLowerInvariant() switch
+                    {
+                        "pagebottom" or "bottom" => FootnotePositionValues.PageBottom,
+                        "beneath" or "beneathtext" => FootnotePositionValues.BeneathText,
+                        "sectend" or "sectionend" => FootnotePositionValues.SectionEnd,
+                        _ => throw new ArgumentException(
+                            $"Invalid footnotePr.pos value: '{value}'. Valid: pageBottom, beneath, sectEnd.")
+                    };
+                    ((FootnoteProperties)container).FootnotePosition = new FootnotePosition { Val = pv };
+                }
+                else
+                {
+                    var pv = value.ToLowerInvariant() switch
+                    {
+                        "sectend" or "sectionend" => EndnotePositionValues.SectionEnd,
+                        "docend" or "documentend" => EndnotePositionValues.DocumentEnd,
+                        _ => throw new ArgumentException(
+                            $"Invalid endnotePr.pos value: '{value}'. Valid: sectEnd, docEnd.")
+                    };
+                    ((EndnoteProperties)container).EndnotePosition = new EndnotePosition { Val = pv };
+                }
+                return true;
+            }
+            default:
+                return false;
+        }
     }
 }

@@ -1054,6 +1054,16 @@ public partial class WordHandler
                     InsertSectPrChildInOrder(sectPr, new VerticalTextAlignmentOnPage { Val = enumVal });
                     break;
                 }
+                case "footnotepr.numfmt" or "footnotepr.numrestart" or "footnotepr.numstart" or "footnotepr.pos"
+                  or "endnotepr.numfmt" or "endnotepr.numrestart" or "endnotepr.numstart" or "endnotepr.pos":
+                {
+                    // BUG-DUMP-SECT-FOOTNOTE: mirror TrySetSectionLayout's
+                    // footnotePr.* / endnotePr.* cases so /section[N] users can
+                    // set section-level footnote/endnote numbering. Shared helper
+                    // keeps the body / and per-section paths identical.
+                    TrySetFootnoteEndnoteNumProps(sectPr, key, value);
+                    break;
+                }
                 default:
                     // Generic dotted "element.attr=value" fallback (pgSz.orient,
                     // pgMar.top, cols.num, …). Same helper as paragraph/run

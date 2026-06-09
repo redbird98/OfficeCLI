@@ -3371,6 +3371,35 @@ public partial class WordHandler
                 if (sbVAlign?.Val != null)
                     node.Format["sectionBreak.vAlign"] = sbVAlign.Val.InnerText;
 
+                // BUG-DUMP-SECT-FOOTNOTE: footnote/endnote numbering on a
+                // mid-document section carrier. Surface as sectionBreak.footnotePr.*
+                // / sectionBreak.endnotePr.* so the carrier sectPr round-trips —
+                // without this, footnote markers reverted from i/ii to 1/2.
+                var sbFn = inlineSectPr.GetFirstChild<FootnoteProperties>();
+                if (sbFn != null)
+                {
+                    if (sbFn.NumberingFormat?.Val != null)
+                        node.Format["sectionBreak.footnotePr.numFmt"] = sbFn.NumberingFormat.Val.InnerText;
+                    if (sbFn.NumberingRestart?.Val != null)
+                        node.Format["sectionBreak.footnotePr.numRestart"] = sbFn.NumberingRestart.Val.InnerText;
+                    if (sbFn.NumberingStart?.Val != null)
+                        node.Format["sectionBreak.footnotePr.numStart"] = (int)sbFn.NumberingStart.Val.Value;
+                    if (sbFn.FootnotePosition?.Val != null)
+                        node.Format["sectionBreak.footnotePr.pos"] = sbFn.FootnotePosition.Val.InnerText;
+                }
+                var sbEn = inlineSectPr.GetFirstChild<EndnoteProperties>();
+                if (sbEn != null)
+                {
+                    if (sbEn.NumberingFormat?.Val != null)
+                        node.Format["sectionBreak.endnotePr.numFmt"] = sbEn.NumberingFormat.Val.InnerText;
+                    if (sbEn.NumberingRestart?.Val != null)
+                        node.Format["sectionBreak.endnotePr.numRestart"] = sbEn.NumberingRestart.Val.InnerText;
+                    if (sbEn.NumberingStart?.Val != null)
+                        node.Format["sectionBreak.endnotePr.numStart"] = (int)sbEn.NumberingStart.Val.Value;
+                    if (sbEn.EndnotePosition?.Val != null)
+                        node.Format["sectionBreak.endnotePr.pos"] = sbEn.EndnotePosition.Val.InnerText;
+                }
+
                 var lnNum = inlineSectPr.GetFirstChild<LineNumberType>();
                 if (lnNum != null)
                 {

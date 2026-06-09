@@ -1086,6 +1086,35 @@ public partial class WordHandler
         if (vAlign?.Val != null)
             secNode.Format["vAlign"] = vAlign.Val.InnerText;
 
+        // BUG-DUMP-SECT-FOOTNOTE: section-level footnote/endnote numbering
+        // (<w:footnotePr>/<w:endnotePr> at the start of sectPr). Surface the
+        // numFmt/numRestart/numStart/pos sub-keys so dump→batch round-trips them
+        // — without this, footnote markers reverted from i/ii to 1/2.
+        var fnPr = sectPr.GetFirstChild<FootnoteProperties>();
+        if (fnPr != null)
+        {
+            if (fnPr.NumberingFormat?.Val != null)
+                secNode.Format["footnotePr.numFmt"] = fnPr.NumberingFormat.Val.InnerText;
+            if (fnPr.NumberingRestart?.Val != null)
+                secNode.Format["footnotePr.numRestart"] = fnPr.NumberingRestart.Val.InnerText;
+            if (fnPr.NumberingStart?.Val != null)
+                secNode.Format["footnotePr.numStart"] = (int)fnPr.NumberingStart.Val.Value;
+            if (fnPr.FootnotePosition?.Val != null)
+                secNode.Format["footnotePr.pos"] = fnPr.FootnotePosition.Val.InnerText;
+        }
+        var enPr = sectPr.GetFirstChild<EndnoteProperties>();
+        if (enPr != null)
+        {
+            if (enPr.NumberingFormat?.Val != null)
+                secNode.Format["endnotePr.numFmt"] = enPr.NumberingFormat.Val.InnerText;
+            if (enPr.NumberingRestart?.Val != null)
+                secNode.Format["endnotePr.numRestart"] = enPr.NumberingRestart.Val.InnerText;
+            if (enPr.NumberingStart?.Val != null)
+                secNode.Format["endnotePr.numStart"] = (int)enPr.NumberingStart.Val.Value;
+            if (enPr.EndnotePosition?.Val != null)
+                secNode.Format["endnotePr.pos"] = enPr.EndnotePosition.Val.InnerText;
+        }
+
         // CONSISTENCY(root-vs-section-readback): docGrid lives on the sectPr,
         // so /section[N] readback must mirror the root reader in
         // WordHandler.Navigation.DocSettings.cs. Set writes via /settings

@@ -343,6 +343,44 @@ public partial class WordHandler
             pgNum.Start = startN;
         }
 
+        // BUG-DUMP-SECT-VALIGN: vertical text alignment on the page
+        // (top/center/bottom/both). CONSISTENCY(add-set-symmetry): mirror
+        // TrySetSectionLayout's valign case so `add section --prop vAlign=center`
+        // round-trips a mid-document section's <w:vAlign>.
+        if (properties.TryGetValue("vAlign", out var vaVal) ||
+            properties.TryGetValue("valign", out vaVal))
+        {
+            var lower = vaVal.ToLowerInvariant().Trim();
+            if (lower is not ("none" or "off" or "false"))
+            {
+                var enumVal = lower switch
+                {
+                    "top" => VerticalJustificationValues.Top,
+                    "center" or "centre" or "middle" => VerticalJustificationValues.Center,
+                    "bottom" => VerticalJustificationValues.Bottom,
+                    "both" => VerticalJustificationValues.Both,
+                    _ => throw new ArgumentException(
+                        $"Invalid vAlign value: '{vaVal}'. Valid: top, center, bottom, both, none.")
+                };
+                InsertSectPrChildInOrder(sectPr, new VerticalTextAlignmentOnPage { Val = enumVal });
+            }
+        }
+
+        // BUG-DUMP-SECT-FOOTNOTE: section-level footnote/endnote numbering.
+        // CONSISTENCY(add-set-symmetry): route footnotePr.* / endnotePr.* through
+        // the shared TrySetFootnoteEndnoteNumProps so `add section` round-trips
+        // a mid-document section's <w:footnotePr>/<w:endnotePr>. Tracked below in
+        // sectionAlreadyConsumed so the dotted fallback doesn't re-run.
+        foreach (var (fk, fv) in properties)
+        {
+            var fkl = fk.ToLowerInvariant();
+            if (fkl.StartsWith("footnotepr.") || fkl.StartsWith("endnotepr."))
+            {
+                properties.ContainsKey(fk); // ACCOUNTING(handler-as-truth)
+                TrySetFootnoteEndnoteNumProps(sectPr, fk, fv);
+            }
+        }
+
         // Dotted-key fallback for sectPr-level attrs not modeled by the
         // hand-rolled blocks above (single-attr forms like docGrid.* or
         // future schema additions). CONSISTENCY(add-set-symmetry).
@@ -369,6 +407,11 @@ public partial class WordHandler
             // unsupported via TrackingPropertyDictionary.UnusedKeys.
             properties.ContainsKey(key);
             if (sectionAlreadyConsumed.Contains(key)) continue;
+            // footnotePr.* / endnotePr.* are consumed by the dedicated loop
+            // above; their attrs live on the nested <w:footnotePr>, not sectPr,
+            // so TypedAttributeFallback would falsely flag them unsupported.
+            if (key.StartsWith("footnotePr.", StringComparison.OrdinalIgnoreCase) ||
+                key.StartsWith("endnotePr.", StringComparison.OrdinalIgnoreCase)) continue;
             if (Core.TypedAttributeFallback.TrySet(sectPr, key, value)) continue;
             LastAddUnsupportedProps.Add(key);
         }
