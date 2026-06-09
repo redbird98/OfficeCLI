@@ -1699,6 +1699,21 @@ internal class WatchServer : IDisposable
             var stream = client.GetStream();
             var (requestLine, headers, bodyPrefix) = await ReadHttpRequestHeaderAsync(stream, token);
 
+            // Anti-DNS-rebinding gate. A rebinding attack reaches this loopback
+            // port but the request carries the attacker's domain in the Host
+            // header (a header page JS cannot forge), so any request whose Host
+            // is not a loopback name is rejected — including GET / and the SSE
+            // stream, which would otherwise leak the whole document. Embedder-
+            // agnostic: direct browser tabs and Electron <webview>s send a
+            // localhost Host automatically; reverse proxies that forward a
+            // non-loopback Host can allowlist it via OFFICECLI_WATCH_ALLOWED_HOSTS.
+            if (!IsHostAllowed(headers))
+            {
+                await WriteForbiddenAsync(stream, ForbiddenHostMessage(headers), token);
+                client.Close();
+                return;
+            }
+
             if (requestLine.Contains("GET /events"))
             {
                 try
@@ -1714,6 +1729,12 @@ internal class WatchServer : IDisposable
 
             if (requestLine.StartsWith("POST /api/selection", StringComparison.Ordinal))
             {
+                if (!IsOriginAllowed(headers))
+                {
+                    await WriteForbiddenAsync(stream, ForbiddenOriginMessage(headers), token);
+                    client.Close();
+                    return;
+                }
                 await HandlePostSelectionAsync(stream, headers, bodyPrefix, token);
                 client.Close();
                 return;
@@ -1721,6 +1742,12 @@ internal class WatchServer : IDisposable
 
             if (requestLine.StartsWith("POST /api/edit", StringComparison.Ordinal))
             {
+                if (!IsOriginAllowed(headers))
+                {
+                    await WriteForbiddenAsync(stream, ForbiddenOriginMessage(headers), token);
+                    client.Close();
+                    return;
+                }
                 await HandlePostEditAsync(stream, headers, bodyPrefix, token);
                 client.Close();
                 return;
@@ -1771,6 +1798,84 @@ internal class WatchServer : IDisposable
         {
             try { client.Close(); } catch { }
         }
+    }
+
+    // Loopback host names accepted in the Host/Origin headers. Seeded with the
+    // standard loopback identities and extended (once, at first use) from
+    // OFFICECLI_WATCH_ALLOWED_HOSTS for reverse-proxy setups that forward a
+    // non-loopback Host upstream.
+    private static readonly HashSet<string> _allowedHosts = BuildAllowedHosts();
+
+    private static HashSet<string> BuildAllowedHosts()
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        { "localhost", "127.0.0.1", "[::1]", "::1" };
+        var extra = Environment.GetEnvironmentVariable("OFFICECLI_WATCH_ALLOWED_HOSTS");
+        if (!string.IsNullOrWhiteSpace(extra))
+            foreach (var h in extra.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                set.Add(h);
+        return set;
+    }
+
+    /// <summary>Strip the optional <c>:port</c> from a Host header value, preserving bracketed IPv6.</summary>
+    internal static string ExtractHostname(string hostHeader)
+    {
+        var v = hostHeader.Trim();
+        if (v.StartsWith("[", StringComparison.Ordinal)) // [::1] or [::1]:port
+        {
+            var rb = v.IndexOf(']');
+            return rb >= 0 ? v[..(rb + 1)] : v;
+        }
+        var colon = v.IndexOf(':');
+        return colon >= 0 ? v[..colon] : v;
+    }
+
+    /// <summary>True if the request's Host header names an accepted loopback host (anti-rebinding).</summary>
+    internal static bool IsHostAllowed(Dictionary<string, string> headers)
+    {
+        // HTTP/1.1 mandates Host and every browser sends it; a missing/blank
+        // Host is treated as untrusted and rejected.
+        if (!headers.TryGetValue("Host", out var host) || string.IsNullOrWhiteSpace(host))
+            return false;
+        return _allowedHosts.Contains(ExtractHostname(host));
+    }
+
+    /// <summary>
+    /// True if a state-changing request's Origin is absent or names a loopback host.
+    /// Absent Origin (server-side proxy hop, or a same-origin navigation that omits
+    /// it) is allowed; a present cross-origin Origin is rejected (CSRF defense).
+    /// </summary>
+    internal static bool IsOriginAllowed(Dictionary<string, string> headers)
+    {
+        if (!headers.TryGetValue("Origin", out var origin) || string.IsNullOrWhiteSpace(origin))
+            return true;
+        if (Uri.TryCreate(origin.Trim(), UriKind.Absolute, out var u))
+            return _allowedHosts.Contains(u.Host) || _allowedHosts.Contains($"[{u.Host}]");
+        return false;
+    }
+
+    private static string ForbiddenHostMessage(Dictionary<string, string> headers)
+    {
+        headers.TryGetValue("Host", out var host);
+        return $"403 Forbidden: request Host '{host ?? "(none)"}' is not a recognized loopback host.\n" +
+               "The officecli watch preview only accepts Host: localhost / 127.0.0.1 (anti-DNS-rebinding).\n" +
+               "If you reach it through a reverse proxy that forwards a different Host, set\n" +
+               "OFFICECLI_WATCH_ALLOWED_HOSTS=<hostname>[,<hostname>...] before starting `officecli watch`.\n";
+    }
+
+    private static string ForbiddenOriginMessage(Dictionary<string, string> headers)
+    {
+        headers.TryGetValue("Origin", out var origin);
+        return $"403 Forbidden: cross-origin request from Origin '{origin ?? "(none)"}' is not allowed for this endpoint.\n";
+    }
+
+    private static async Task WriteForbiddenAsync(NetworkStream stream, string message, CancellationToken token)
+    {
+        var msg = Encoding.UTF8.GetBytes(message);
+        var hdr = Encoding.UTF8.GetBytes(
+            $"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {msg.Length}\r\nConnection: close\r\n\r\n");
+        await stream.WriteAsync(hdr, token);
+        await stream.WriteAsync(msg, token);
     }
 
     /// <summary>
@@ -1922,7 +2027,7 @@ internal class WatchServer : IDisposable
         }
 
         var resp = Encoding.UTF8.GetBytes(
-            $"HTTP/1.1 {statusCode} {statusText}\r\nContent-Length: 0\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n");
+            $"HTTP/1.1 {statusCode} {statusText}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
         await stream.WriteAsync(resp, token);
     }
 
@@ -2008,7 +2113,7 @@ internal class WatchServer : IDisposable
             statusCode = 400; statusText = "Bad Request";
         }
         var resp = Encoding.UTF8.GetBytes(
-            $"HTTP/1.1 {statusCode} {statusText}\r\nContent-Length: 0\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n");
+            $"HTTP/1.1 {statusCode} {statusText}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
         await stream.WriteAsync(resp, token);
     }
 
@@ -2050,7 +2155,7 @@ internal class WatchServer : IDisposable
     private async Task HandleSseAsync(NetworkStream stream, CancellationToken token)
     {
         var header = Encoding.UTF8.GetBytes(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: *\r\n\r\n");
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n");
         await stream.WriteAsync(header, token);
 
         _lastActivityTime = DateTime.UtcNow;
