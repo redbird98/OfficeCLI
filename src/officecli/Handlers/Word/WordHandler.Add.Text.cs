@@ -265,6 +265,23 @@ public partial class WordHandler
             var spacing = pProps.SpacingBetweenLines ?? (pProps.SpacingBetweenLines = new SpacingBetweenLines());
             spacing.After = SpacingConverter.ParseWordSpacing(sa4).ToString();
         }
+        // BUG-DUMP-R24-5: <w:spacing w:beforeLines/w:afterLines> — ½-line
+        // (font-relative, 1/100 of a line) spacing Word PRECEDES the fixed
+        // before/after twips with. The dump already captures these on `add p`
+        // (spaceBeforeLines/spaceAfterLines); without applying them here the
+        // direct paragraph-spacing path strips them (the style path already
+        // honoured the same attrs), reflowing the doc and inserting a spurious
+        // blank page. Values are raw 1/100-line integers (no unit conversion).
+        if (properties.TryGetValue("spacebeforelines", out var sbl4) || properties.TryGetValue("spaceBeforeLines", out sbl4))
+        {
+            var spacing = pProps.SpacingBetweenLines ?? (pProps.SpacingBetweenLines = new SpacingBetweenLines());
+            spacing.BeforeLines = ParseHelpers.SafeParseInt(sbl4, "spaceBeforeLines");
+        }
+        if (properties.TryGetValue("spaceafterlines", out var sal4) || properties.TryGetValue("spaceAfterLines", out sal4))
+        {
+            var spacing = pProps.SpacingBetweenLines ?? (pProps.SpacingBetweenLines = new SpacingBetweenLines());
+            spacing.AfterLines = ParseHelpers.SafeParseInt(sal4, "spaceAfterLines");
+        }
         if (properties.TryGetValue("linespacing", out var ls4) || properties.TryGetValue("lineSpacing", out ls4))
         {
             var spacing = pProps.SpacingBetweenLines ?? (pProps.SpacingBetweenLines = new SpacingBetweenLines());
@@ -888,6 +905,9 @@ public partial class WordHandler
             "hangingchars", "hangingChars",
             "rightindent", "indentright", "hangingindent", "hanging",
             "spacebefore", "spaceafter", "linespacing", "lineSpacing", "linerule", "lineRule",
+            // BUG-DUMP-R24-5: ½-line spacing attrs consumed by the
+            // spaceBeforeLines/spaceAfterLines blocks above (mirror Set).
+            "spacebeforelines", "spaceBeforeLines", "spaceafterlines", "spaceAfterLines",
             "keepnext", "keepwithnext", "keeplines", "keeptogether",
             "pagebreakbefore", "break",
             "widowcontrol", "widowControl",
