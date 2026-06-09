@@ -377,6 +377,35 @@ public partial class ExcelHandler
                     }
         }
 
+        // 6i. pivot tables. The cache source range lives in a workbook-level
+        // PivotTableCacheDefinitionPart (shift only when its worksheetSource
+        // targets this sheet); the pivot's render location lives on the hosting
+        // worksheet. Both must follow the displacement so a refresh reads the
+        // right data and the table re-lays out in the right place.
+        foreach (var cacheDefPart in _doc.WorkbookPart!.GetPartsOfType<PivotTableCacheDefinitionPart>())
+        {
+            var wsSource = cacheDefPart.PivotCacheDefinition?.CacheSource?.WorksheetSource;
+            if (wsSource?.Reference?.Value == null) continue;
+            if (!string.Equals(wsSource.Sheet?.Value, sheetName, StringComparison.Ordinal)) continue;
+            var newRef = refMapper(wsSource.Reference.Value);
+            if (newRef != null && !string.Equals(newRef, wsSource.Reference.Value, StringComparison.Ordinal))
+            {
+                wsSource.Reference = newRef;
+                cacheDefPart.PivotCacheDefinition!.Save();
+            }
+        }
+        foreach (var pivotPart in worksheet.GetPartsOfType<PivotTablePart>())
+        {
+            var loc = pivotPart.PivotTableDefinition?.Location;
+            if (loc?.Reference?.Value == null) continue;
+            var newRef = refMapper(loc.Reference.Value);
+            if (newRef != null && !string.Equals(newRef, loc.Reference.Value, StringComparison.Ordinal))
+            {
+                loc.Reference = newRef;
+                pivotPart.PivotTableDefinition!.Save();
+            }
+        }
+
         // 7. cell formulas (text + shared/array ref attribute)
         var sheetData = ws.GetFirstChild<SheetData>();
         if (sheetData != null)
