@@ -1440,7 +1440,12 @@ public partial class PowerPointHandler
             "oval" => $"<circle cx=\"{h:0.#}\" cy=\"{h:0.#}\" r=\"{h:0.#}\" fill=\"{color}\"/>",
             // Concave/notched arrow: triangle with a notch cut into the back edge.
             "stealth" => $"<polygon points=\"0 0,{s:0.#} {h:0.#},0 {s:0.#},{h:0.#} {h:0.#}\" fill=\"{color}\"/>",
-            // triangle / arrow / default: right-pointing triangle.
+            // Slimmer, more-pointed arrowhead (➜): narrower base than the wide triangle
+            // plus a shallow concave back edge, so it reads as a pointed open arrow rather
+            // than a wide solid wedge. Back vertices pulled inward (x=h/2) toward a center
+            // notch at (h,h); tip at the right (s,h). All coords stay within 0..s.
+            "arrow" => $"<polygon points=\"{h / 2:0.#} 0,{s:0.#} {h:0.#},{h / 2:0.#} {s:0.#},{h:0.#} {h:0.#}\" fill=\"{color}\"/>",
+            // triangle / default: wide right-pointing solid triangle (▶).
             _ => $"<polygon points=\"0 0,{s:0.#} {h:0.#},0 {s:0.#}\" fill=\"{color}\"/>",
         };
     }
