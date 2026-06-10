@@ -4287,14 +4287,18 @@ public partial class WordHandler
                 if (kEmpty?.Val?.HasValue == true)
                     node.Format["kern"] = kEmpty.Val.Value.ToString();
             }
-            // BUG-DUMP-R27-1: empty-paragraph ¶-mark character shading
-            // (<w:shd> inside ParagraphMarkRunProperties). The text/picture
-            // path surfaces this as markRPr.shading (pmrpForDump block above);
-            // here we cover the empty-paragraph case (markRp != null ⇒ no
-            // text run) and emit the bare `shading` key — AddParagraph's
-            // no-text hoist routes it back onto the ¶ mark rPr (mirrors how
-            // bare bold/color/highlight are hoisted to markRPr on replay).
-            if (markRp != null && !node.Format.ContainsKey("shading"))
+            // BUG-DUMP-R27-1 / BUG-DUMP-R44-3: empty-paragraph ¶-mark character
+            // shading (<w:shd> inside ParagraphMarkRunProperties). This MUST be
+            // emitted under the EXPLICIT `markRPr.shading` key (same as the
+            // text/picture path in the pmrpForDump block above), NOT the bare
+            // `shading` key. Bare `shading` is now unambiguously a paragraph-level
+            // DIRECT <w:pPr><w:shd> (whole-line banner) on replay — emitting it
+            // here would relocate a genuine ¶-mark (pilcrow-only) shading onto the
+            // whole-line background, AND conversely a genuine direct pPr/shd on a
+            // no-text banner paragraph (e.g. an empty full-width banner bar) would
+            // be wrongly pushed down to the ¶ mark. The `markRPr.shading` key
+            // routes through AddParagraph's markRPr.* branch to the mark rPr.
+            if (markRp != null && !node.Format.ContainsKey("markRPr.shading"))
             {
                 var shdEmpty = markRp.GetFirstChild<Shading>();
                 if (shdEmpty != null)
@@ -4308,11 +4312,11 @@ public partial class WordHandler
                     {
                         var v = string.IsNullOrEmpty(sv) ? "clear" : sv;
                         if (!string.IsNullOrEmpty(sc))
-                            node.Format["shading"] = $"{v};{(string.IsNullOrEmpty(sf) ? "" : ParseHelpers.FormatHexColor(sf))};{ParseHelpers.FormatHexColor(sc)}";
+                            node.Format["markRPr.shading"] = $"{v};{(string.IsNullOrEmpty(sf) ? "" : ParseHelpers.FormatHexColor(sf))};{ParseHelpers.FormatHexColor(sc)}";
                         else if (!string.IsNullOrEmpty(sf))
-                            node.Format["shading"] = $"{v};{ParseHelpers.FormatHexColor(sf)}";
+                            node.Format["markRPr.shading"] = $"{v};{ParseHelpers.FormatHexColor(sf)}";
                         else
-                            node.Format["shading"] = v;
+                            node.Format["markRPr.shading"] = v;
                     }
                 }
             }

@@ -146,10 +146,11 @@ public partial class WordHandler
         // re-emerge (e.g. `style=TOC2 size=11pt` → 12pt because TOC2's
         // base size is 12pt). Mirrors the size.cs/italic.cs/bold.cs hoist
         // above. Only applied when there is no text run carrier.
-        // BUG-DUMP-R27-1: when a no-text paragraph's shd is hoisted to the
-        // mark rPr, this flag suppresses the pPr-level <w:shd> handler below
-        // so a paragraph-mark shading is not also stamped as whole-line
-        // background shading (different semantics).
+        // BUG-DUMP-R44-3: the plain `shading`/`shd` key is always a
+        // paragraph-level pPr/shd (whole-line banner) — never hoisted to the
+        // ¶-mark rPr (that's what the explicit `markRPr.shading` key is for).
+        // This flag therefore stays false; kept only so the pPr-level shading
+        // guard below reads as an intentional "not consumed by a mark hoist".
         bool shadingHoistedToMarkRPr = false;
         if (!properties.ContainsKey("text"))
         {
@@ -193,25 +194,20 @@ public partial class WordHandler
                 ApplyRunFormatting(EnsureNoTextMarkRPr(), "color", ntColor);
             if (properties.TryGetValue("highlight", out var ntHighlight))
                 ApplyRunFormatting(EnsureNoTextMarkRPr(), "highlight", ntHighlight);
-            // BUG-DUMP-R27-1: ¶-mark character shading on a no-text paragraph
-            // must hoist onto the mark rPr (<w:pPr><w:rPr><w:shd/>), NOT the
-            // paragraph-level pPr/shd. Without this, the bare `shading` key
-            // emitted by Navigation's empty-paragraph fallback would route to
-            // pProps.Shading (line ~390) and the round-trip would relocate the
-            // shd from markRPr to pPr. Mirrors the highlight hoist above; the
-            // `shd` alias matches the run-level shading key vocabulary.
-            if (properties.TryGetValue("shading", out var ntShd)
-                || properties.TryGetValue("shd", out ntShd))
-            {
-                ApplyRunFormatting(EnsureNoTextMarkRPr(), "shading", ntShd);
-                // Mark the shading as consumed by the ¶-mark hoist so the
-                // pPr-level shading handler below (which runs LATER in this
-                // method) does NOT also stamp a paragraph-level <w:pPr><w:shd>.
-                // The two are different semantics: mark rPr shd shades the ¶
-                // glyph only; pPr shd paints the whole-line background. For a
-                // no-text paragraph the source shd lives on the mark rPr alone.
-                shadingHoistedToMarkRPr = true;
-            }
+            // BUG-DUMP-R44-3: the plain `shading`/`shd` key is a PARAGRAPH-level
+            // property (a DIRECT <w:pPr><w:shd> that paints the whole-line
+            // banner background) — it must NOT be hoisted onto the ¶-mark rPr
+            // even on a no-text paragraph (e.g. an empty full-width banner bar).
+            // The prior R27-1 hoist here pushed a genuine paragraph shading DOWN
+            // into <w:pPr><w:rPr><w:shd>, which only colors the invisible pilcrow
+            // and made the banner bar disappear on round-trip. A genuine ¶-mark
+            // character shading is emitted by Navigation under the EXPLICIT
+            // `markRPr.shading` key (read from <w:pPr><w:rPr><w:shd/>), which
+            // routes through the markRPr.* branch below — so mark-only shading is
+            // still preserved without conflating it with the paragraph banner.
+            // Therefore: let the plain `shading`/`shd` key fall through to the
+            // pPr-level pProps.Shading handler (~line 388); never set
+            // shadingHoistedToMarkRPr here.
             if (properties.TryGetValue("underline", out var ntUl)
                 || properties.TryGetValue("font.underline", out ntUl))
                 ApplyRunFormatting(EnsureNoTextMarkRPr(), "underline", ntUl);
