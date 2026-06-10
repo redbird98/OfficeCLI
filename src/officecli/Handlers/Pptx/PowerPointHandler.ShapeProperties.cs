@@ -240,6 +240,23 @@ public partial class PowerPointHandler
                         var rPr = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
                         rPr.SetAttribute(new OpenXmlAttribute("", "cap", "", capValue));
                     }
+                    // Text-less shape: fall back to the first paragraph's endParaRPr
+                    // so cap on an empty shape isn't silently dropped (mirrors the
+                    // RunPropTargets endParaRPr fallback used by bold/italic in Add).
+                    if (targetRuns.Count == 0)
+                    {
+                        var firstParaCap = shape.TextBody?.Elements<Drawing.Paragraph>().FirstOrDefault();
+                        if (firstParaCap != null)
+                        {
+                            var endRPr = firstParaCap.GetFirstChild<Drawing.EndParagraphRunProperties>();
+                            if (endRPr == null)
+                            {
+                                endRPr = new Drawing.EndParagraphRunProperties { Language = "en-US" };
+                                firstParaCap.AppendChild(endRPr);
+                            }
+                            endRPr.SetAttribute(new OpenXmlAttribute("", "cap", "", capValue));
+                        }
+                    }
                     break;
                 }
                 case "text":

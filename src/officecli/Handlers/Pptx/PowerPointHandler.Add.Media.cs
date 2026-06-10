@@ -469,6 +469,61 @@ public partial class PowerPointHandler
                     picBlipForFilters.CompressionState = ParseBlipCompressionState(picCStateStr);
                 }
 
+                // CONSISTENCY(add-set-parity): shadow / glow / brightness /
+                // contrast are supported on Set picture (Set.Media.cs). Mirror
+                // them here so Add picture doesn't false-warn and silently drop.
+                if (properties.TryGetValue("shadow", out var picShadow))
+                {
+                    var spPrSh = picture.ShapeProperties ?? (picture.ShapeProperties = new ShapeProperties());
+                    var shadowVal = picShadow;
+                    if (IsValidBooleanString(shadowVal) && IsTruthy(shadowVal)) shadowVal = "000000";
+                    ApplyShadow(spPrSh, shadowVal);
+                }
+                if (properties.TryGetValue("glow", out var picGlow))
+                {
+                    var spPrGl = picture.ShapeProperties ?? (picture.ShapeProperties = new ShapeProperties());
+                    ApplyGlow(spPrGl, picGlow);
+                }
+                // brightness / contrast → <a:lum bright=/contrast=> on the blip
+                // (ECMA-376 §20.1.8.13). Mirrors Set.Media.cs lines 346-409.
+                foreach (var bcKey in new[] { "brightness", "contrast" })
+                {
+                    if (!properties.TryGetValue(bcKey, out var bcValStr)) continue;
+                    var blipBC = picture.BlipFill?.GetFirstChild<Drawing.Blip>();
+                    if (blipBC == null) continue;
+                    if (!double.TryParse(bcValStr, System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out var bcVal)
+                        || bcVal < -100 || bcVal > 100)
+                        throw new ArgumentException($"Invalid '{bcKey}' value: '{bcValStr}'. Expected number in [-100, 100].");
+
+                    int curBright = 0;
+                    int curContrast = 0;
+                    var staleLum = new List<OpenXmlElement>();
+                    foreach (var kid in blipBC.ChildElements.ToList())
+                    {
+                        if (kid.NamespaceUri != "http://schemas.openxmlformats.org/drawingml/2006/main") continue;
+                        if (kid is Drawing.LuminanceEffect existingLum)
+                        {
+                            if (existingLum.Brightness?.HasValue == true) curBright = existingLum.Brightness.Value;
+                            if (existingLum.Contrast?.HasValue == true) curContrast = existingLum.Contrast.Value;
+                            staleLum.Add(kid);
+                        }
+                        else if (kid.LocalName == "lumMod" || kid.LocalName == "lumOff")
+                        {
+                            staleLum.Add(kid);
+                        }
+                    }
+                    foreach (var s in staleLum) s.Remove();
+
+                    if (bcKey == "brightness") curBright = (int)(bcVal * 1000);
+                    else curContrast = (int)(bcVal * 1000);
+
+                    var lum = new Drawing.LuminanceEffect();
+                    if (curBright != 0) lum.Brightness = curBright;
+                    if (curContrast != 0) lum.Contrast = curContrast;
+                    blipBC.AppendChild(lum);
+                }
+
                 // CONSISTENCY(shape-picture-parity): pictures are routinely
                 // click-targets — wire link= the same way shape does.
                 // Tooltip is the same secondary key as on shape.

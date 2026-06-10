@@ -364,20 +364,21 @@ public partial class PowerPointHandler
                 if (properties.TryGetValue("underline", out var ulVal)
                     || properties.TryGetValue("font.underline", out ulVal))
                 {
-                    foreach (var run in newShape.Descendants<Drawing.Run>())
+                    var ulEnum = ulVal.ToLowerInvariant() switch
                     {
-                        var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
-                        rProps.Underline = ulVal.ToLowerInvariant() switch
-                        {
-                            "true" or "single" or "sng" => Drawing.TextUnderlineValues.Single,
-                            "double" or "dbl" => Drawing.TextUnderlineValues.Double,
-                            "heavy" => Drawing.TextUnderlineValues.Heavy,
-                            "dotted" => Drawing.TextUnderlineValues.Dotted,
-                            "dash" => Drawing.TextUnderlineValues.Dash,
-                            "wavy" => Drawing.TextUnderlineValues.Wavy,
-                            "false" or "none" => Drawing.TextUnderlineValues.None,
-                            _ => throw new ArgumentException($"Invalid underline value: '{ulVal}'. Valid values: single, double, heavy, dotted, dash, wavy, none.")
-                        };
+                        "true" or "single" or "sng" => Drawing.TextUnderlineValues.Single,
+                        "double" or "dbl" => Drawing.TextUnderlineValues.Double,
+                        "heavy" => Drawing.TextUnderlineValues.Heavy,
+                        "dotted" => Drawing.TextUnderlineValues.Dotted,
+                        "dash" => Drawing.TextUnderlineValues.Dash,
+                        "wavy" => Drawing.TextUnderlineValues.Wavy,
+                        "false" or "none" => Drawing.TextUnderlineValues.None,
+                        _ => throw new ArgumentException($"Invalid underline value: '{ulVal}'. Valid values: single, double, heavy, dotted, dash, wavy, none.")
+                    };
+                    foreach (var rProps in RunPropTargets())
+                    {
+                        if (rProps is Drawing.RunProperties rp) rp.Underline = ulEnum;
+                        else if (rProps is Drawing.EndParagraphRunProperties ep) ep.Underline = ulEnum;
                     }
                 }
 
@@ -391,9 +392,8 @@ public partial class PowerPointHandler
                     || properties.TryGetValue("font.underline.color", out ulColorVal))
                 {
                     var ulHex = OfficeCli.Core.ParseHelpers.SanitizeColorForOoxml(ulColorVal).Rgb;
-                    foreach (var run in newShape.Descendants<Drawing.Run>())
+                    foreach (var rProps in RunPropTargets())
                     {
-                        var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
                         rProps.RemoveAllChildren<Drawing.UnderlineFill>();
                         rProps.RemoveAllChildren<Drawing.UnderlineFillText>();
                         rProps.AppendChild(new Drawing.UnderlineFill(
@@ -408,16 +408,17 @@ public partial class PowerPointHandler
                     || properties.TryGetValue("font.strike", out stVal)
                     || properties.TryGetValue("font.strikethrough", out stVal))
                 {
-                    foreach (var run in newShape.Descendants<Drawing.Run>())
+                    var stEnum = stVal.ToLowerInvariant() switch
                     {
-                        var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
-                        rProps.Strike = stVal.ToLowerInvariant() switch
-                        {
-                            "true" or "single" => Drawing.TextStrikeValues.SingleStrike,
-                            "double" => Drawing.TextStrikeValues.DoubleStrike,
-                            "false" or "none" => Drawing.TextStrikeValues.NoStrike,
-                            _ => throw new ArgumentException($"Invalid strikethrough value: '{stVal}'. Valid values: single, double, none.")
-                        };
+                        "true" or "single" => Drawing.TextStrikeValues.SingleStrike,
+                        "double" => Drawing.TextStrikeValues.DoubleStrike,
+                        "false" or "none" => Drawing.TextStrikeValues.NoStrike,
+                        _ => throw new ArgumentException($"Invalid strikethrough value: '{stVal}'. Valid values: single, double, none.")
+                    };
+                    foreach (var rProps in RunPropTargets())
+                    {
+                        if (rProps is Drawing.RunProperties rp) rp.Strike = stEnum;
+                        else if (rProps is Drawing.EndParagraphRunProperties ep) ep.Strike = stEnum;
                     }
                 }
 
