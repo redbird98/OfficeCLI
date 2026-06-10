@@ -50,6 +50,38 @@ public static partial class WordBatchEmitter
         return false;
     }
 
+    // BUG-DUMP-R26-2: the cached field result is "rich" when its post-separate
+    // text runs don't all share one formatting signature. AddField's single-rPr
+    // model can only apply ONE rPr to all rebuilt result runs, so a result like
+    // "Bold "(b) + "Red "(color) + "Italic"(i) collapses to one run with the
+    // first run's bold leaked onto every run (and onto the fldChar markers).
+    // When this returns true the emitter routes the whole field chain through a
+    // verbatim raw-set instead. Single-run results (the common case) and an
+    // empty result are NOT rich — they round-trip fine through `add field`.
+    private static bool ResultRunsAreRich(List<DocumentNode> resultRuns)
+    {
+        // Only text-bearing runs count; markers / empty rPr-only runs don't
+        // contribute a distinct visible segment.
+        var textRuns = resultRuns.Where(r => !string.IsNullOrEmpty(r.Text)).ToList();
+        if (textRuns.Count <= 1) return false;
+        string Sig(DocumentNode r)
+        {
+            var parts = new List<string>();
+            foreach (var k in FieldResultFormatKeys)
+            {
+                if (r.Format.TryGetValue(k, out var v) && v != null)
+                {
+                    var s = v switch { bool b => b ? "1" : "0", _ => v.ToString() ?? "" };
+                    if (s.Length > 0 && s != "0" && s != "false") parts.Add(k + "=" + s);
+                }
+            }
+            parts.Sort(StringComparer.Ordinal);
+            return string.Join(";", parts);
+        }
+        var first = Sig(textRuns[0]);
+        return textRuns.Any(r => Sig(r) != first);
+    }
+
     // Track-change attribution keys a revision wrapper (<w:del>/<w:ins>/
     // <w:moveFrom>/<w:moveTo>) stamps on each run it wraps. A field collapsed
     // out of such runs must carry them onto its synth so the emitter re-wraps
@@ -106,6 +138,14 @@ public static partial class WordBatchEmitter
             // result-run formatting per segment is rare; we capture the first
             // formatted display run, matching AddField's single-rPr model.)
             DocumentNode? firstFormattedResult = null;
+            // BUG-DUMP-R26-2: collect EVERY post-separate result run so we can
+            // detect a rich (multi-run, heterogeneously-formatted) cached result.
+            // AddField's single-rPr model collapses such a result to one run and
+            // applies the FIRST run's bold to all of them (and leaks it onto the
+            // begin/instr/separate/end fldChar runs). When the result carries >1
+            // distinctly-formatted run, we round-trip the whole field chain
+            // verbatim via raw-set instead (see TryEmitFieldRun).
+            var resultRuns = new List<DocumentNode>();
             // BUG-DUMP-FIELDVALIGN: field-wide vertical alignment (superscript /
             // subscript) is uniform across EVERY run of the field — a citation
             // mark whose begin/instr/separate/result/end runs all carry the same
@@ -178,6 +218,9 @@ public static partial class WordBatchEmitter
                     // to AddField (which applies it to the rebuilt field runs).
                     if (sawSeparate && firstFormattedResult == null && FieldRunHasFormatting(k))
                         firstFormattedResult = k;
+                    // BUG-DUMP-R26-2: remember all post-separate result runs (for
+                    // the rich-result heterogeneity check below).
+                    if (sawSeparate) resultRuns.Add(k);
                     // BUG-DUMP-FIELDVALIGN: capture vertAlign from ANY result run
                     // in the chain (independent of sawSeparate / text), so an
                     // empty pre-separate rPr-only run or a field with an empty
@@ -289,6 +332,41 @@ public static partial class WordBatchEmitter
                     ["instruction"] = instruction.Trim()
                 }
             };
+            // BUG-DUMP-R26-2: a rich (multi-run, heterogeneously-formatted)
+            // cached result cannot round-trip through `add field` — its single
+            // rPr model collapses the runs and leaks the first run's bold onto
+            // every result run AND the begin/instr/separate/end fldChar markers.
+            // Flag it and stash the field-slice run paths so TryEmitFieldRun
+            // raw-sets the whole begin..end chain verbatim, preserving per-run
+            // formatting. Empty / single-run results stay on the typed path.
+            if (sawSeparate && ResultRunsAreRich(resultRuns))
+            {
+                var slicePaths = new List<string>();
+                for (int s = i; s <= end; s++)
+                {
+                    var sp = children[s].Path;
+                    if (!string.IsNullOrEmpty(sp)) slicePaths.Add(sp);
+                }
+                if (slicePaths.Count > 0)
+                {
+                    synth.Format["_richFieldResult"] = true;
+                    synth.Format["_fieldSlicePaths"] = string.Join("\n", slicePaths);
+                }
+            }
+            // BUG-DUMP-R26-7 (PART B): a field cached result that wraps a
+            // HYPERLINK (result run carries a `url`, i.e. an external r:id rel)
+            // does NOT round-trip the hyperlink through the typed `add field`
+            // path — the link wrapper is dropped (text + bold survive, the rel
+            // is lost) and bold leaks onto the fldChar markers. This is a silent
+            // loss even when the result is a single run (so ResultRunsAreRich is
+            // false). Flag it so TryEmitFieldRun emits a deterministic warning.
+            // Full hyperlink-in-field-result preservation is a separate effort.
+            if (sawSeparate && resultRuns.Any(r =>
+                    r.Format.TryGetValue("url", out var u) && u != null
+                    && !string.IsNullOrEmpty(u.ToString())))
+            {
+                synth.Format["_fieldResultHasExternalRel"] = true;
+            }
             // Source field has no <w:fldChar w:fldCharType="separate"/> — it's
             // the begin+instr+end shape (Word recomputes the result on open).
             // Flag this so EmitField on the field branch can pass `text=""`

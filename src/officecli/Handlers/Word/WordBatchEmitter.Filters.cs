@@ -49,6 +49,15 @@ public static partial class WordBatchEmitter
         // numId/numLevel/numFmt/listStyle/start before they ride on `add p`.
         // Drop the flag itself from any emitted prop bag.
         "numInherited",
+        // BUG-DUMP-R26-2: internal flags set by CollapseFieldChains when a
+        // field's cached result has multiple distinctly-formatted runs. Consumed
+        // by TryEmitFieldRun (routes the field to a verbatim raw-set chain);
+        // never replayed as an Add/Set property.
+        "_richFieldResult", "_fieldSlicePaths",
+        // BUG-DUMP-R26-7: flag set when a field cached result wraps a hyperlink
+        // (external rel) the typed path can't preserve — drives a deterministic
+        // warning in TryEmitFieldRun. Never replayed as an Add/Set property.
+        "_fieldResultHasExternalRel",
         // Document-internal relationship id (rId4 / X5c0e4d…). Assigned fresh
         // by every Add* path when it creates a new part-relationship, so the
         // value is unstable across replays even when the document is byte-

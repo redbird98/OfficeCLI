@@ -337,6 +337,17 @@ public static partial class WordBatchEmitter
                 var cellNode = word.Get(cells[c].Path);
                 var cellTargetPath = $"{tablePath}/tr[{r + 1}]/tc[{c + 1}]";
 
+                // BUG-DUMP-R26-7: the global-ordinal XPath of THIS cell, used by
+                // EmitParagraph's inline raw-set fallbacks (rich field result,
+                // nested SDT, VML textbox) to append verbatim content into the
+                // correct cell instead of falling back to the lossy typed emit.
+                // Only carried for /document-hosted (body) tables — the same
+                // restriction the cell-SDT raw-set's rawPart uses; header/footer
+                // -hosted cell raw-set targeting is out of scope this round.
+                string? cellRawXPath = containerPath == "/body"
+                    ? $"(//w:tbl)[{tableOrdinal}]/w:tr[{r + 1}]/w:tc[{c + 1}]"
+                    : null;
+
                 // Cell-level tcPr properties (fill, valign, width, borders,
                 // padding, colspan, …) are surfaced on cellNode.Format but
                 // were previously dropped — only the inner paragraph was
@@ -435,6 +446,11 @@ public static partial class WordBatchEmitter
                             continue;
                         }
                         bool isTrailingAutoP = k == trailingAutoP;
+                        // BUG-DUMP-R26-7: publish THIS cell's raw-set XPath so the
+                        // paragraph's inline raw-set fallbacks target the right
+                        // cell. Re-set per paragraph because a preceding nested
+                        // table recursion overwrote the box with its own cell.
+                        if (ctx != null) ctx.CurrentCellXPathBox[0] = cellRawXPath;
                         EmitParagraph(word, cc.Path, cellTargetPath, cellParaIdx, items,
                                       autoPresent: !firstParaSeen || isTrailingAutoP, ctx);
                         firstParaSeen = true;
@@ -499,6 +515,12 @@ public static partial class WordBatchEmitter
                 });
             }
         }
+        // BUG-DUMP-R26-7: clear the cell-XPath context once this table is fully
+        // emitted so body/header/footer content AFTER the table (or a parent
+        // cell's content after a nested table) doesn't inherit a stale cell
+        // address. A parent cell re-publishes its own XPath before its next
+        // paragraph (see the per-paragraph set above), so null here is safe.
+        if (ctx != null) ctx.CurrentCellXPathBox[0] = null;
     }
 
     // BUG-R4 (DBF-R4-02): emit a typed `add equation` (display) targeting a cell

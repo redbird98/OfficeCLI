@@ -291,7 +291,9 @@ public static partial class WordBatchEmitter
             // to /body hosts + no external rels (same constraints as the inline
             // textbox raw-set) so dangling r:id/r:embed can't be produced; other
             // hosts fall back to the flat text emit.
-            if (parentPath == "/body" && TryEmitRichInlineSdt(word, sdt, items, ctx))
+            // BUG-DUMP-R26-7: rich/nested inline SDTs now round-trip verbatim in
+            // header/footer/cell hosts too (ResolveRawSetHost), not only /body.
+            if (TryEmitRichInlineSdt(word, sdt, parentPath, items, ctx))
                 return;
             var sdtProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             // BUG-DUMP-SDTPROPS: forward the form-control sdtPr children the typed
@@ -388,7 +390,7 @@ public static partial class WordBatchEmitter
             if (TryEmitPtabRun(run, paraTargetPath, items)) continue;
             if (TryEmitEquationRun(word, run, paraTargetPath, items)) continue;
             if (TryEmitFormFieldRun(run, paraTargetPath, items)) continue;
-            if (TryEmitFieldRun(run, paraTargetPath, items, ctx)) continue;
+            if (TryEmitFieldRun(word, run, paraTargetPath, parentPath, items, ctx)) continue;
             // OLE/embedded-object runs surface as type="ole" (see CreateOleNode
             // in WordHandler.ImageHelpers.cs). TryEmitOleRun base64-inlines the
             // embedded payload + icon and the VML frame metadata into a
@@ -668,6 +670,14 @@ public static partial class WordBatchEmitter
         // visible body text — it doesn't disqualify the wrapper-coalesce.
         var rawXml = word.GetElementXml(run.Path);
         if (string.IsNullOrEmpty(rawXml) || !IsTextboxDrawing(rawXml)) return false;
+        // BUG-DUMP-R26-6: a legacy VML textbox round-trips via a verbatim
+        // raw-set APPEND into the host paragraph (TryEmitTextbox), which needs
+        // an `add p` to exist first. The host-less shortcut here (which relies
+        // on AddTextbox creating its own modern host) would leave the raw-set
+        // with no /body/p[last()] target. Bail so the normal EmitParagraph flow
+        // emits `add p`, then routes the run through TryEmitPictureRun →
+        // TryEmitTextbox, which raw-sets the VML into the just-added paragraph.
+        if (IsVmlTextbox(rawXml)) return false;
         // Delegate to the same emit path TryEmitPictureRun uses so geometry
         // props + inner-paragraph recursion stay identical.
         return TryEmitTextbox(word, run, rawXml, parentPath, items, ctx);
@@ -1342,8 +1352,81 @@ public static partial class WordBatchEmitter
         return true;
     }
 
-    private static bool TryEmitFieldRun(DocumentNode run, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx = null)
+    private static bool TryEmitFieldRun(WordHandler word, DocumentNode run, string paraTargetPath, string parentPath, List<BatchItem> items, BodyEmitContext? ctx = null)
     {
+        if (run.Type != "field") return false;
+        // BUG-DUMP-R26-2: a field whose cached result has multiple distinctly-
+        // formatted runs can't round-trip through `add field` (single-rPr model
+        // collapses the runs and leaks the first run's bold onto the fldChar
+        // markers). CollapseFieldChains flagged it and stashed the field-slice
+        // run paths (begin..end). Raw-set the whole chain verbatim so per-run
+        // formatting survives.
+        // BUG-DUMP-R26-7: fire for /body, header/footer AND table-cell hosts
+        // (ResolveRawSetHost), not only /body — previously a rich field result
+        // in a header/footer/cell silently fell to the lossy typed emit.
+        if (run.Format.TryGetValue("_richFieldResult", out var rfr) && rfr is bool rfrB && rfrB
+            && run.Format.TryGetValue("_fieldSlicePaths", out var spObj) && spObj is string spStr
+            && !string.IsNullOrEmpty(spStr)
+            && ResolveRawSetHost(parentPath, ctx) is { } fieldHost)
+        {
+            var sb = new System.Text.StringBuilder();
+            bool ok = true;
+            foreach (var p in spStr.Split('\n'))
+            {
+                if (string.IsNullOrEmpty(p)) continue;
+                var xml = word.GetElementXml(p);
+                if (string.IsNullOrEmpty(xml)) { ok = false; break; }
+                sb.Append(xml);
+            }
+            if (ok && sb.Length > 0)
+            {
+                var chainXml = sb.ToString();
+                // BUG-DUMP-R26-7 (PART B): an external relationship inside the
+                // cached result (e.g. a hyperlink r:id) would DANGLE in the
+                // rebuilt part — the raw-set can't recreate the rel. Do NOT fall
+                // silently to the lossy extractor; emit a deterministic warning
+                // naming the loss. Full rel preservation is a separate effort.
+                if (HasExternalRelRef(chainXml))
+                {
+                    ctx?.Warnings.Add(new DocxUnsupportedWarning(
+                        Element: "field.richResult",
+                        Path: run.Path,
+                        Reason: "field cached result with per-run formatting AND an external relationship (hyperlink/image) cannot round-trip verbatim; the relationship target is not carried through dump→batch, so the formatted result is flattened to uniform text on replay"));
+                    // Fall through to the typed path (preserves instruction +
+                    // cached value with uniform formatting; loss is now visible).
+                }
+                else
+                {
+                    items.Add(new BatchItem
+                    {
+                        Command = "raw-set",
+                        Part = fieldHost.Part,
+                        Xpath = fieldHost.XPath,
+                        Action = "append",
+                        Xml = chainXml
+                    });
+                    return true;
+                }
+            }
+            // Reconstruction failed — fall through to the typed path so the
+            // field still round-trips (cached value + uniform formatting).
+        }
+        // BUG-DUMP-R26-7 (PART B): a single-run field result that wraps a
+        // hyperlink (external rel) isn't "rich" (so the verbatim raw-set above
+        // doesn't fire) but the typed path below still drops the hyperlink
+        // wrapper + rel silently (text + bold survive). Emit a deterministic
+        // warning so the loss is visible. (The multi-run rich+rel case is
+        // already warned on the raw-set branch above, so gate on NOT-rich to
+        // avoid a double warning.)
+        if (run.Format.TryGetValue("_fieldResultHasExternalRel", out var frer)
+            && frer is bool frerB && frerB
+            && !(run.Format.TryGetValue("_richFieldResult", out var rfr2) && rfr2 is bool rfr2B && rfr2B))
+        {
+            ctx?.Warnings.Add(new DocxUnsupportedWarning(
+                Element: "field.richResult",
+                Path: run.Path,
+                Reason: "field cached result wraps a hyperlink whose external relationship target is not carried through dump→batch; the hyperlink is flattened (its link is dropped) on replay"));
+        }
         // Synthetic field entry from CollapseFieldChains. Format carries
         // `instruction` (raw fldSimple/instrText) and Text holds the cached
         // display value. AddField parses the instruction and rebuilds the
@@ -1753,6 +1836,21 @@ public static partial class WordBatchEmitter
         // and the caller surfaces a loss warning (mirrors the SmartArt path).
         xml.Contains("r:link");
 
+    // BUG-DUMP-R26-6: a legacy VML textbox is a <w:pict> carrying a
+    // <v:textbox> (with <w:txbxContent>) or a <v:shape type="#_x0000_t202">
+    // (the VML textbox preset). Distinct from the modern DrawingML textbox
+    // (wps:wsp/wps:txbx), which the typed `add textbox` path handles. We
+    // detect VML so it can round-trip verbatim via raw-set instead of being
+    // force-converted (and emptied) through the DrawingML emit.
+    private static bool IsVmlTextbox(string rawXml)
+    {
+        if (!rawXml.Contains("<w:pict", StringComparison.Ordinal)
+            && !rawXml.Contains("<v:", StringComparison.Ordinal))
+            return false;
+        return rawXml.Contains("<v:textbox", StringComparison.Ordinal)
+            || rawXml.Contains("_x0000_t202", StringComparison.Ordinal);
+    }
+
     private static bool IsTextboxDrawing(string rawXml)
     {
         // Mirrors WordHandler.CountTextboxesInHost / Navigation's textbox
@@ -1791,6 +1889,48 @@ public static partial class WordBatchEmitter
                                        string? attachParaPath = null)
     {
         if (ctx == null) return false;
+
+        // BUG-DUMP-R26-6: a LEGACY VML textbox (<w:pict> with <v:shape
+        // type="#_x0000_t202"> / <v:textbox><w:txbxContent>) is a different
+        // shape family than the modern DrawingML box `add textbox` produces.
+        // The typed emit below parses DrawingML namespaces (wp:/wps:/a:) that
+        // don't exist in VML, so it extracted ZERO props (no text, fill, or
+        // stroke) and Navigation can't surface the VML txbxContent under
+        // /<host>/textbox[N] for the recursive inner-content emit — the box came
+        // back as an empty modern textbox with its content + fillcolor/
+        // strokecolor gone. The faithful (and lossless) round-trip is a verbatim
+        // raw-set of the whole <w:pict> run into the just-emitted host paragraph
+        // — mirrors the non-textbox-shape / rich-inline-SDT raw-set append.
+        // BUG-DUMP-R26-7: fire for /body, header/footer AND table-cell hosts
+        // (ResolveRawSetHost), not only /body — VML page-number / watermark
+        // boxes in headers are the most common real case.
+        if (IsVmlTextbox(rawXml) && ResolveRawSetHost(parentPath, ctx) is { } vmlHost)
+        {
+            // BUG-DUMP-R26-7 (PART B): a VML shape with an external relationship
+            // (e.g. <v:imagedata r:id> referencing an image part) would dangle in
+            // the rebuilt part. Don't silently flatten — emit a deterministic
+            // warning naming the loss, then fall through. Plain VML textboxes
+            // (fillcolor/strokecolor, no r:id) still round-trip verbatim.
+            if (HasExternalRelRef(rawXml))
+            {
+                ctx.Warnings.Add(new DocxUnsupportedWarning(
+                    Element: "textbox.vmlContent",
+                    Path: run.Path,
+                    Reason: "legacy VML shape with an external relationship (image r:id / linked content) cannot round-trip verbatim; the relationship target is not carried through dump→batch, so the shape content is dropped on replay"));
+            }
+            else
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = vmlHost.Part,
+                    Xpath = vmlHost.XPath,
+                    Action = "append",
+                    Xml = rawXml
+                });
+                return true;
+            }
+        }
 
         // Only emit a typed `add textbox` for hosts AddTextbox itself
         // supports: /body, /body/tbl[..]/tc[N], /header[N], /footer[N].
@@ -2113,6 +2253,40 @@ public static partial class WordBatchEmitter
             && parentPath.EndsWith("]", StringComparison.Ordinal);
     }
 
+    // BUG-DUMP-R26-7: resolve the (Part, XPath) for a raw-set APPEND into the
+    // last paragraph of the host identified by <paramref name="parentPath"/>.
+    // The verbatim-content raw-set fallbacks (rich field result FIX-2, nested
+    // SDT FIX-5, VML textbox FIX-6) previously fired only for /body; this
+    // extends them to header / footer / table-cell hosts so the content
+    // survives there too instead of falling silently to the lossy extractor.
+    //   /body                         -> ("/document",  "/w:document/w:body/w:p[last()]")
+    //   /header[N]                    -> ("/header[N]", "/w:hdr/w:p[last()]")
+    //   /footer[N]                    -> ("/footer[N]", "/w:ftr/w:p[last()]")
+    //   table cell (ctx box set)      -> ("/document",  "(//w:tbl)[N]/w:tr[M]/w:tc[K]/w:p[last()]")
+    // Returns null when the host isn't one we can address (the caller then
+    // keeps its existing behaviour — typically the lossy typed emit).
+    private static (string Part, string XPath)? ResolveRawSetHost(string parentPath, BodyEmitContext? ctx)
+    {
+        if (parentPath == "/body")
+            return ("/document", "/w:document/w:body/w:p[last()]");
+        if (IsHeaderFooterHost(parentPath))
+        {
+            var root = parentPath.StartsWith("/header[", StringComparison.Ordinal) ? "/w:hdr" : "/w:ftr";
+            return (parentPath, $"{root}/w:p[last()]");
+        }
+        // Table cell: EmitTable stashes the current cell's global-ordinal XPath
+        // in the context box while walking the cell's paragraphs. Append into
+        // that cell's last paragraph. The container part is the document for a
+        // body table; header/footer-hosted tables aren't carried here (the box
+        // is only set for /document-hosted tables) so we conservatively skip.
+        if (parentPath.Contains("/tc[", StringComparison.Ordinal)
+            && ctx?.CurrentCellXPathBox is { } box && box[0] is { } cellXPath)
+        {
+            return ("/document", $"{cellXPath}/w:p[last()]");
+        }
+        return null;
+    }
+
     /// <summary>
     /// R10-bug1: OLE / embedded-object runs (Type=="ole"). Full round-trip:
     /// pull the embedded payload + VML icon binaries and the frame metadata
@@ -2427,26 +2601,32 @@ public static partial class WordBatchEmitter
     // replay time — the same last()-relative attach the inline-textbox raw-set
     // uses.
     private static bool TryEmitRichInlineSdt(WordHandler word, DocumentNode sdt,
-                                             List<BatchItem> items, BodyEmitContext? ctx)
+                                             string parentPath, List<BatchItem> items, BodyEmitContext? ctx)
     {
         var rawXml = word.RawElementXml(sdt.Path);
         if (string.IsNullOrEmpty(rawXml) || !IsRichInlineSdt(rawXml!)) return false;
+        // BUG-DUMP-R26-7: target /body, header/footer OR table-cell hosts, not
+        // only /body. When the host isn't raw-set-addressable, fall back to the
+        // typed emit (no regression vs the old /body-only guard).
+        if (ResolveRawSetHost(parentPath, ctx) is not { } sdtHost) return false;
         // External relationship references (hyperlink r:id, image r:embed/r:link)
-        // would dangle in the blank target — raw injection does not recreate the
-        // matching rels. Fall back to the flat text emit and surface the loss.
+        // would dangle in the rebuilt part — raw injection does not recreate the
+        // matching rels. Emit a deterministic warning naming the loss instead of
+        // silently flattening (BUG-DUMP-R26-7 PART B), then fall back to the flat
+        // text emit. Full rel preservation is a separate, larger effort.
         if (HasExternalRelRef(rawXml!))
         {
             ctx?.Warnings.Add(new DocxUnsupportedWarning(
                 Element: "sdt.richContent",
                 Path: sdt.Path,
-                Reason: "inline content control with formatted runs AND external relationship references (hyperlinks/images) flattened to text on dump"));
+                Reason: "inline content control with formatted/nested content AND an external relationship (hyperlink/image) cannot round-trip verbatim; the relationship target is not carried through dump→batch, so the control is flattened to text on replay"));
             return false;
         }
         items.Add(new BatchItem
         {
             Command = "raw-set",
-            Part = "/document",
-            Xpath = "/w:document/w:body/w:p[last()]",
+            Part = sdtHost.Part,
+            Xpath = sdtHost.XPath,
             Action = "append",
             Xml = rawXml
         });
@@ -2460,6 +2640,14 @@ public static partial class WordBatchEmitter
     // keys on inner <w:p> count — a run-level SDT has no inner paragraph.)
     private static bool IsRichInlineSdt(string sdtXml)
     {
+        // BUG-DUMP-R26-5: nested inline SDT. The outer <w:sdt> wraps one or more
+        // child <w:sdt> in its sdtContent (L1>L2>L3 tag/id/alias nesting). The
+        // flat `add sdt text=` path seeds a single run from the innermost text
+        // and drops every nesting level's tag/id/alias plus the structure. A
+        // second <w:sdt> anywhere in the XML means at least one nested control,
+        // so raw-set the whole tree verbatim to preserve depth + per-level props.
+        if (System.Text.RegularExpressions.Regex.Matches(sdtXml, "<w:sdt[ >]").Count > 1)
+            return true;
         // More than one content run.
         if (System.Text.RegularExpressions.Regex.Matches(sdtXml, "<w:r[ >]").Count > 1)
             return true;

@@ -149,6 +149,7 @@ public static partial class WordBatchEmitter
             DeferredBookmarks: new List<BatchItem>(),
             TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
             TableOrdinalBox: new int[1],
+            CurrentCellXPathBox: new string?[1],
             MovePairIds: word.BuildMovePairIdMap(),
             Warnings: warnings);
 
@@ -463,6 +464,16 @@ public static partial class WordBatchEmitter
         // cell content, N is the stable 1-based `//w:tbl` document-order index
         // the cell-SDT raw-set resolves against at replay time.
         int[] TableOrdinalBox,
+        // BUG-DUMP-R26-7: while EmitTable walks a cell's content, this holds the
+        // raw-set XPath of the CURRENT cell ("(//w:tbl)[N]/w:tr[M]/w:tc[K]", same
+        // global-ordinal form the cell-SDT raw-set uses). Null when the walk is
+        // in the body / header / footer (no cell context). EmitParagraph's inline
+        // raw-set fallbacks (rich field result, nested SDT, VML textbox) read it
+        // via ResolveRawSetHost so they target the right cell paragraph instead
+        // of being restricted to /body. Single-element mutable box (records are
+        // immutable); set+restored around each cell's content walk so nested
+        // tables and post-cell body content see the correct value.
+        string?[] CurrentCellXPathBox,
         // CONSISTENCY(move-range-markers): map from each moveFrom/moveTo run's
         // own w:id to the SHARED pairing id its bracketing range-marker w:name
         // implies (see WordHandler.BuildMovePairIdMap). EmitPlainOrHyperlinkRun
@@ -538,6 +549,7 @@ public static partial class WordBatchEmitter
             DeferredBookmarks: new List<BatchItem>(),
             TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
             TableOrdinalBox: new int[1],
+            CurrentCellXPathBox: new string?[1],
             MovePairIds: word.BuildMovePairIdMap(),
             Warnings: warnings);
 
