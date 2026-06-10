@@ -335,7 +335,24 @@ public static partial class WordBatchEmitter
             var probe = word.GetElementXml(r.Path);
             return !string.IsNullOrEmpty(probe) && IsTextboxDrawing(probe);
         });
-        string? sharedAttachPara = drawingBearingCount >= 2 ? paraTargetPath : null;
+        // BUG-DUMP-R25-7: a header/footer paragraph that hosts a textbox drawing
+        // (e.g. the centred page-number box in a footer) must keep the drawing
+        // run INSIDE its styled host paragraph. The body-only
+        // TryEmitTextboxOnlyParagraph shortcut does not fire for header/footer
+        // hosts, so the textbox otherwise fell through to AddTextbox creating a
+        // NEW unstyled paragraph — splitting the footer into (a) an empty
+        // pStyle-carrying paragraph and (b) an unstyled drawing paragraph that
+        // reverted to Normal's taller exact line height, growing the reserved
+        // footer area and reflowing the body (+1 rendered page). Attaching to
+        // the just-emitted paraTargetPath (which carries the pPr/pStyle/ind/jc)
+        // keeps the drawing in its styled host. Restrict to non-body hosts —
+        // /body single-drawing paragraphs already round-trip via the
+        // wrapper-coalesce shortcut, and the ≥2 side-by-side case is unchanged.
+        string? sharedAttachPara =
+            (drawingBearingCount >= 2
+             || (drawingBearingCount == 1 && parentPath != "/body"
+                 && IsHeaderFooterHost(parentPath)))
+            ? paraTargetPath : null;
         // BUG-R14B: hyperlink rows already emitted at this parent belong to
         // earlier paragraphs (paraTargetPath is the same "/body/p[last()]"
         // literal for every <w:p>). Capture that count so multi-run hyperlinks
@@ -1934,6 +1951,24 @@ public static partial class WordBatchEmitter
                 if (!string.IsNullOrEmpty(vert) && vert != "horz") props["textDirection"] = vert;
                 var bAnchor = bodyPr.Attribute("anchor")?.Value;
                 if (!string.IsNullOrEmpty(bAnchor) && bAnchor != "t") props["textAnchor"] = bAnchor;
+                // BUG-DUMP-R25-6: wps:bodyPr/@wrap is the IN-shape text-wrap
+                // mode (distinct from wp:wrapNone/wp:wrapSquare, the around-shape
+                // wrap forwarded via `wrap`). AddTextbox hardcoded wrap="square";
+                // a source wrap="none"/"tight"/"through" was clobbered to square.
+                // Forward the value verbatim. The source bodyPr ALWAYS exists
+                // here (we're inside `if (bodyPr != null)`), so emit an explicit
+                // empty-string sentinel when @wrap is ABSENT — AddTextbox then
+                // omits the attribute entirely, preserving absence instead of
+                // re-injecting the schema default. (A `null` key, by contrast,
+                // means "interactive caller never touched wrap" → legacy square.)
+                var bodyWrap = bodyPr.Attribute("wrap")?.Value;
+                props["bodyWrap"] = bodyWrap ?? "";
+                // BUG-DUMP-R25-6: <a:spAutoFit/> (resize shape to fit text) is a
+                // child of bodyPr. AddTextbox never emitted it, so the box kept
+                // its fixed cy instead of shrinking to the content — same
+                // vertical-extent / reflow defect. Forward as an autoFit flag.
+                if (bodyPr.Elements().Any(e => e.Name.LocalName == "spAutoFit"))
+                    props["autoFit"] = "true";
             }
             // docPr name → alt
             var docPr = doc.Descendants(wp + "docPr").FirstOrDefault();
@@ -2062,6 +2097,20 @@ public static partial class WordBatchEmitter
         if (parentPath.Contains("/tc[", StringComparison.Ordinal)
             && parentPath.EndsWith("]", StringComparison.Ordinal)) return true;
         return false;
+    }
+
+    // BUG-DUMP-R25-7: a bare /header[N] or /footer[N] host (NOT a cell, which
+    // already attaches its textbox to the containing paragraph via the
+    // "/tc[" branch in TryEmitPictureRun). Used to keep a single footer/header
+    // textbox inside its styled host paragraph instead of letting AddTextbox
+    // fork a new unstyled paragraph.
+    private static bool IsHeaderFooterHost(string parentPath)
+    {
+        // Reject nested (cell) paths: a bare /footer[N] has its only '/' at 0.
+        if (parentPath.IndexOf('/', 1) >= 0) return false;
+        return (parentPath.StartsWith("/header[", StringComparison.Ordinal)
+                || parentPath.StartsWith("/footer[", StringComparison.Ordinal))
+            && parentPath.EndsWith("]", StringComparison.Ordinal);
     }
 
     /// <summary>

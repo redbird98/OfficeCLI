@@ -2190,6 +2190,20 @@ public partial class WordHandler
         string vertAttr = !string.IsNullOrEmpty(vert) ? $" vert=\"{SanitizeBodyVert(vert)}\"" : "";
         string anchorVal = SanitizeBodyAnchor(
             properties.GetValueOrDefault("textAnchor") ?? properties.GetValueOrDefault("vAlign"));
+        // BUG-DUMP-R25-6: in-shape text-wrap mode (wps:bodyPr/@wrap) and
+        // <a:spAutoFit/> control the textbox's own sizing — distinct from the
+        // around-shape `wrap` (wp:wrapNone/Square) handled by wrapInnerXml.
+        // Three-way contract so every ST_TextWrappingType value round-trips and
+        // a source that had NO @wrap stays attribute-less:
+        //   key absent          → legacy interactive caller never set it →
+        //                          wrap="square" (preserves prior behaviour).
+        //   key present & empty  → dump sentinel: the source bodyPr had no
+        //                          @wrap → omit the attribute (preserve absence).
+        //   key present & value  → pass the value through verbatim (none /
+        //                          square / tight / through), no longer
+        //                          clobbered to square by a 2-way map.
+        string bodyWrapAttr = BuildBodyWrapAttr(properties);
+        string spAutoFitXml = IsTruthy(properties.GetValueOrDefault("autoFit", "")) ? "<a:spAutoFit/>" : "";
         string? gradient = properties.GetValueOrDefault("fill.gradient") ?? properties.GetValueOrDefault("gradient");
         string? fillOpacity = properties.GetValueOrDefault("fill.opacity") ?? properties.GetValueOrDefault("opacity");
 
@@ -2212,7 +2226,7 @@ public partial class WordHandler
         // Drawing scaffolding. EffectExtent + DocProperties + a:graphic with
         // a:graphicData uri = wordprocessingShape; inner wps:wsp carries
         // spPr (preset rect geometry + fill + line) + txbx (body paragraphs) + bodyPr.
-        string drawingXml = $@"<w:drawing xmlns:w=""http://schemas.openxmlformats.org/wordprocessingml/2006/main"" xmlns:wp=""http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"" xmlns:a=""http://schemas.openxmlformats.org/drawingml/2006/main"" xmlns:wps=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><wp:anchor distT=""0"" distB=""0"" distL=""114300"" distR=""114300"" simplePos=""0"" relativeHeight=""251{siblingShapes:D3}"" behindDoc=""0"" locked=""0"" layoutInCell=""1"" allowOverlap=""1""><wp:simplePos x=""0"" y=""0""/><wp:positionH relativeFrom=""{hRel}"">{posHInner}</wp:positionH><wp:positionV relativeFrom=""{vRel}"">{posVInner}</wp:positionV><wp:extent cx=""{cxEmu}"" cy=""{cyEmu}""/><wp:effectExtent l=""0"" t=""0"" r=""0"" b=""0""/>{wrapInnerXml}<wp:docPr id=""{docPropId}"" name=""{System.Security.SecurityElement.Escape(altText)}""/><wp:cNvGraphicFramePr/><a:graphic><a:graphicData uri=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><wps:wsp><wps:cNvSpPr txBox=""1""/><wps:spPr><a:xfrm{rotAttr}><a:off x=""0"" y=""0""/><a:ext cx=""{cxEmu}"" cy=""{cyEmu}""/></a:xfrm><a:prstGeom prst=""{geom}""><a:avLst/></a:prstGeom>{fillXml}{lnXml}{effectXml}</wps:spPr><wps:txbx><w:txbxContent>{txbxBodyXml}</w:txbxContent></wps:txbx><wps:bodyPr rot=""0""{vertAttr} wrap=""square"" lIns=""{lIns}"" tIns=""{tIns}"" rIns=""{rIns}"" bIns=""{bIns}"" anchor=""{anchorVal}"" anchorCtr=""0""/></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing>";
+        string drawingXml = $@"<w:drawing xmlns:w=""http://schemas.openxmlformats.org/wordprocessingml/2006/main"" xmlns:wp=""http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"" xmlns:a=""http://schemas.openxmlformats.org/drawingml/2006/main"" xmlns:wps=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><wp:anchor distT=""0"" distB=""0"" distL=""114300"" distR=""114300"" simplePos=""0"" relativeHeight=""251{siblingShapes:D3}"" behindDoc=""0"" locked=""0"" layoutInCell=""1"" allowOverlap=""1""><wp:simplePos x=""0"" y=""0""/><wp:positionH relativeFrom=""{hRel}"">{posHInner}</wp:positionH><wp:positionV relativeFrom=""{vRel}"">{posVInner}</wp:positionV><wp:extent cx=""{cxEmu}"" cy=""{cyEmu}""/><wp:effectExtent l=""0"" t=""0"" r=""0"" b=""0""/>{wrapInnerXml}<wp:docPr id=""{docPropId}"" name=""{System.Security.SecurityElement.Escape(altText)}""/><wp:cNvGraphicFramePr/><a:graphic><a:graphicData uri=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><wps:wsp><wps:cNvSpPr txBox=""1""/><wps:spPr><a:xfrm{rotAttr}><a:off x=""0"" y=""0""/><a:ext cx=""{cxEmu}"" cy=""{cyEmu}""/></a:xfrm><a:prstGeom prst=""{geom}""><a:avLst/></a:prstGeom>{fillXml}{lnXml}{effectXml}</wps:spPr><wps:txbx><w:txbxContent>{txbxBodyXml}</w:txbxContent></wps:txbx><wps:bodyPr rot=""0""{vertAttr}{bodyWrapAttr} lIns=""{lIns}"" tIns=""{tIns}"" rIns=""{rIns}"" bIns=""{bIns}"" anchor=""{anchorVal}"" anchorCtr=""0"">{spAutoFitXml}</wps:bodyPr></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing>";
 
         var drawing = ParseDrawingFromXml(drawingXml);
         var run = new Run(drawing);
@@ -2447,6 +2461,29 @@ public partial class WordHandler
         "dist" or "distributed"        => "dist",
         _                             => "t",
     };
+
+    // BUG-DUMP-R25-6: build the wps:bodyPr/@wrap attribute (with a leading
+    // space) honouring the three-way contract documented at the call site.
+    // ST_TextWrappingType is the closed set {none, square}; Word also writes
+    // the legacy values {tight, through} on some shapes. Pass ANY of those
+    // through verbatim (the earlier 2-way none/square map clobbered tight/
+    // through → square). Absent key → legacy default wrap="square". Present
+    // but empty (dump sentinel for a source bodyPr with no @wrap) → emit no
+    // attribute at all, preserving the source's attribute-less shape.
+    private static string BuildBodyWrapAttr(Dictionary<string, string> properties)
+    {
+        if (!properties.TryGetValue("bodyWrap", out var raw))
+            return " wrap=\"square\"";                 // key absent → legacy default
+        var v = (raw ?? "").Trim().ToLowerInvariant();
+        if (v.Length == 0)
+            return "";                                  // explicit-absence sentinel → omit
+        var sane = v switch
+        {
+            "none" or "square" or "tight" or "through" => v,
+            _                                          => "square",  // unknown → safe default
+        };
+        return $" wrap=\"{sane}\"";
+    }
 
     /// <summary>solidFill, optionally translucent. Opacity accepts 0-100000
     /// (OOXML alpha, the dump form), a "NN%" string, or a 0-1 / 0-100 number.</summary>
