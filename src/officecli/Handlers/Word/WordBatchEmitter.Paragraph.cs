@@ -555,6 +555,35 @@ public static partial class WordBatchEmitter
                 Type = "section",
                 Props = sectProps
             });
+            // BUG-DUMP-R37-1: AddSection only captures the sectPr geometry
+            // (page/margin/grid/column via sectionBreak.* keys). The HOST
+            // paragraph that carries the <w:sectPr> in its pPr also holds its
+            // own paragraph-level properties (spacing/ind/jc/widowControl/…) and
+            // a paragraph-mark rPr (bold/size/color/font.ea) — the empty
+            // section-terminating paragraph's mark-rPr size/spacing set its
+            // rendered line height, so dropping them shifts pagination near
+            // section boundaries. Re-apply them with a `set` on the rebuilt
+            // section paragraph (now at /body/p[last()]), mirroring how a normal
+            // paragraph round-trips its pPr: reuse FilterEmittableProps (same
+            // pPr/mark-rPr vocabulary AddParagraph/Set understand) and strip the
+            // sectionBreak.* keys already consumed by `add section`. On a
+            // run-less section paragraph the bare bold/size/color/font.* keys
+            // land on the ParagraphMarkRunProperties (SetElement Paragraph branch).
+            var sectPProps = FilterEmittableProps(pNode.Format);
+            sectPProps.Remove("sectionBreak");
+            foreach (var k in sectPProps.Keys
+                         .Where(k => k.StartsWith("sectionBreak.", StringComparison.OrdinalIgnoreCase))
+                         .ToList())
+                sectPProps.Remove(k);
+            if (sectPProps.Count > 0)
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "set",
+                    Path = "/body/p[last()]",
+                    Props = sectPProps
+                });
+            }
             // BUG-DUMP4-04: a section-break paragraph can also carry visible
             // text runs (the carrier paragraph is just a regular paragraph
             // with sectPr in its pPr). AddSection appends a fresh paragraph

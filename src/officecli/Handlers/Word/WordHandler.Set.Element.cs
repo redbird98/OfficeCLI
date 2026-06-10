@@ -990,8 +990,10 @@ public partial class WordHandler
                     // store on the paragraph mark rPr AND propagate to
                     // all existing runs so visible text picks up the
                     // character style.
-                    var pmrp = pProps.ParagraphMarkRunProperties
-                        ?? pProps.AppendChild(new ParagraphMarkRunProperties());
+                    // BUG-DUMP-R37-1: schema-order-safe creation (rPr before
+                    // sectPr) so re-applying a section-break paragraph's mark
+                    // formatting validates.
+                    var pmrp = EnsureMarkRunProperties(pProps);
                     pmrp.RemoveAllChildren<RunStyle>();
                     pmrp.PrependChild(new RunStyle { Val = value });
                     foreach (var pRun in para.Descendants<Run>())
@@ -1012,8 +1014,7 @@ public partial class WordHandler
                 case var mk when mk.StartsWith("markrpr.", StringComparison.OrdinalIgnoreCase):
                 {
                     var sub = key.Substring("markRPr.".Length);
-                    var markOnlyRPr = pProps.ParagraphMarkRunProperties
-                        ?? pProps.AppendChild(new ParagraphMarkRunProperties());
+                    var markOnlyRPr = EnsureMarkRunProperties(pProps);
                     // CONSISTENCY(markRPr-explicit-false): the dotted markRPr.*
                     // form is dump-specific (Navigation emits markRPr.bold=false
                     // only when source <w:rPr><w:b w:val="false"/></w:rPr> sits
@@ -1118,8 +1119,7 @@ public partial class WordHandler
                     // markRPr.* setter does NOT enable bare-key mirroring.
                     if ((allParaRuns.Count == 0 || markRPrPreExisted) && !explicitMarkOverride)
                     {
-                        var markRPr = pProps.ParagraphMarkRunProperties
-                            ?? pProps.AppendChild(new ParagraphMarkRunProperties());
+                        var markRPr = EnsureMarkRunProperties(pProps);
                         ApplyRunFormatting(markRPr, key, value);
                     }
                     foreach (var pRun in allParaRuns)
@@ -1172,8 +1172,7 @@ public partial class WordHandler
                     }
                     if (key.Contains('.'))
                     {
-                        var paraRPr = pProps.GetFirstChild<ParagraphMarkRunProperties>()
-                            ?? pProps.AppendChild(new ParagraphMarkRunProperties());
+                        var paraRPr = EnsureMarkRunProperties(pProps);
                         if (Core.TypedAttributeFallback.TrySet(paraRPr, key, value))
                             break;
                         if (paraRPr.ChildElements.Count == 0)
@@ -1244,8 +1243,7 @@ public partial class WordHandler
         // or the source already carried a markRPr.
         if (runs.Count == 0 || markRPrPreExisted)
         {
-            var markRPr = pProps.ParagraphMarkRunProperties
-                ?? pProps.AppendChild(new ParagraphMarkRunProperties());
+            var markRPr = EnsureMarkRunProperties(pProps);
             if (GenericXmlQuery.TryCreateTypedChild(markRPr, key, value))
                 applied = true;
             else if (markRPr.ChildElements.Count == 0)
@@ -1387,7 +1385,7 @@ public partial class WordHandler
                         var fp = cell.Elements<Paragraph>().FirstOrDefault();
                         if (fp == null) { fp = new Paragraph(); cell.AppendChild(fp); }
                         var pPr = fp.ParagraphProperties ?? fp.PrependChild(new ParagraphProperties());
-                        var pmrp = pPr.ParagraphMarkRunProperties ?? pPr.AppendChild(new ParagraphMarkRunProperties());
+                        var pmrp = EnsureMarkRunProperties(pPr);
                         ApplyRunFormatting(pmrp, key, value);
                     }
                     break;

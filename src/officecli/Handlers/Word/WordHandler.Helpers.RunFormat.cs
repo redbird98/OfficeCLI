@@ -472,6 +472,23 @@ public partial class WordHandler
     }
 
     /// <summary>
+    /// Return the paragraph-mark run properties, creating them IN CT_PPr SCHEMA
+    /// ORDER when absent. The strongly-typed <see cref="ParagraphProperties.ParagraphMarkRunProperties"/>
+    /// setter inserts the element at its schema position — crucially BEFORE any
+    /// <c>&lt;w:sectPr&gt;</c> (rPr precedes sectPr in CT_PPr). Plain
+    /// <c>AppendChild(new ParagraphMarkRunProperties())</c> appends at the end,
+    /// which lands the rPr AFTER an already-present sectPr and fails schema
+    /// validation — exactly the section-break-paragraph case (BUG-DUMP-R37-1),
+    /// where the rebuilt section paragraph already holds its sectPr when Set
+    /// re-applies the paragraph-mark formatting.
+    /// </summary>
+    private static ParagraphMarkRunProperties EnsureMarkRunProperties(ParagraphProperties pProps)
+    {
+        return pProps.ParagraphMarkRunProperties
+            ??= new ParagraphMarkRunProperties();
+    }
+
+    /// <summary>
     /// Parse a w:shd value string ("fill", "val;fill", "val;fill;color") into a Shading element.
     /// Shared by paragraph-level, run-level, and pmrp shading handlers.
     /// </summary>
