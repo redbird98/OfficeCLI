@@ -184,6 +184,7 @@ public partial class WordHandler
             "chart" => AddChart(parent, parentPath, index, properties),
             "picture" or "image" or "img" => AddPicture(parent, parentPath, index, properties),
             "ole" or "oleobject" or "object" or "embed" => AddOle(parent, parentPath, index, properties),
+            "activex" => AddActiveX(parent, parentPath, properties),
             "comment" => AddComment(parent, parentPath, index, properties),
             "bookmark" => AddBookmark(parent, parentPath, index, properties),
             "permstart" or "permend" => AddPerm(parent, parentPath, index, properties, type),
@@ -403,6 +404,9 @@ public partial class WordHandler
                 case "oleobject":
                 case "object":
                 case "embed":
+                // AddActiveX wraps the control run in a cell paragraph, same
+                // as AddOle — block-level schema requirement satisfied.
+                case "activex":
                     break;
                 // BUG-FIX(B2): bookmark is an inline-level construct, but
                 // AddBookmark redirects into the cell's first paragraph

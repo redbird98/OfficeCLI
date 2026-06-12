@@ -357,6 +357,78 @@ public partial class WordHandler : IDocumentHandler
             iconBytes, iconCt, progId, display, width, height, name);
     }
 
+    // dump→batch round-trip carrier for an ActiveX form-control run — a
+    // <w:object> hosting <w:control r:id> plus a VML preview <v:imagedata r:id>
+    // instead of an o:OLEObject. The dump ships the verbatim run XML and every
+    // referenced package part's bytes (preview image, activeX persistence XML,
+    // and that part's nested binary blob); AddActiveX rebuilds the parts and
+    // rewrites the run's r:id refs, so the control needs no external files.
+    internal sealed record ActiveXPartData(
+        string RelId, byte[] Bytes, string ContentType, List<ActiveXPartData> Children);
+    internal sealed record ActiveXEmitData(string RunXml, List<ActiveXPartData> Parts);
+
+    /// <summary>
+    /// dump→batch: extract the verbatim run XML and all referenced parts for an
+    /// ActiveX control run. Returns null when the run hosts no &lt;w:control&gt;
+    /// or any referenced part can't be resolved, so the emitter falls back to
+    /// the warn-and-drop path.
+    /// </summary>
+    internal ActiveXEmitData? GetActiveXEmitData(string runPath)
+    {
+        OpenXmlElement? element;
+        try { element = NavigateToElement(ParsePath(runPath)); }
+        catch { return null; }
+        if (element is not Run run) return null;
+        var obj = run.GetFirstChild<EmbeddedObject>();
+        if (obj == null) return null;
+        if (!obj.Descendants().Any(e => e.LocalName == "control")) return null;
+
+        var hostPart = ResolveImageHostPart(run);
+        var relIds = new List<string>();
+        foreach (var el in obj.Descendants())
+        {
+            foreach (var a in el.GetAttributes())
+            {
+                if (a.LocalName == "id" && a.NamespaceUri == RelNs
+                    && !string.IsNullOrEmpty(a.Value) && !relIds.Contains(a.Value!))
+                    relIds.Add(a.Value!);
+            }
+        }
+        if (relIds.Count == 0) return null;
+
+        var parts = new List<ActiveXPartData>();
+        foreach (var relId in relIds)
+        {
+            OpenXmlPart part;
+            byte[] bytes;
+            try
+            {
+                part = hostPart.GetPartById(relId);
+                bytes = ReadPartBytes(part);
+            }
+            catch { return null; }
+            var children = new List<ActiveXPartData>();
+            foreach (var child in part.Parts)
+            {
+                byte[] cb;
+                try { cb = ReadPartBytes(child.OpenXmlPart); }
+                catch { return null; }
+                children.Add(new ActiveXPartData(
+                    child.RelationshipId, cb, child.OpenXmlPart.ContentType, new List<ActiveXPartData>()));
+            }
+            parts.Add(new ActiveXPartData(relId, bytes, part.ContentType, children));
+        }
+        return new ActiveXEmitData(run.OuterXml, parts);
+    }
+
+    private static byte[] ReadPartBytes(OpenXmlPart part)
+    {
+        using var s = part.GetStream();
+        using var ms = new MemoryStream();
+        s.CopyTo(ms);
+        return ms.ToArray();
+    }
+
     private OpenXmlPart ResolveImageHostPart(Run run)
     {
         var headerAncestor = run.Ancestors<Header>().FirstOrDefault();

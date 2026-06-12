@@ -690,6 +690,129 @@ public partial class WordHandler
     //
     // Caller can override: progId, width, height, icon (png/jpg/emf file path),
     // display (icon|content). display=content flips DrawAspect to "Content".
+    // dump→batch round-trip for an ActiveX form-control run (<w:object> hosting
+    // <w:control r:id> + a VML preview <v:imagedata r:id> — no o:OLEObject).
+    // props carry the verbatim <w:r> XML plus one part{N}.relId/part{N}.data
+    // pair per package part the object references (preview image, activeX
+    // persistence XML) and part{N}.child{M}.* for parts nested under those
+    // (the activeX binary blob). Parts are recreated with FRESH relationship
+    // ids — the source ids would collide with the rebuilt main part's existing
+    // rels — and the run XML's r:id refs are rewritten to match. Child parts
+    // keep their SOURCE rel ids: they are scoped to the freshly created parent
+    // part, so the verbatim part bytes' internal refs resolve untouched.
+    private string AddActiveX(OpenXmlElement parent, string parentPath, Dictionary<string, string> properties)
+    {
+        properties ??= new Dictionary<string, string>();
+        if (!properties.TryGetValue("runXml", out var runXml) || string.IsNullOrEmpty(runXml))
+            throw new ArgumentException("activex requires --prop runXml with the verbatim run XML");
+        if (!runXml.Contains("<w:control", StringComparison.Ordinal))
+            throw new ArgumentException("activex runXml must contain a <w:control> element");
+
+        var mainPart = _doc.MainDocumentPart!;
+        // CONSISTENCY(host-part-rel): same routing as AddOle — parts referenced
+        // from a header/footer-hosted run must attach to that part.
+        OpenXmlPart hostPart = mainPart;
+        {
+            var headerAncestor = parent as Header ?? parent.Ancestors<Header>().FirstOrDefault();
+            if (headerAncestor != null)
+            {
+                var hp = mainPart.HeaderParts.FirstOrDefault(p => ReferenceEquals(p.Header, headerAncestor));
+                if (hp != null) hostPart = hp;
+            }
+            else
+            {
+                var footerAncestor = parent as Footer ?? parent.Ancestors<Footer>().FirstOrDefault();
+                if (footerAncestor != null)
+                {
+                    var fp = mainPart.FooterParts.FirstOrDefault(p => ReferenceEquals(p.Footer, footerAncestor));
+                    if (fp != null) hostPart = fp;
+                }
+            }
+        }
+
+        var idMap = new List<(string OldId, string NewId)>();
+        for (int pi = 1; properties.TryGetValue($"part{pi}.relId", out var oldRelId); pi++)
+        {
+            var dataUri = properties.GetValueOrDefault($"part{pi}.data");
+            if (string.IsNullOrEmpty(oldRelId)
+                || !OfficeCli.Core.OleHelper.TryDecodeDataUri(dataUri, out var bytes, out var ct)
+                || bytes.Length == 0)
+                throw new ArgumentException($"activex part{pi} requires relId and a non-empty data: URI");
+
+            OpenXmlPart created;
+            if (string.Equals(ct, "application/vnd.ms-office.activeX+xml", StringComparison.OrdinalIgnoreCase))
+                created = hostPart.AddNewPart<EmbeddedControlPersistencePart>(ct, null);
+            else if (ct.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                created = hostPart.AddNewPart<ImagePart>(ct, null);
+            else
+                throw new ArgumentException($"activex part{pi}: unsupported content type '{ct}'");
+            using (var ms = new MemoryStream(bytes))
+                created.FeedData(ms);
+
+            for (int ci = 1; properties.TryGetValue($"part{pi}.child{ci}.relId", out var childRelId); ci++)
+            {
+                var childUri = properties.GetValueOrDefault($"part{pi}.child{ci}.data");
+                if (string.IsNullOrEmpty(childRelId)
+                    || !OfficeCli.Core.OleHelper.TryDecodeDataUri(childUri, out var cbytes, out var cct)
+                    || cbytes.Length == 0)
+                    throw new ArgumentException($"activex part{pi}.child{ci} requires relId and a non-empty data: URI");
+                var childPart = created.AddNewPart<EmbeddedControlPersistenceBinaryDataPart>(cct, childRelId);
+                using var cms = new MemoryStream(cbytes);
+                childPart.FeedData(cms);
+            }
+
+            idMap.Add((oldRelId!, hostPart.GetIdOfPart(created)));
+        }
+
+        // Two-phase rewrite: a freshly assigned id can equal a *different*
+        // source id still pending replacement, so route through unique
+        // placeholders instead of replacing in place.
+        var rewritten = runXml;
+        for (int i = 0; i < idMap.Count; i++)
+            rewritten = rewritten.Replace($"\"{idMap[i].OldId}\"", $"\"__OCLI_AXREL_{i}__\"", StringComparison.Ordinal);
+        for (int i = 0; i < idMap.Count; i++)
+            rewritten = rewritten.Replace($"\"__OCLI_AXREL_{i}__\"", $"\"{idMap[i].NewId}\"", StringComparison.Ordinal);
+
+        var axRun = new Run(rewritten);
+
+        string resultPath;
+        if (parent is Paragraph axPara)
+        {
+            axPara.AppendChild(axRun);
+            var axRunIdx = GetAllRuns(axPara).IndexOf(axRun) + 1;
+            // CONSISTENCY(para-path-canonical): canonicalize to paraId-form.
+            resultPath = $"{ReplaceTrailingParaSegment(parentPath, axPara)}/r[{axRunIdx}]";
+        }
+        else if (parent is TableCell axCell)
+        {
+            var firstCellPara = axCell.Elements<Paragraph>().FirstOrDefault();
+            Paragraph hostPara;
+            if (firstCellPara != null && !firstCellPara.Elements<Run>().Any())
+            {
+                firstCellPara.AppendChild(axRun);
+                hostPara = firstCellPara;
+            }
+            else
+            {
+                hostPara = new Paragraph(axRun);
+                AssignParaId(hostPara);
+                axCell.AppendChild(hostPara);
+            }
+            var axPIdx = axCell.Elements<Paragraph>().ToList().IndexOf(hostPara) + 1;
+            var axCellRunIdx = GetAllRuns(hostPara).IndexOf(axRun) + 1;
+            resultPath = $"{parentPath}/{BuildParaPathSegment(hostPara, axPIdx)}/r[{axCellRunIdx}]";
+        }
+        else
+        {
+            var hostPara = new Paragraph(axRun);
+            AssignParaId(hostPara);
+            AppendToParent(parent, hostPara);
+            var axPIdx = parent.Elements<Paragraph>().ToList().IndexOf(hostPara) + 1;
+            resultPath = $"{parentPath}/{BuildParaPathSegment(hostPara, axPIdx)}/r[1]";
+        }
+        return resultPath;
+    }
+
     private string AddOle(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
         properties ??= new Dictionary<string, string>();

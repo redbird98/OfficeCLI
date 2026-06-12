@@ -2872,6 +2872,46 @@ public static partial class WordBatchEmitter
             return true;
         }
 
+        // An ActiveX form control (<w:object> hosting <w:control r:id> with a
+        // VML preview image, no o:OLEObject) has no embedded OLE payload, so
+        // GetOleEmitData returns null — previously every such control (radio
+        // buttons, checkboxes in form templates) was warn-dropped and its table
+        // cell rebuilt empty. Emit a self-contained `add activex` instead:
+        // verbatim run XML plus every referenced part's bytes base64-inlined,
+        // mirroring the `add ole` data: URI design.
+        var axData = word.GetActiveXEmitData(run.Path);
+        if (axData != null)
+        {
+            var axProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["runXml"] = axData.RunXml,
+            };
+            int pi = 0;
+            foreach (var part in axData.Parts)
+            {
+                pi++;
+                axProps[$"part{pi}.relId"] = part.RelId;
+                axProps[$"part{pi}.data"] =
+                    $"data:{part.ContentType};base64,{Convert.ToBase64String(part.Bytes)}";
+                int ci = 0;
+                foreach (var child in part.Children)
+                {
+                    ci++;
+                    axProps[$"part{pi}.child{ci}.relId"] = child.RelId;
+                    axProps[$"part{pi}.child{ci}.data"] =
+                        $"data:{child.ContentType};base64,{Convert.ToBase64String(child.Bytes)}";
+                }
+            }
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = paraTargetPath,
+                Type = "activex",
+                Props = axProps,
+            });
+            return true;
+        }
+
         if (ctx != null)
         {
             var progId = run.Format.TryGetValue("progId", out var pid) ? pid?.ToString() : null;
