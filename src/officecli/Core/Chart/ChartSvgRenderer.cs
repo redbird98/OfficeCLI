@@ -559,6 +559,204 @@ internal partial class ChartSvgRenderer
         }
     }
 
+    // --- Shared decoration primitives (used by both the line and scatter
+    // renderers so the two never drift). Each takes pre-computed pixel points
+    // and/or value→pixel mappers, so the caller owns axis positioning. ---
+
+    // Catmull-Rom → cubic Bézier smooth path through the given pixel points.
+    private static string BuildSmoothPath(IReadOnlyList<(double x, double y)> pts)
+    {
+        var d = new StringBuilder();
+        d.Append($"M{pts[0].x:0.#},{pts[0].y:0.#}");
+        for (int i = 0; i < pts.Count - 1; i++)
+        {
+            var p0 = i > 0 ? pts[i - 1] : pts[i];
+            var p1 = pts[i];
+            var p2 = pts[i + 1];
+            var p3 = i + 2 < pts.Count ? pts[i + 2] : pts[i + 1];
+            var cp1x = p1.x + (p2.x - p0.x) / 6.0;
+            var cp1y = p1.y + (p2.y - p0.y) / 6.0;
+            var cp2x = p2.x - (p3.x - p1.x) / 6.0;
+            var cp2y = p2.y - (p3.y - p1.y) / 6.0;
+            d.Append($" C{cp1x:0.#},{cp1y:0.#} {cp2x:0.#},{cp2y:0.#} {p2.x:0.#},{p2.y:0.#}");
+        }
+        return d.ToString();
+    }
+
+    // Vertical (Y) error bars at each point. seriesValues feeds stdDev/stdErr.
+    private void AppendErrorBars(StringBuilder sb, IReadOnlyList<(double x, double y, double val)> pts,
+        ErrorBarInfo eb, double[] seriesValues, Func<double, double> mapY)
+    {
+        var ebColor = eb.Color ?? "#666";
+        var capW = 4.0; // half-width of the cap line
+
+        double errAmount = eb.Value;
+        if (eb.ValueType is "stdDev" or "stdErr")
+        {
+            var mean = seriesValues.Average();
+            var variance = seriesValues.Sum(v => (v - mean) * (v - mean)) / seriesValues.Length;
+            var stddev = Math.Sqrt(variance);
+            errAmount = eb.ValueType == "stdErr" ? stddev / Math.Sqrt(seriesValues.Length) : stddev;
+        }
+
+        for (int p = 0; p < pts.Count; p++)
+        {
+            var val = pts[p].val;
+            double plusErr, minusErr;
+            if (eb.ValueType == "percentage")
+                plusErr = minusErr = Math.Abs(val) * eb.Value / 100.0;
+            else
+                plusErr = minusErr = errAmount;
+
+            var showPlus = eb.BarType is "both" or "plus";
+            var showMinus = eb.BarType is "both" or "minus";
+
+            var yTop = showPlus ? mapY(val + plusErr) : pts[p].y;
+            var yBot = showMinus ? mapY(val - minusErr) : pts[p].y;
+
+            sb.AppendLine($"        <line x1=\"{pts[p].x:0.#}\" y1=\"{yTop:0.#}\" x2=\"{pts[p].x:0.#}\" y2=\"{yBot:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
+            if (showPlus)
+                sb.AppendLine($"        <line x1=\"{pts[p].x - capW:0.#}\" y1=\"{yTop:0.#}\" x2=\"{pts[p].x + capW:0.#}\" y2=\"{yTop:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
+            if (showMinus)
+                sb.AppendLine($"        <line x1=\"{pts[p].x - capW:0.#}\" y1=\"{yBot:0.#}\" x2=\"{pts[p].x + capW:0.#}\" y2=\"{yBot:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
+        }
+    }
+
+    // Regression trendline. xData/yData are the regression domain (category
+    // indices for line charts, real X values for scatter); mapXVal maps an
+    // xData-domain value to a pixel, mapY maps a Y value to a pixel. Because
+    // scatter passes its real X, the fitted slope/equation are correct there
+    // (the old line-only path always regressed over the 1-based index).
+    private void AppendTrendline(StringBuilder sb, TrendlineInfo tl, double[] xData, double[] yData,
+        Func<double, double> mapXVal, Func<double, double> mapY, string lineColor, double fallbackLabelX, double fallbackLabelY)
+    {
+        if (xData.Length < 2) return;
+        var dashArr = tl.Dash != "solid" ? $" stroke-dasharray=\"{RefLineDashArray(tl.Dash)}\"" : "";
+
+        Func<double, double>? trendFn = null;
+        string? eqText = null;
+        double rSquared = 0;
+
+        switch (tl.Type)
+        {
+            case "linear":
+            {
+                var (slope, intercept) = FitLinear(xData, yData);
+                trendFn = x => slope * x + intercept;
+                eqText = $"y = {slope:0.####}x {(intercept >= 0 ? "+" : "−")} {Math.Abs(intercept):0.####}";
+                rSquared = ComputeRSquared(xData, yData, trendFn);
+                break;
+            }
+            case "exp":
+            {
+                var (a, b) = FitExponential(xData, yData);
+                if (!double.IsNaN(a))
+                {
+                    trendFn = x => a * Math.Exp(b * x);
+                    eqText = $"y = {a:0.####}e^({b:0.####}x)";
+                    rSquared = ComputeRSquared(xData, yData, trendFn);
+                }
+                break;
+            }
+            case "log":
+            {
+                var (a, b) = FitLogarithmic(xData, yData);
+                if (!double.IsNaN(a))
+                {
+                    trendFn = x => a * Math.Log(x) + b;
+                    eqText = $"y = {a:0.####}ln(x) {(b >= 0 ? "+" : "−")} {Math.Abs(b):0.####}";
+                    rSquared = ComputeRSquared(xData, yData, trendFn);
+                }
+                break;
+            }
+            case "poly":
+            {
+                var coeffs = FitPolynomial(xData, yData, tl.Order);
+                if (coeffs != null)
+                {
+                    trendFn = x =>
+                    {
+                        double result = 0;
+                        for (int i = 0; i < coeffs.Length; i++)
+                            result += coeffs[i] * Math.Pow(x, i);
+                        return result;
+                    };
+                    var eqParts = new List<string>();
+                    for (int i = coeffs.Length - 1; i >= 0; i--)
+                    {
+                        if (i == 0) eqParts.Add($"{coeffs[i]:0.####}");
+                        else if (i == 1) eqParts.Add($"{coeffs[i]:0.####}x");
+                        else eqParts.Add($"{coeffs[i]:0.####}x^{i}");
+                    }
+                    eqText = "y = " + string.Join(" + ", eqParts).Replace("+ -", "− ");
+                    rSquared = ComputeRSquared(xData, yData, trendFn);
+                }
+                break;
+            }
+            case "power":
+            {
+                var (a, b) = FitPower(xData, yData);
+                if (!double.IsNaN(a))
+                {
+                    trendFn = x => a * Math.Pow(x, b);
+                    eqText = $"y = {a:0.####}x^{b:0.####}";
+                    rSquared = ComputeRSquared(xData, yData, trendFn);
+                }
+                break;
+            }
+            case "movingAvg":
+            {
+                var period = Math.Max(2, tl.Period);
+                var maPoints = new List<(double x, double y)>();
+                for (int i = period - 1; i < xData.Length; i++)
+                {
+                    double sum = 0;
+                    for (int j = 0; j < period; j++) sum += yData[i - j];
+                    maPoints.Add((mapXVal(xData[i]), mapY(sum / period)));
+                }
+                if (maPoints.Count >= 2)
+                {
+                    var maPath = string.Join(" ", maPoints.Select(p => $"{p.x:0.#},{p.y:0.#}"));
+                    sb.AppendLine($"        <polyline points=\"{maPath}\" fill=\"none\" stroke=\"{lineColor}\" stroke-width=\"{tl.Width:0.#}\"{dashArr}/>");
+                }
+                return; // no equation/R² for moving average
+            }
+        }
+
+        if (trendFn == null) return;
+
+        // Render trendline curve
+        var xMin = xData[0] - tl.Backward;
+        var xMax = xData[^1] + tl.Forward;
+        var steps = 50;
+        var tlPoints = new List<(double px, double py)>();
+        for (int i = 0; i <= steps; i++)
+        {
+            var x = xMin + (xMax - xMin) * i / steps;
+            var y = trendFn(x);
+            if (double.IsNaN(y) || double.IsInfinity(y)) continue;
+            tlPoints.Add((mapXVal(x), mapY(y)));
+        }
+
+        if (tlPoints.Count >= 2)
+        {
+            var pathStr = string.Join(" ", tlPoints.Select(p => $"{p.px:0.#},{p.py:0.#}"));
+            sb.AppendLine($"        <polyline points=\"{pathStr}\" fill=\"none\" stroke=\"{lineColor}\" stroke-width=\"{tl.Width:0.#}\"{dashArr}/>");
+        }
+
+        // Equation / R² label
+        if (tl.DisplayEquation || tl.DisplayRSquared)
+        {
+            var labelParts = new List<string>();
+            if (tl.DisplayEquation && eqText != null) labelParts.Add(eqText);
+            if (tl.DisplayRSquared) labelParts.Add($"R² = {rSquared:0.####}");
+            var label = string.Join("  ", labelParts);
+            var labelX = tlPoints.Count > 0 ? tlPoints[^1].px - 4 : fallbackLabelX;
+            var labelY = tlPoints.Count > 0 ? tlPoints[^1].py - 8 : fallbackLabelY;
+            sb.AppendLine($"        <text x=\"{labelX:0.#}\" y=\"{labelY:0.#}\" fill=\"{lineColor}\" font-size=\"8\" text-anchor=\"end\" font-style=\"italic\">{HtmlEncode(label)}</text>");
+        }
+    }
+
     public void RenderLineChartSvg(StringBuilder sb, List<(string name, double[] values)> series,
         string[] categories, List<string> colors, int ox, int oy, int pw, int ph,
         bool showDataLabels = false, List<string>? markerShapes = null, List<int>? markerSizes = null,
@@ -571,7 +769,7 @@ internal partial class ChartSvgRenderer
         string? dropLineColor = null, double dropLineWidth = 0.7, string? dropLineDash = null,
         string? highLowLineColor = null, double highLowLineWidth = 1,
         List<TrendlineInfo?>? trendlines = null, List<ErrorBarInfo?>? errorBars = null,
-        bool scatterMarkersOnly = false, double[]? scatterX = null)
+        bool scatterMarkersOnly = false)
     {
         bool isLog = logBase.HasValue && logBase.Value > 1;
 
@@ -589,43 +787,9 @@ internal partial class ChartSvgRenderer
         if (dataMax <= 0 && isLog) dataMax = 1;
         var catCount = Math.Max(categories.Length, series.Max(s => s.values.Length));
 
-        // #151: XY scatter charts must position points by their numeric X value
-        // on a value axis — not at evenly-spaced category slots in data order
-        // (which renders a scatter plot as a category line chart). When the
-        // caller supplies scatterX (the series' <c:xVal> data), build a nice X
-        // value-axis spanning [xMin, xMax] using the same ComputeNiceAxis logic
-        // as the Y axis, and map each point's X through it. Line/area charts
-        // pass scatterX = null and keep the index-based category spacing.
-        bool isScatter = scatterX != null && scatterX.Length > 0;
-        double xNiceMin = 0, xNiceMax = 1, xTickStep = 1;
-        int xNTicks = 1;
-        if (isScatter)
-        {
-            var xMin = scatterX!.Min();
-            var xMax = scatterX!.Max();
-            // Borrow ComputeNiceAxis only for a sensible tick STEP, then snap the
-            // bounds to that step WITHOUT the 5% headroom ComputeNiceAxis adds for
-            // the Y axis — Excel's X value axis lands its ticks on the data domain
-            // (xMax=10 → 0,2,…,10; not 0,2,…,12). Origin stays at 0 for all-positive
-            // X (matching Excel's default), and floors to a nice negative otherwise.
-            var xSpan = Math.Max(Math.Abs(xMax), Math.Abs(xMin));
-            (_, xTickStep, _) = ComputeNiceAxis(xSpan > 0 ? xSpan : 1);
-            if (xTickStep <= 0) xTickStep = 1;
-            xNiceMin = xMin < 0 ? Math.Floor(xMin / xTickStep) * xTickStep : 0;
-            xNiceMax = Math.Ceiling(xMax / xTickStep) * xTickStep;
-            if (xNiceMax <= xNiceMin) xNiceMax = xNiceMin + xTickStep;
-            xNTicks = Math.Max(1, (int)Math.Round((xNiceMax - xNiceMin) / xTickStep));
-        }
-        double MapX(int c)
-        {
-            if (isScatter && c < scatterX!.Length)
-            {
-                var r = (xNiceMax - xNiceMin) > 0 ? (scatterX[c] - xNiceMin) / (xNiceMax - xNiceMin) : 0.5;
-                r = Math.Max(0, Math.Min(1, r));
-                return ox + r * pw;
-            }
-            return ox + (catCount > 1 ? (double)pw * c / (catCount - 1) : pw / 2.0);
-        }
+        // X position of category c: evenly-spaced slots. (Scatter charts, which
+        // value-position X, are handled by RenderScatterChartSvg, not here.)
+        double MapX(int c) => ox + (catCount > 1 ? (double)pw * c / (catCount - 1) : pw / 2.0);
 
         // Compute axis scale
         double niceMax, niceMin, tickStep;
@@ -769,21 +933,7 @@ internal partial class ChartSvgRenderer
             }
             else if (isSmooth && pts.Count >= 2)
             {
-                // Catmull-Rom to cubic Bezier smooth path
-                var d = new StringBuilder();
-                d.Append($"M{pts[0].x:0.#},{pts[0].y:0.#}");
-                for (int i = 0; i < pts.Count - 1; i++)
-                {
-                    var p0 = i > 0 ? pts[i - 1] : pts[i];
-                    var p1 = pts[i];
-                    var p2 = pts[i + 1];
-                    var p3 = i + 2 < pts.Count ? pts[i + 2] : pts[i + 1];
-                    var cp1x = p1.x + (p2.x - p0.x) / 6.0;
-                    var cp1y = p1.y + (p2.y - p0.y) / 6.0;
-                    var cp2x = p2.x - (p3.x - p1.x) / 6.0;
-                    var cp2y = p2.y - (p3.y - p1.y) / 6.0;
-                    d.Append($" C{cp1x:0.#},{cp1y:0.#} {cp2x:0.#},{cp2y:0.#} {p2.x:0.#},{p2.y:0.#}");
-                }
+                var d = BuildSmoothPath(pts.Select(p => (p.x, p.y)).ToList());
                 sb.AppendLine($"        <path d=\"{d}\" fill=\"none\" stroke=\"{lineColor}\" stroke-width=\"{lw:0.#}\"{dashAttr}/>");
             }
             else
@@ -823,49 +973,7 @@ internal partial class ChartSvgRenderer
             {
                 var eb = s < errorBars.Count ? errorBars[s] : null;
                 if (eb == null) continue;
-                var pts = allPoints[s];
-                var ebColor = eb.Color ?? "#666";
-                var capW = 4.0; // half-width of the cap line
-
-                // Compute error amount per point
-                double errAmount = eb.Value;
-                if (eb.ValueType is "stdDev" or "stdErr")
-                {
-                    var vals = series[s].values;
-                    var mean = vals.Average();
-                    var variance = vals.Sum(v => (v - mean) * (v - mean)) / vals.Length;
-                    var stddev = Math.Sqrt(variance);
-                    errAmount = eb.ValueType == "stdErr" ? stddev / Math.Sqrt(vals.Length) : stddev;
-                }
-
-                for (int p = 0; p < pts.Count; p++)
-                {
-                    var val = pts[p].val;
-                    double plusErr, minusErr;
-                    if (eb.ValueType == "percentage")
-                    {
-                        plusErr = minusErr = Math.Abs(val) * eb.Value / 100.0;
-                    }
-                    else
-                    {
-                        plusErr = minusErr = errAmount;
-                    }
-
-                    var showPlus = eb.BarType is "both" or "plus";
-                    var showMinus = eb.BarType is "both" or "minus";
-
-                    var yTop = showPlus ? MapY(val + plusErr) : pts[p].y;
-                    var yBot = showMinus ? MapY(val - minusErr) : pts[p].y;
-
-                    // Vertical line
-                    sb.AppendLine($"        <line x1=\"{pts[p].x:0.#}\" y1=\"{yTop:0.#}\" x2=\"{pts[p].x:0.#}\" y2=\"{yBot:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
-                    // Top cap
-                    if (showPlus)
-                        sb.AppendLine($"        <line x1=\"{pts[p].x - capW:0.#}\" y1=\"{yTop:0.#}\" x2=\"{pts[p].x + capW:0.#}\" y2=\"{yTop:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
-                    // Bottom cap
-                    if (showMinus)
-                        sb.AppendLine($"        <line x1=\"{pts[p].x - capW:0.#}\" y1=\"{yBot:0.#}\" x2=\"{pts[p].x + capW:0.#}\" y2=\"{yBot:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
-                }
+                AppendErrorBars(sb, allPoints[s], eb, series[s].values, MapY);
             }
         }
 
@@ -879,148 +987,13 @@ internal partial class ChartSvgRenderer
                 var pts = allPoints[s];
                 if (pts.Count < 2) continue;
                 var lineColor = tl.Color ?? colors[s % colors.Count];
-                var dashArr = tl.Dash != "solid" ? $" stroke-dasharray=\"{RefLineDashArray(tl.Dash)}\"" : "";
-
-                // Build x/y data arrays (using category indices as x, values as y)
+                // Line/category charts regress over the 1-based category index
+                // (xData[i]=i+1); tlMapX converts that index back to a pixel.
                 var xData = new double[pts.Count];
                 var yData = new double[pts.Count];
-                for (int i = 0; i < pts.Count; i++)
-                {
-                    xData[i] = i + 1; // 1-based like Excel
-                    yData[i] = series[s].values[i];
-                }
-
-                // Compute trendline function
-                Func<double, double>? trendFn = null;
-                string? eqText = null;
-                double rSquared = 0;
-
-                switch (tl.Type)
-                {
-                    case "linear":
-                    {
-                        var (slope, intercept) = FitLinear(xData, yData);
-                        trendFn = x => slope * x + intercept;
-                        eqText = $"y = {slope:0.####}x {(intercept >= 0 ? "+" : "−")} {Math.Abs(intercept):0.####}";
-                        rSquared = ComputeRSquared(xData, yData, trendFn);
-                        break;
-                    }
-                    case "exp":
-                    {
-                        var (a, b) = FitExponential(xData, yData);
-                        if (!double.IsNaN(a))
-                        {
-                            trendFn = x => a * Math.Exp(b * x);
-                            eqText = $"y = {a:0.####}e^({b:0.####}x)";
-                            rSquared = ComputeRSquared(xData, yData, trendFn);
-                        }
-                        break;
-                    }
-                    case "log":
-                    {
-                        var (a, b) = FitLogarithmic(xData, yData);
-                        if (!double.IsNaN(a))
-                        {
-                            trendFn = x => a * Math.Log(x) + b;
-                            eqText = $"y = {a:0.####}ln(x) {(b >= 0 ? "+" : "−")} {Math.Abs(b):0.####}";
-                            rSquared = ComputeRSquared(xData, yData, trendFn);
-                        }
-                        break;
-                    }
-                    case "poly":
-                    {
-                        var coeffs = FitPolynomial(xData, yData, tl.Order);
-                        if (coeffs != null)
-                        {
-                            trendFn = x =>
-                            {
-                                double result = 0;
-                                for (int i = 0; i < coeffs.Length; i++)
-                                    result += coeffs[i] * Math.Pow(x, i);
-                                return result;
-                            };
-                            var eqParts = new List<string>();
-                            for (int i = coeffs.Length - 1; i >= 0; i--)
-                            {
-                                if (i == 0) eqParts.Add($"{coeffs[i]:0.####}");
-                                else if (i == 1) eqParts.Add($"{coeffs[i]:0.####}x");
-                                else eqParts.Add($"{coeffs[i]:0.####}x^{i}");
-                            }
-                            eqText = "y = " + string.Join(" + ", eqParts).Replace("+ -", "− ");
-                            rSquared = ComputeRSquared(xData, yData, trendFn);
-                        }
-                        break;
-                    }
-                    case "power":
-                    {
-                        var (a, b) = FitPower(xData, yData);
-                        if (!double.IsNaN(a))
-                        {
-                            trendFn = x => a * Math.Pow(x, b);
-                            eqText = $"y = {a:0.####}x^{b:0.####}";
-                            rSquared = ComputeRSquared(xData, yData, trendFn);
-                        }
-                        break;
-                    }
-                    case "movingAvg":
-                    {
-                        // Moving average: render as polyline of averaged points
-                        var period = Math.Max(2, tl.Period);
-                        var maPoints = new List<(double x, double y)>();
-                        for (int i = period - 1; i < xData.Length; i++)
-                        {
-                            double sum = 0;
-                            for (int j = 0; j < period; j++) sum += yData[i - j];
-                            var avgVal = sum / period;
-                            var px = ox + (catCount > 1 ? (double)pw * i / (catCount - 1) : pw / 2.0);
-                            var py = MapY(avgVal);
-                            maPoints.Add((px, py));
-                        }
-                        if (maPoints.Count >= 2)
-                        {
-                            var maPath = string.Join(" ", maPoints.Select(p => $"{p.x:0.#},{p.y:0.#}"));
-                            sb.AppendLine($"        <polyline points=\"{maPath}\" fill=\"none\" stroke=\"{lineColor}\" stroke-width=\"{tl.Width:0.#}\"{dashArr}/>");
-                        }
-                        continue; // no equation/R² for moving average
-                    }
-                }
-
-                if (trendFn == null) continue;
-
-                // Render trendline curve
-                var xMin = xData[0] - tl.Backward;
-                var xMax = xData[^1] + tl.Forward;
-                var steps = 50;
-                var tlPoints = new List<(double px, double py)>();
-                for (int i = 0; i <= steps; i++)
-                {
-                    var x = xMin + (xMax - xMin) * i / steps;
-                    var y = trendFn(x);
-                    if (double.IsNaN(y) || double.IsInfinity(y)) continue;
-                    // Map x to pixel: x is 1-based category index
-                    var px = ox + (catCount > 1 ? pw * (x - 1) / (catCount - 1) : pw / 2.0);
-                    var py = MapY(y);
-                    tlPoints.Add((px, py));
-                }
-
-                if (tlPoints.Count >= 2)
-                {
-                    var pathStr = string.Join(" ", tlPoints.Select(p => $"{p.px:0.#},{p.py:0.#}"));
-                    sb.AppendLine($"        <polyline points=\"{pathStr}\" fill=\"none\" stroke=\"{lineColor}\" stroke-width=\"{tl.Width:0.#}\"{dashArr}/>");
-                }
-
-                // Equation / R² label
-                if (tl.DisplayEquation || tl.DisplayRSquared)
-                {
-                    var labelParts = new List<string>();
-                    if (tl.DisplayEquation && eqText != null) labelParts.Add(eqText);
-                    if (tl.DisplayRSquared) labelParts.Add($"R² = {rSquared:0.####}");
-                    var label = string.Join("  ", labelParts);
-                    // Position label near the end of the trendline
-                    var labelX = tlPoints.Count > 0 ? tlPoints[^1].px - 4 : ox + pw;
-                    var labelY = tlPoints.Count > 0 ? tlPoints[^1].py - 8 : oy + 12;
-                    sb.AppendLine($"        <text x=\"{labelX:0.#}\" y=\"{labelY:0.#}\" fill=\"{lineColor}\" font-size=\"8\" text-anchor=\"end\" font-style=\"italic\">{HtmlEncode(label)}</text>");
-                }
+                for (int i = 0; i < pts.Count; i++) { xData[i] = i + 1; yData[i] = series[s].values[i]; }
+                Func<double, double> tlMapX = xv => ox + (catCount > 1 ? pw * (xv - 1) / (catCount - 1) : pw / 2.0);
+                AppendTrendline(sb, tl, xData, yData, tlMapX, MapY, lineColor, ox + pw, oy + 12);
             }
         }
 
@@ -1035,29 +1008,11 @@ internal partial class ChartSvgRenderer
             }
         }
 
-        if (isScatter)
+        // Category labels
+        for (int c = 0; c < catCount; c++)
         {
-            // #151: X value-axis ticks at nice round values (0, 50, 100…) with
-            // faint vertical gridlines, instead of one label per data point.
-            for (int t = 0; t <= xNTicks; t++)
-            {
-                var tickVal = xNiceMin + xTickStep * t;
-                var tx = (xNiceMax - xNiceMin) > 0
-                    ? ox + (tickVal - xNiceMin) / (xNiceMax - xNiceMin) * pw
-                    : ox + pw / 2.0;
-                sb.AppendLine($"        <line x1=\"{tx:0.#}\" y1=\"{oy}\" x2=\"{tx:0.#}\" y2=\"{oy + ph}\" stroke=\"{GridColor}\" stroke-width=\"0.5\"/>");
-                sb.AppendLine($"        <text x=\"{tx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(FormatAxisValue(tickVal, null))}</text>");
-            }
-        }
-        else
-        {
-            // Category labels
-            for (int c = 0; c < catCount; c++)
-            {
-                var label = c < categories.Length ? categories[c] : "";
-                var lx = ox + (catCount > 1 ? (double)pw * c / (catCount - 1) : pw / 2.0);
-                sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
-            }
+            var label = c < categories.Length ? categories[c] : "";
+            sb.AppendLine($"        <text x=\"{MapX(c):0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
         }
 
         // Value axis labels
@@ -1450,7 +1405,8 @@ internal partial class ChartSvgRenderer
         List<(string name, double[] values)> series, List<string> colors,
         int ox, int oy, int pw, int ph, List<string>? markerShapes, List<int>? markerSizes,
         List<double>? lineWidths, List<string>? lineDashes, bool markersOnly,
-        bool showDataLabels, double? axisMin, double? axisMax, double? majorUnit, string? valNumFmt)
+        bool showDataLabels, double? axisMin, double? axisMax, double? majorUnit, string? valNumFmt,
+        List<bool>? smooth = null, List<TrendlineInfo?>? trendlines = null, List<ErrorBarInfo?>? errorBars = null)
     {
         var scatterSeries = plotArea.Descendants<OpenXmlCompositeElement>()
             .Where(e => e.LocalName == "ser" && e.Parent?.LocalName == "scatterChart").ToList();
@@ -1523,14 +1479,39 @@ internal partial class ChartSvgRenderer
                 pts.Add((MapX(xVals[i]), MapY(yVals[i]), xVals[i], yVals[i]));
 
             // Connecting line — drawn for lineMarker/smoothMarker scatter styles,
-            // suppressed when scatterStyle is marker/none (markersOnly).
+            // suppressed when scatterStyle is marker/none (markersOnly). A smooth
+            // series uses a Catmull-Rom path (same primitive as the line renderer).
             if (!markersOnly && pts.Count >= 2)
             {
                 var lw = lineWidths != null && s < lineWidths.Count ? lineWidths[s] : 2;
                 var dashName = lineDashes != null && s < lineDashes.Count ? lineDashes[s] : "solid";
                 var dashAttr = dashName != "solid" ? $" stroke-dasharray=\"{RefLineDashArray(dashName)}\"" : "";
-                var pointStr = string.Join(" ", pts.Select(p => $"{p.x:0.#},{p.y:0.#}"));
-                sb.AppendLine($"        <polyline points=\"{pointStr}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"{lw:0.#}\"{dashAttr}/>");
+                var isSmooth = smooth != null && s < smooth.Count && smooth[s];
+                if (isSmooth)
+                {
+                    var d = BuildSmoothPath(pts.Select(p => (p.x, p.y)).ToList());
+                    sb.AppendLine($"        <path d=\"{d}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"{lw:0.#}\"{dashAttr}/>");
+                }
+                else
+                {
+                    var pointStr = string.Join(" ", pts.Select(p => $"{p.x:0.#},{p.y:0.#}"));
+                    sb.AppendLine($"        <polyline points=\"{pointStr}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"{lw:0.#}\"{dashAttr}/>");
+                }
+            }
+
+            // Error bars (vertical, on Y) — shared primitive with the line renderer.
+            var ebInfo = errorBars != null && s < errorBars.Count ? errorBars[s] : null;
+            if (ebInfo != null)
+                AppendErrorBars(sb, pts.Select(p => (p.x, p.y, p.yv)).ToList(), ebInfo, yVals.Take(count).ToArray(), MapY);
+
+            // Trendline — regressed over the REAL X values (xv), so the fitted
+            // slope/equation are correct for scatter (unlike the index-based line path).
+            var tlInfo = trendlines != null && s < trendlines.Count ? trendlines[s] : null;
+            if (tlInfo != null)
+            {
+                var tlColor = tlInfo.Color ?? color;
+                AppendTrendline(sb, tlInfo, pts.Select(p => p.xv).ToArray(), pts.Select(p => p.yv).ToArray(),
+                    MapX, MapY, tlColor, ox + pw, oy + 12);
             }
 
             var shape = markerShapes != null && s < markerShapes.Count ? markerShapes[s] : "circle";
@@ -2759,34 +2740,14 @@ internal partial class ChartSvgRenderer
             RenderScatterChartSvg(sb, info.PlotArea, info.Series, info.Colors, marginLeft, marginTop, plotW, plotH,
                 info.MarkerShapes, info.MarkerSizes, info.LineWidths, info.LineDashes,
                 info.ScatterMarkersOnly, info.ShowDataLabels,
-                info.AxisMin, info.AxisMax, info.MajorUnit, info.ValNumFmt);
+                info.AxisMin, info.AxisMax, info.MajorUnit, info.ValNumFmt,
+                info.Smooth, info.Trendlines, info.ErrorBars);
         }
         else if (chartType.Contains("line") || chartType == "scatter")
         {
             if (info.Is3D)
                 RenderLine3DSvg(sb, info.Series, info.Categories, info.Colors, marginLeft, marginTop, plotW, plotH);
             else
-            {
-                // #151: for scatter, parse the X-value categories into numerics so
-                // RenderLineChartSvg can value-position points. If any entry is
-                // non-numeric (shouldn't happen for <c:xVal>), fall back to null
-                // → index-based category spacing (old behavior), never crash.
-                double[]? scatterX = null;
-                if (chartType == "scatter" && info.Categories.Length > 0)
-                {
-                    var parsed = new double[info.Categories.Length];
-                    bool allNumeric = true;
-                    for (int i = 0; i < info.Categories.Length; i++)
-                    {
-                        if (double.TryParse(info.Categories[i], System.Globalization.NumberStyles.Any,
-                                System.Globalization.CultureInfo.InvariantCulture, out parsed[i])
-                            || double.TryParse(info.Categories[i], out parsed[i]))
-                            continue;
-                        allNumeric = false;
-                        break;
-                    }
-                    if (allNumeric) scatterX = parsed;
-                }
                 RenderLineChartSvg(sb, info.Series, info.Categories, info.Colors, marginLeft, marginTop, plotW, plotH,
                     info.ShowDataLabels, info.MarkerShapes, info.MarkerSizes, info.LogBase, info.IsReversed,
                     info.HasDropLines, info.HasHighLowLines, info.HasUpDownBars,
@@ -2794,8 +2755,7 @@ internal partial class ChartSvgRenderer
                     info.ReferenceLines, info.Smooth, info.LineDashes, info.LineWidths,
                     info.DropLineColor, info.DropLineWidth, info.DropLineDash,
                     info.HighLowLineColor, info.HighLowLineWidth,
-                    info.Trendlines, info.ErrorBars, info.ScatterMarkersOnly, scatterX);
-            }
+                    info.Trendlines, info.ErrorBars, info.ScatterMarkersOnly);
         }
         else
         {
