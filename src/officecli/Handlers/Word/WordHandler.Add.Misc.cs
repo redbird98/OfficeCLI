@@ -786,7 +786,20 @@ public partial class WordHandler
         }
 
         var hlRProps = new RunProperties();
-        if (properties.TryGetValue("color", out var hlColor))
+        // "inherit" sentinel (dump-emitted): the SOURCE hyperlink run carries
+        // no <w:color>/<w:u> at all — its appearance comes from styles, or it
+        // deliberately looks like plain text (TOC leader rows). Skip the
+        // interactive defaults entirely so the rebuilt run stays element-free.
+        bool hlColorInherit = properties.TryGetValue("color", out var hlColorProbe)
+            && string.Equals(hlColorProbe, "inherit", StringComparison.OrdinalIgnoreCase);
+        bool hlUnderlineInherit = (properties.TryGetValue("underline", out var hlUlProbe)
+                || properties.TryGetValue("font.underline", out hlUlProbe))
+            && string.Equals(hlUlProbe, "inherit", StringComparison.OrdinalIgnoreCase);
+        if (hlColorInherit)
+        {
+            // no color element
+        }
+        else if (properties.TryGetValue("color", out var hlColor))
         {
             // BUG-R4B(BUG4): accept theme/scheme color names (text1, accent1, …)
             // on hyperlink Add the same way the run color path does — the old
@@ -809,7 +822,11 @@ public partial class WordHandler
         // common case so existing behavior is preserved when no underline is
         // given. Without this, a source hyperlink whose run is dotted/wave/etc.
         // round-trips to single (the dump captures it, AddHyperlink dropped it).
-        if (properties.TryGetValue("underline", out var hlUnderline)
+        if (hlUnderlineInherit)
+        {
+            // no underline element
+        }
+        else if (properties.TryGetValue("underline", out var hlUnderline)
             || properties.TryGetValue("font.underline", out hlUnderline))
         {
             var hlUlVal = NormalizeUnderlineValue(hlUnderline);
@@ -841,6 +858,20 @@ public partial class WordHandler
         {
             hlRProps.RunFonts ??= new RunFonts();
             hlRProps.RunFonts.ComplexScript = hlFontCs;
+        }
+        // East-Asian font slot + character spacing: the dump emits these on
+        // TOC-row links (Calibri eastAsia + spacing -1); without the cases the
+        // wrapper run silently lost them while its sibling runs kept theirs.
+        if (properties.TryGetValue("font.ea", out var hlFontEa)
+            || properties.TryGetValue("font.eastasia", out hlFontEa))
+        {
+            hlRProps.RunFonts ??= new RunFonts();
+            hlRProps.RunFonts.EastAsia = hlFontEa;
+        }
+        if (properties.TryGetValue("charSpacing", out var hlCharSp)
+            || properties.TryGetValue("charspacing", out hlCharSp))
+        {
+            ApplyRunFormatting(hlRProps, "charSpacing", hlCharSp);
         }
         if (properties.TryGetValue("size", out var hlSize))
             hlRProps.FontSize = new FontSize { Val = ((int)Math.Round(ParseFontSize(hlSize) * 2, MidpointRounding.AwayFromZero)).ToString() };

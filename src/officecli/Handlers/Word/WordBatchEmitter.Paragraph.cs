@@ -3168,6 +3168,14 @@ public static partial class WordBatchEmitter
                 });
                 return;
             }
+            // The SOURCE run has no <w:color>/<w:u> at all (a TOC leader row
+            // that deliberately looks like plain text). Without the sentinel,
+            // AddHyperlink stamps its theme-blue + single-underline defaults
+            // and the dotted leader comes back blue. Injected only on the real
+            // `add hyperlink` path — the bare-wrapper fallback above emits a
+            // plain `add r`, whose color parser must not see "inherit".
+            if (!rProps.ContainsKey("color")) rProps["color"] = "inherit";
+            if (!rProps.ContainsKey("underline")) rProps["underline"] = "inherit";
             items.Add(new BatchItem
             {
                 Command = "add",
@@ -3214,8 +3222,11 @@ public static partial class WordBatchEmitter
         var firstClone = new DocumentNode
         {
             Path = first.Path,
-            Type = first.Type,
-            Text = first.Text,
+            Type = "run",
+            // A tab-first hyperlink (TOC leader): the wrapper's text "\t" is
+            // split into a real <w:tab/> by AddText, so the leader stays the
+            // hyperlink's first child in source order.
+            Text = first.Type == "tab" ? "\t" : first.Text,
             Format = new Dictionary<string, object?>(first.Format, StringComparer.OrdinalIgnoreCase),
         };
         firstClone.Format.Remove("_hlStructured");
@@ -3276,7 +3287,9 @@ public static partial class WordBatchEmitter
             if (rProps.TryGetValue("underline", out var u)
                 && string.Equals(u, "single", StringComparison.OrdinalIgnoreCase))
                 rProps.Remove("underline");
-            if (!string.IsNullOrEmpty(hlRuns[k].Text))
+            if (hlRuns[k].Type == "tab")
+                rProps["text"] = "\t";
+            else if (!string.IsNullOrEmpty(hlRuns[k].Text))
                 rProps["text"] = hlRuns[k].Text!;
             items.Add(new BatchItem
             {
@@ -3450,7 +3463,14 @@ public static partial class WordBatchEmitter
         {
             var run = runs[i];
             string? url = null, anchor = null, hlParent = null;
-            if (run.Type == "run" || run.Type == "r")
+            // Tab runs INSIDE a hyperlink (a TOC row whose link wraps the
+            // leader tab + page number) carry the same anchor/_hyperlinkParent
+            // markers — include them so the wrapper add is emitted before (and
+            // contains) the tab. Excluding them split the link: the tab run
+            // raced ahead of the wrapper (its parent guard miscounted across
+            // paragraphs sharing the literal /body/p[last()] parent) and the
+            // replay dropped it.
+            if (run.Type == "run" || run.Type == "r" || run.Type == "tab")
             {
                 if (run.Format.TryGetValue("url", out var u))
                     url = u?.ToString();
@@ -3482,7 +3502,7 @@ public static partial class WordBatchEmitter
             while (j < runs.Count)
             {
                 var next = runs[j];
-                if (next.Type != "run" && next.Type != "r") break;
+                if (next.Type != "run" && next.Type != "r" && next.Type != "tab") break;
                 next.Format.TryGetValue("url", out var nUrlObj);
                 next.Format.TryGetValue("anchor", out var nAncObj);
                 next.Format.TryGetValue("_hyperlinkParent", out var nHlpObj);
@@ -3493,7 +3513,7 @@ public static partial class WordBatchEmitter
                 if (!string.Equals(nAnchor, anchor, StringComparison.Ordinal)) break;
                 if (!string.Equals(nHlParent, hlParent, StringComparison.Ordinal)) break;
                 group.Add(next);
-                sb.Append(next.Text ?? "");
+                sb.Append(next.Type == "tab" ? "\t" : (next.Text ?? ""));
                 j++;
             }
             // BUG-R12A(BUG1): the flat `add hyperlink text=Part1Part2` fast path
@@ -3507,7 +3527,10 @@ public static partial class WordBatchEmitter
             var merged = new DocumentNode
             {
                 Path = run.Path,
-                Type = run.Type,
+                // Normalize to "run": a group whose FIRST member is a tab must
+                // not surface as a tab-typed node, or TryEmitTabRun would
+                // intercept it ahead of the hyperlink emit.
+                Type = "run",
                 Text = sb.ToString(),
                 Format = new Dictionary<string, object?>(run.Format, StringComparer.OrdinalIgnoreCase),
             };
