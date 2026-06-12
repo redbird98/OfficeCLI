@@ -758,6 +758,19 @@ public partial class WordHandler
         return AddInlinedPartsRun(parent, parentPath, properties, "vmlshape");
     }
 
+    // Modern DrawingML shape run (<w:drawing> hosting wps:wsp) whose spPr /
+    // blipFill references image parts (a cover-page fern graphic). Same
+    // carrier; previously the emitter scrubbed the blipFill to a neutral
+    // solid fill and the bitmap was lost.
+    private string AddDrawingShape(OpenXmlElement parent, string parentPath, Dictionary<string, string> properties)
+    {
+        properties ??= new Dictionary<string, string>();
+        if (!properties.TryGetValue("runXml", out var dsMarker) || string.IsNullOrEmpty(dsMarker)
+            || !dsMarker.Contains("<w:drawing", StringComparison.Ordinal))
+            throw new ArgumentException("drawingshape requires --prop runXml containing a <w:drawing> element");
+        return AddInlinedPartsRun(parent, parentPath, properties, "drawingshape");
+    }
+
     private string AddInlinedPartsRun(OpenXmlElement parent, string parentPath, Dictionary<string, string> properties, string opName)
     {
         var runXml = properties["runXml"];

@@ -615,7 +615,10 @@ public static partial class WordBatchEmitter
                 {
                     // BUG-DUMP7-11: include inline w:sdt carrier children.
                     if (c.Type == "sdt") return true;
-                    if (c.Type != "run" && c.Type != "r") return false;
+                    // Anchored cover art surfaces as type="picture" when the
+                    // drawing carries an image blip — include it for the
+                    // drawing-carrier branch below.
+                    if (c.Type != "run" && c.Type != "r" && c.Type != "picture") return false;
                     if (!string.IsNullOrEmpty(c.Text)) return true;
                     // BUG-DUMP5-08 / BUG-R7B(BUG1): include empty footnote /
                     // endnote reference runs (their visible text comes via the
@@ -623,6 +626,15 @@ public static partial class WordBatchEmitter
                     // actual reference child, not the arbitrary rStyle name.
                     var rsv = c.Format.TryGetValue("rStyle", out var rsraw) ? rsraw?.ToString() : null;
                     if (ClassifyNoteRefRun(word, c, rsv) != NoteRefKind.None)
+                        return true;
+                    // A cover-page section paragraph can host anchored
+                    // drawings (textboxes, picture-filled shapes) in
+                    // otherwise text-less runs; dropping them deleted the
+                    // whole cover art. Include drawing/pict-bearing runs.
+                    var crx = word.GetElementXml(c.Path);
+                    if (!string.IsNullOrEmpty(crx)
+                        && (crx.Contains("<w:drawing", StringComparison.Ordinal)
+                            || crx.Contains("<w:pict", StringComparison.Ordinal)))
                         return true;
                     return false;
                 })
@@ -674,6 +686,47 @@ public static partial class WordBatchEmitter
                     {
                         int idx = ++ctx!.EndnoteCursor.Index;
                         EmitNoteReference(word, "endnote", idx, idx, carrierPath, items, run);
+                        continue;
+                    }
+                    // Drawing/pict-bearing carrier run: ship via the
+                    // inlined-parts carrier when it references parts
+                    // (rel ids rewritten on replay); a rel-less drawing
+                    // raw-sets verbatim into the section paragraph.
+                    var carrierRunXml = word.GetElementXml(run.Path);
+                    if (!string.IsNullOrEmpty(carrierRunXml)
+                        && (carrierRunXml.Contains("<w:drawing", StringComparison.Ordinal)
+                            || carrierRunXml.Contains("<w:pict", StringComparison.Ordinal)))
+                    {
+                        if (word.GetDrawingShapeEmitData(run.Path) is { } csData)
+                        {
+                            items.Add(new BatchItem
+                            {
+                                Command = "add",
+                                Parent = carrierPath,
+                                Type = "drawingshape",
+                                Props = PackInlinedPartsProps(csData),
+                            });
+                            continue;
+                        }
+                        if (word.GetVmlShapeEmitData(run.Path) is { } cvData)
+                        {
+                            items.Add(new BatchItem
+                            {
+                                Command = "add",
+                                Parent = carrierPath,
+                                Type = "vmlshape",
+                                Props = PackInlinedPartsProps(cvData),
+                            });
+                            continue;
+                        }
+                        items.Add(new BatchItem
+                        {
+                            Command = "raw-set",
+                            Part = "/document",
+                            Xpath = "/w:document/w:body/w:p[last()]",
+                            Action = "append",
+                            Xml = carrierRunXml
+                        });
                         continue;
                     }
                     var rProps = FilterEmittableProps(run.Format);
@@ -2020,13 +2073,27 @@ public static partial class WordBatchEmitter
                 && ResolveRawSetHost(parentPath, ctx) is { } shapeHost)
             {
                 // The shape's blipFill references an embedded image part via
-                // r:embed; the dump can't carry that media binary + rel into a
-                // raw-set, so a verbatim passthrough would dangle the r:embed and
-                // corrupt the file. Scrub the blipFill rel (replace with a neutral
-                // solidFill placeholder so the shape stays a valid filled shape)
-                // and warn that the image bitmap is dropped — the geometry and
-                // outline, the load-bearing shape semantics, still round-trip.
+                // r:embed; a verbatim raw-set would dangle it. Ship the run
+                // through the inlined-parts carrier (verbatim runXml +
+                // part{N} image bytes, rel ids rewritten on replay) so the
+                // bitmap fill survives — same shape as the vmlshape carrier.
                 // A wps:wsp with NO external rel (plain fill) raw-sets verbatim.
+                if (HasExternalRelRef(shapeXml)
+                    && word.GetDrawingShapeEmitData(run.Path) is { } shpData)
+                {
+                    items.Add(new BatchItem
+                    {
+                        Command = "add",
+                        Parent = paraTargetPath,
+                        Type = "drawingshape",
+                        Props = PackInlinedPartsProps(shpData),
+                    });
+                    return true;
+                }
+                // Fallback (unresolvable reference): scrub the blipFill rel
+                // (neutral solidFill placeholder keeps the shape valid) and
+                // warn that the image bitmap is dropped — geometry and outline
+                // still round-trip.
                 var scrubbed = ScrubDrawingBlipFillRels(shapeXml, out var blipDropped);
                 if (blipDropped)
                     ctx.Warnings.Add(new DocxUnsupportedWarning(

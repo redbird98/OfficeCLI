@@ -452,6 +452,22 @@ public partial class WordHandler : IDocumentHandler
     /// references nothing (the plain raw-set passthrough already handles that)
     /// or a reference can't be resolved.
     /// </summary>
+    /// <summary>
+    /// dump→batch: extract the verbatim run XML and referenced parts for a
+    /// modern DrawingML shape run (&lt;w:drawing&gt; hosting wps:wsp with an
+    /// image blipFill). Same carrier shape as the vmlshape path.
+    /// </summary>
+    internal ActiveXEmitData? GetDrawingShapeEmitData(string runPath)
+    {
+        OpenXmlElement? element;
+        try { element = NavigateToElement(ParsePath(runPath)); }
+        catch { return null; }
+        if (element is not Run run) return null;
+        if (!run.Descendants<DocumentFormat.OpenXml.Wordprocessing.Drawing>().Any())
+            return null;
+        return CollectInlinedPartsEmitData(run, run);
+    }
+
     internal ActiveXEmitData? GetSdtEmitData(string sdtPath)
     {
         OpenXmlElement? element;
