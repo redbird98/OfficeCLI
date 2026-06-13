@@ -280,6 +280,16 @@ public partial class PowerPointHandler
                     pProps.RightToLeft = rtl;
                     break;
                 }
+                case "ealnbrk" or "ealinebreak"
+                  or "latinlnbrk" or "latinlinebreak"
+                  or "fontalgn" or "fontalignment"
+                  or "deftabsz" or "defaulttabsize":
+                {
+                    // CJK / line-break pPr attributes — mirror AddParagraph + readback.
+                    var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                    ApplyParagraphBreakProp(pProps, key, value);
+                    break;
+                }
                 default:
                     // Apply run-level properties to all runs in this paragraph
                     var runUnsup = SetRunOrShapeProperties(

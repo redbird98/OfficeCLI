@@ -31,6 +31,25 @@ public partial class PowerPointHandler
         };
     }
 
+    // Emit the simple-valued CT_TextParagraphProperties attributes that were
+    // previously dropped on readback: line-break / punctuation / font-alignment
+    // / default-tab-size. These are heavily used by CJK source decks
+    // (eaLnBrk="0" suppresses East-Asian line breaking) — dropping them rewrapped
+    // text and shifted layout on round-trip. Canonical keys mirror the OOXML
+    // attribute names so Add/Set re-apply them symmetrically.
+    private static void EmitParagraphBreakProps(Drawing.ParagraphProperties? pProps, DocumentNode node)
+    {
+        if (pProps == null) return;
+        if (pProps.EastAsianLineBreak?.HasValue == true)
+            node.Format["eaLnBrk"] = pProps.EastAsianLineBreak.Value ? "1" : "0";
+        if (pProps.LatinLineBreak?.HasValue == true)
+            node.Format["latinLnBrk"] = pProps.LatinLineBreak.Value ? "1" : "0";
+        if (pProps.FontAlignment?.HasValue == true && !string.IsNullOrEmpty(pProps.FontAlignment.InnerText))
+            node.Format["fontAlgn"] = pProps.FontAlignment.InnerText!;
+        if (pProps.DefaultTabSize?.HasValue == true)
+            node.Format["defTabSz"] = FormatEmu(pProps.DefaultTabSize.Value);
+    }
+
     // CONSISTENCY(effect-color-8digit): shadow/glow readback contract is
     // CSS-form 8-digit hex '#RRGGBBAA' (schema/help/pptx/shape.json
     // shadow.readback / glow.readback). FormatHexWithAlpha falls back to
@@ -1838,6 +1857,7 @@ public partial class PowerPointHandler
             // set so LTR docs don't get a noisy `direction=ltr` everywhere.
             if (pProps.RightToLeft?.HasValue == true)
                 node.Format["direction"] = pProps.RightToLeft.Value ? "rtl" : "ltr";
+            EmitParagraphBreakProps(pProps, node);
         }
         // Inherit direction from slideLayout / slideMaster placeholder defaults
         // when the shape itself doesn't declare one. Surfaced as
@@ -1913,6 +1933,7 @@ public partial class PowerPointHandler
                     }
                     if (paraPProps?.RightToLeft?.HasValue == true)
                         paraNode.Format["direction"] = paraPProps.RightToLeft.Value ? "rtl" : "ltr";
+                    EmitParagraphBreakProps(paraPProps, paraNode);
                     var pLsPct = paraPProps?.GetFirstChild<Drawing.LineSpacing>()?.GetFirstChild<Drawing.SpacingPercent>()?.Val?.Value;
                     if (pLsPct.HasValue) paraNode.Format["lineSpacing"] = SpacingConverter.FormatPptLineSpacingPercent(pLsPct.Value);
                     var pLsPts = paraPProps?.GetFirstChild<Drawing.LineSpacing>()?.GetFirstChild<Drawing.SpacingPoints>()?.Val?.Value;
@@ -3009,6 +3030,7 @@ public partial class PowerPointHandler
                     {
                         paraNode.Format["align"] = MapTextAlignToFriendly(paraPProps.Alignment);
                     }
+                    EmitParagraphBreakProps(paraPProps, paraNode);
                     if (depth > 1)
                     {
                         int runIdx = 0;

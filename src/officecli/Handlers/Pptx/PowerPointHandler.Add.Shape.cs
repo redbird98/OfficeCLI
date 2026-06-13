@@ -338,6 +338,21 @@ public partial class PowerPointHandler
                     }
                 }
 
+                // CJK / line-break pPr attributes on the shape's first-paragraph
+                // (eaLnBrk / latinLnBrk / fontAlgn / defTabSz). Shapes/textboxes
+                // built with an inline text= seed their first paragraph here, not
+                // through AddParagraph — without this the dropped attributes
+                // rewrapped CJK text on round-trip. Apply to every paragraph.
+                foreach (var pBreakKey in new[] { "eaLnBrk", "latinLnBrk", "fontAlgn", "defTabSz" })
+                {
+                    if (!properties.TryGetValue(pBreakKey, out var pBreakVal)) continue;
+                    foreach (var para in newShape.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        ApplyParagraphBreakProp(pProps, pBreakKey, pBreakVal);
+                    }
+                }
+
                 // Vertical alignment
                 if (properties.TryGetValue("valign", out var valignVal))
                 {

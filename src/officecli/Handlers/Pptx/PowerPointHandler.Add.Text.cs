@@ -279,6 +279,11 @@ public partial class PowerPointHandler
                         throw new ArgumentException($"Invalid 'level' value: '{pLevelStr}'. Expected an integer between 0 and 8 (OOXML a:pPr/@lvl).");
                     pProps.Level = pLevelVal;
                 }
+                // CJK / line-break pPr attributes (eaLnBrk / latinLnBrk /
+                // hangingPunct / fontAlgn / defTabSz). Mirror NodeBuilder readback.
+                foreach (var pBreakKey in new[] { "eaLnBrk", "latinLnBrk", "fontAlgn", "defTabSz" })
+                    if (properties.TryGetValue(pBreakKey, out var pBreakVal))
+                        ApplyParagraphBreakProp(pProps, pBreakKey, pBreakVal);
                 // Line spacing (CONSISTENCY(lineSpacing): same idiom as AddShape:~180)
                 if (properties.TryGetValue("lineSpacing", out var pLsVal) || properties.TryGetValue("linespacing", out pLsVal))
                 {

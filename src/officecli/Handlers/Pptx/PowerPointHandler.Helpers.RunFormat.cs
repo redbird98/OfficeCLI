@@ -493,6 +493,42 @@ public partial class PowerPointHandler
     /// the order in which properties were set. Caller is responsible for
     /// removing any pre-existing same-typed child first.
     /// </summary>
+    // Apply the simple-valued CT_TextParagraphProperties attributes
+    // (line-break / punctuation / font-alignment / default-tab-size). These are
+    // plain pPr attributes, not child elements, so they're set directly on the
+    // ParagraphProperties object (no schema-order insertion needed). Returns the
+    // set of keys it consumed so callers can skip them in their own dispatch.
+    // Shared by AddParagraph and SetParagraphOnShape for symmetric round-trip of
+    // CJK line-break controls (eaLnBrk etc.).
+    private static bool ApplyParagraphBreakProp(Drawing.ParagraphProperties pProps, string key, string value)
+    {
+        switch (key.ToLowerInvariant())
+        {
+            case "ealnbrk" or "ealinebreak":
+                pProps.EastAsianLineBreak = IsTruthy(value);
+                return true;
+            case "latinlnbrk" or "latinlinebreak":
+                pProps.LatinLineBreak = IsTruthy(value);
+                return true;
+            case "fontalgn" or "fontalignment":
+                pProps.FontAlignment = value.Trim().ToLowerInvariant() switch
+                {
+                    "auto" => Drawing.TextFontAlignmentValues.Automatic,
+                    "t" or "top" => Drawing.TextFontAlignmentValues.Top,
+                    "ctr" or "center" => Drawing.TextFontAlignmentValues.Center,
+                    "base" or "baseline" => Drawing.TextFontAlignmentValues.Baseline,
+                    "b" or "bottom" => Drawing.TextFontAlignmentValues.Bottom,
+                    _ => throw new ArgumentException($"Invalid fontAlgn value: '{value}'. Valid: auto, t, ctr, base, b.")
+                };
+                return true;
+            case "deftabsz" or "defaulttabsize":
+                pProps.DefaultTabSize = (int)Core.EmuConverter.ParseEmu(value);
+                return true;
+            default:
+                return false;
+        }
+    }
+
     internal static void InsertPPrChild(Drawing.ParagraphProperties pProps, OpenXmlElement child)
     {
         var newRank = PPrChildRank(child);
