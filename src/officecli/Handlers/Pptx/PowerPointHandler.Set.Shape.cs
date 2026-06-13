@@ -1028,6 +1028,37 @@ public partial class PowerPointHandler
     /// SetParagraphOnShape / SetParagraphRunOnShape helpers without
     /// duplicating navigation logic.
     /// </summary>
+    /// <summary>
+    /// Resolve a Shape inside a (possibly nested) group from the raw
+    /// "/group[K]/group[L]…" segment string and a final shape index. Walks each
+    /// group segment in order, then picks shape[shapeIdx] inside the deepest
+    /// group. Shared by AddParagraph's grouped-shape parent route.
+    /// </summary>
+    private (SlidePart slidePart, Shape shape) ResolveGroupInnerShapeBySegments(int slideIdx, string groupSegs, int shapeIdx)
+    {
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count)
+            throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts.Count})");
+        var slidePart = slideParts[slideIdx - 1];
+        var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree
+            ?? throw new ArgumentException("Slide has no shape tree");
+        OpenXmlCompositeElement current = shapeTree;
+        int depth = 0;
+        foreach (Match seg in Regex.Matches(groupSegs, @"/group\[(\d+)\]"))
+        {
+            depth++;
+            var grpIdx = int.Parse(seg.Groups[1].Value);
+            var groups = current.Elements<GroupShape>().ToList();
+            if (grpIdx < 1 || grpIdx > groups.Count)
+                throw new ArgumentException($"Group {grpIdx} not found at depth {depth} (total: {groups.Count})");
+            current = groups[grpIdx - 1];
+        }
+        var innerShapes = current.Elements<Shape>().ToList();
+        if (shapeIdx < 1 || shapeIdx > innerShapes.Count)
+            throw new ArgumentException($"Shape {shapeIdx} not found in group (total: {innerShapes.Count})");
+        return (slidePart, innerShapes[shapeIdx - 1]);
+    }
+
     private (SlidePart slidePart, Shape shape) ResolveGroupInnerShape(int slideIdx, int grpIdx, int shapeIdx)
     {
         var slideParts = GetSlideParts().ToList();

@@ -180,17 +180,25 @@ public partial class PowerPointHandler
                 // Set side ships at PowerPointHandler.Set.Shape.cs, so dump
                 // emit can target either form via positional ordinals.
                 var paraParentMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]/shape\[(\d+)\]$");
-                var paraPhMatch = paraParentMatch.Success ? null : Regex.Match(parentPath, @"^/slide\[(\d+)\]/placeholder\[(\w+)\]$");
+                // Grouped shape parent: /slide[N]/group[K](/group[L])*/shape[M].
+                // dump emits paragraph adds into shapes that live inside (possibly
+                // nested) groups; without this they hit the slide-only matcher and
+                // failed "Element not found". Mirrors the Set-side nested-group
+                // shape resolution.
+                var paraGroupMatch = paraParentMatch.Success
+                    ? null
+                    : Regex.Match(parentPath, @"^/slide\[(\d+)\]((?:/group\[\d+\])+)/shape\[(\d+)\]$");
+                var paraPhMatch = (paraParentMatch.Success || (paraGroupMatch?.Success == true)) ? null : Regex.Match(parentPath, @"^/slide\[(\d+)\]/placeholder\[(\w+)\]$");
                 // R57 bt-4: accept connector parents so dump→replay round-trips
                 // multi-paragraph / multi-run connector labels (the inline
                 // `text=` prop on AddConnector handles only the single-run
                 // case). The connector's <p:txBody> is not declared by the
                 // p:cxnSp schema — see ConnectorEnsureTextBody.
-                var paraCxnMatch = (paraParentMatch.Success || (paraPhMatch?.Success == true))
+                var paraCxnMatch = (paraParentMatch.Success || (paraGroupMatch?.Success == true) || (paraPhMatch?.Success == true))
                     ? null
                     : Regex.Match(parentPath, @"^/slide\[(\d+)\]/connector\[([^\]]+)\]$");
-                if (!paraParentMatch.Success && (paraPhMatch == null || !paraPhMatch.Success) && (paraCxnMatch == null || !paraCxnMatch.Success))
-                    throw new ArgumentException("Paragraphs must be added to a shape, placeholder, or connector: /slide[N]/shape[M], /slide[N]/placeholder[X], or /slide[N]/connector[K]");
+                if (!paraParentMatch.Success && (paraGroupMatch == null || !paraGroupMatch.Success) && (paraPhMatch == null || !paraPhMatch.Success) && (paraCxnMatch == null || !paraCxnMatch.Success))
+                    throw new ArgumentException("Paragraphs must be added to a shape, placeholder, or connector: /slide[N]/shape[M], /slide[N]/group[K]/.../shape[M], /slide[N]/placeholder[X], or /slide[N]/connector[K]");
 
                 SlidePart paraSlidePart;
                 Shape? paraShape = null;
@@ -204,6 +212,14 @@ public partial class PowerPointHandler
                     paraShapeIdx = int.Parse(paraParentMatch.Groups[2].Value);
                     (paraSlidePart, paraShape) = ResolveShape(paraSlideIdx, paraShapeIdx);
                     paraReturnPathHead = $"/slide[{paraSlideIdx}]/{BuildElementPathSegment("shape", paraShape, paraShapeIdx)}";
+                }
+                else if (paraGroupMatch != null && paraGroupMatch.Success)
+                {
+                    paraSlideIdx = int.Parse(paraGroupMatch.Groups[1].Value);
+                    var groupSegs = paraGroupMatch.Groups[2].Value;
+                    paraShapeIdx = int.Parse(paraGroupMatch.Groups[3].Value);
+                    (paraSlidePart, paraShape) = ResolveGroupInnerShapeBySegments(paraSlideIdx, groupSegs, paraShapeIdx);
+                    paraReturnPathHead = $"/slide[{paraSlideIdx}]{groupSegs}/{BuildElementPathSegment("shape", paraShape, paraShapeIdx)}";
                 }
                 else if (paraPhMatch != null && paraPhMatch.Success)
                 {

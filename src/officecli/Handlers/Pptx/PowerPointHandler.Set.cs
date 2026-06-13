@@ -351,6 +351,36 @@ public partial class PowerPointHandler
         var cxnMatch = Regex.Match(path, @"^/slide\[(\d+)\]/(?:connector|connection)\[(\d+)\]$");
         if (cxnMatch.Success) return SetConnectorByPath(cxnMatch, properties);
 
+        // Try nested-depth group inner paragraph/run path:
+        //   /slide[N]/group[M](/group[L])+/shape[K]/paragraph[P][/run[R]]
+        // CONSISTENCY(group-inner-shape): the depth-1 routes below handle a single
+        // group; deeper nesting (group/group/group/shape/paragraph) fell through to
+        // the XML fallback and errored "Element not found". Walk arbitrary depth via
+        // ResolveGroupInnerShapeBySegments, then reuse the shape paragraph/run helpers.
+        var nestedGrpParaRunMatch = Regex.Match(path,
+            @"^/slide\[(\d+)\]/group\[(\d+)\]((?:/group\[\d+\])+)/shape\[(\d+)\]/(?:paragraph|p)\[(\d+)\]/(?:run|r)\[(\d+)\]$");
+        if (nestedGrpParaRunMatch.Success)
+        {
+            var slideIdx = int.Parse(nestedGrpParaRunMatch.Groups[1].Value);
+            var segs = "/group[" + nestedGrpParaRunMatch.Groups[2].Value + "]" + nestedGrpParaRunMatch.Groups[3].Value;
+            var shapeIdx = int.Parse(nestedGrpParaRunMatch.Groups[4].Value);
+            var paraIdx = int.Parse(nestedGrpParaRunMatch.Groups[5].Value);
+            var runIdx = int.Parse(nestedGrpParaRunMatch.Groups[6].Value);
+            var (sp, shp) = ResolveGroupInnerShapeBySegments(slideIdx, segs, shapeIdx);
+            return SetParagraphRunOnShape(sp, shp, paraIdx, runIdx, properties);
+        }
+        var nestedGrpParaMatch = Regex.Match(path,
+            @"^/slide\[(\d+)\]/group\[(\d+)\]((?:/group\[\d+\])+)/shape\[(\d+)\]/(?:paragraph|p)\[(\d+)\]$");
+        if (nestedGrpParaMatch.Success)
+        {
+            var slideIdx = int.Parse(nestedGrpParaMatch.Groups[1].Value);
+            var segs = "/group[" + nestedGrpParaMatch.Groups[2].Value + "]" + nestedGrpParaMatch.Groups[3].Value;
+            var shapeIdx = int.Parse(nestedGrpParaMatch.Groups[4].Value);
+            var paraIdx = int.Parse(nestedGrpParaMatch.Groups[5].Value);
+            var (sp, shp) = ResolveGroupInnerShapeBySegments(slideIdx, segs, shapeIdx);
+            return SetParagraphOnShape(sp, shp, paraIdx, properties);
+        }
+
         // Try group inner paragraph/run path: /slide[N]/group[M]/shape[K]/paragraph[P]/run[R]
         // CONSISTENCY(group-inner-shape): Get supports the nested paragraph/run
         // path on shapes inside a group; Set used to fall through to the
