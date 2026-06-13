@@ -415,6 +415,12 @@ internal static partial class ChartHelper
                 var dottedKey = $"series{i}.name";
                 if (!properties.ContainsKey(dottedKey))
                     properties[dottedKey] = nameVal;
+                // Remove the flat key so SetChartProperties' dispatch loop
+                // doesn't also iterate it — the legacy `series{N}=` branch
+                // does int.TryParse on the suffix ("2Name") and reports it
+                // as unsupported. TryGetValue above already marked the
+                // original input consumed for handler-as-truth tracking.
+                properties.Remove(flatKey);
             }
         }
     }

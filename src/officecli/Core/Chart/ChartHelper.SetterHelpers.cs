@@ -230,6 +230,28 @@ internal static partial class ChartHelper
             typeStr = "fixed";
         }
 
+        // Direction-keyword leading form: errBars=both | plus | minus | both:fixed:5
+        // The first slot is the ErrorBarType direction, not the value-type. Shift
+        // remaining slots so the existing typeStr / value parsing picks them up.
+        // Bare direction (no second slot) defaults to type=stdErr — Excel's UI
+        // default for "Error Bars > Standard Error" with direction=Both.
+        var explicitDirection = (C.ErrorBarValues?)null;
+        if (typeStr is "both" or "plus" or "minus")
+        {
+            explicitDirection = typeStr switch
+            {
+                "plus" => C.ErrorBarValues.Plus,
+                "minus" => C.ErrorBarValues.Minus,
+                _ => C.ErrorBarValues.Both,
+            };
+            // Shift: parts[1] becomes the type, parts[2..] becomes value(s).
+            // If no second slot, fall back to stdErr (no magnitude needed).
+            typeStr = parts.Length > 1 ? parts[1].Trim().ToLowerInvariant() : "stderr";
+            parts = parts.Length > 1
+                ? new[] { typeStr }.Concat(parts.Skip(2)).ToArray()
+                : new[] { typeStr };
+        }
+
         var errBars = new C.ErrorBars();
         errBars.AppendChild(new C.ErrorDirection { Val = C.ErrorBarDirectionValues.Y });
 
@@ -267,7 +289,7 @@ internal static partial class ChartHelper
             return errBars;
         }
 
-        errBars.AppendChild(new C.ErrorBarType { Val = C.ErrorBarValues.Both });
+        errBars.AppendChild(new C.ErrorBarType { Val = explicitDirection ?? C.ErrorBarValues.Both });
 
         var errValType = typeStr switch
         {

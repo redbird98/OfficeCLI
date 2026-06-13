@@ -735,11 +735,13 @@ public partial class PowerPointHandler
                 {
                     var outline = EnsureOutline(newShape.ShapeProperties!);
                     outline.Width = Core.EmuConverter.ParseLineWidth(lwStr);
+                    EnsureOutlineHasFill(outline);
                 }
                 else if (compoundLineWidth != null)
                 {
                     var outline = EnsureOutline(newShape.ShapeProperties!);
                     outline.Width = Core.EmuConverter.ParseLineWidth(compoundLineWidth);
+                    EnsureOutlineHasFill(outline);
                 }
                 // Stash the compound dash so the lineDash branch in
                 // SetRunOrShapeProperties below picks it up via the

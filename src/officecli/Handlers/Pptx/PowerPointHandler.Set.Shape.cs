@@ -515,21 +515,21 @@ public partial class PowerPointHandler
                 }
                 case "fill":
                 {
-                    var grpSpPr = grp.GroupShapeProperties ?? (grp.GroupShapeProperties = new GroupShapeProperties());
-                    grpSpPr.RemoveAllChildren<Drawing.SolidFill>();
-                    grpSpPr.RemoveAllChildren<Drawing.NoFill>();
-                    grpSpPr.RemoveAllChildren<Drawing.GradientFill>();
-                    if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
-                        grpSpPr.AppendChild(new Drawing.NoFill());
-                    else
-                        grpSpPr.AppendChild(BuildSolidFill(value));
+                    // OOXML CT_GroupShapeProperties (p:grpSpPr) does NOT allow
+                    // fill children — only xfrm/scene3d/extLst. PowerPoint
+                    // silently ignores any solidFill/noFill/gradFill written
+                    // here, so accepting the prop and writing the OOXML was
+                    // misleading (the file rendered unchanged). Reject as
+                    // unsupported so the caller learns the operation isn't
+                    // supported instead of seeing a no-op succeed.
+                    unsupported.Add($"{key} (p:grpSpPr does not support fill in OOXML; PowerPoint ignores any fill on a group — apply fill to the child shapes instead)");
                     break;
                 }
                 default:
                     if (!GenericXmlQuery.SetGenericAttribute(grp, key, value))
                     {
                         if (unsupported.Count == 0)
-                            unsupported.Add($"{key} (valid group props: x, y, width, height, rotation, name, fill, link, tooltip)");
+                            unsupported.Add($"{key} (valid group props: x, y, width, height, rotation, name, link, tooltip)");
                         else
                             unsupported.Add(key);
                     }
@@ -584,6 +584,7 @@ public partial class PowerPointHandler
                     var spPr = cxn.ShapeProperties ?? (cxn.ShapeProperties = new ShapeProperties());
                     var outline = EnsureOutline(spPr);
                     outline.Width = Core.EmuConverter.ParseLineWidth(value);
+                    EnsureOutlineHasFill(outline);
                     break;
                 }
                 case "linecolor" or "line.color" or "line" or "color":

@@ -31,8 +31,22 @@ public partial class PowerPointHandler
             var sldSz = _doc.PresentationPart?.Presentation?.GetFirstChild<SlideSize>();
             if (sldSz != null)
             {
-                if (sldSz.Cx?.HasValue == true) node.Format["slideWidth"] = FormatEmu(sldSz.Cx.Value);
-                if (sldSz.Cy?.HasValue == true) node.Format["slideHeight"] = FormatEmu(sldSz.Cy.Value);
+                // Pair slideWidth/slideHeight on the same unit so they don't
+                // mix pt vs cm when one is pt-exact and the other is cm-exact
+                // (default widescreen: 12192000 EMU=960pt but 6858000 EMU=
+                // 19.05cm — both legal, both unhelpful when paired).
+                if (sldSz.Cx?.HasValue == true && sldSz.Cy?.HasValue == true)
+                {
+                    var (wStr, hStr) = Core.EmuConverter.FormatEmuPaired(
+                        sldSz.Cx.Value, sldSz.Cy.Value);
+                    node.Format["slideWidth"] = wStr;
+                    node.Format["slideHeight"] = hStr;
+                }
+                else
+                {
+                    if (sldSz.Cx?.HasValue == true) node.Format["slideWidth"] = FormatEmu(sldSz.Cx.Value);
+                    if (sldSz.Cy?.HasValue == true) node.Format["slideHeight"] = FormatEmu(sldSz.Cy.Value);
+                }
                 if (sldSz.Type is { HasValue: true } sldType) node.Format["slideSize"] = sldType.InnerText!.ToLowerInvariant() switch
                 {
                     "screen16x9" => "widescreen",
@@ -1967,6 +1981,8 @@ public partial class PowerPointHandler
                                 Text = rowText,
                                 ChildCount = row.Elements<Drawing.TableCell>().Count()
                             };
+                            if (row.Height?.HasValue == true)
+                                rowNode.Format["height"] = Core.EmuConverter.FormatEmuLossy(row.Height.Value);
                             if (parsed.TextContains == null || rowText.Contains(parsed.TextContains, StringComparison.OrdinalIgnoreCase))
                             {
                                 if (MatchesGenericAttributes(rowNode, parsed.Attributes))

@@ -213,7 +213,7 @@ internal static partial class ChartHelper
                     || titleDefRp.GetAttributes().Any(a => a.LocalName is "i" or "u"));
                 bool hasAlgn = titlePPr.GetAttributes().Any(a => a.LocalName == "algn");
                 if (defRpMeaningful || hasAlgn)
-                    node.Format["title.pPr"] = titlePPr.OuterXml;
+                    node.InternalFormat["title.pPr"] = titlePPr.OuterXml;
             }
         }
 
@@ -349,7 +349,7 @@ internal static partial class ChartHelper
             // cap/cmpd/algn/join. Capture the gridline <c:spPr> verbatim — same
             // approach as valAx.spPr — so the tint and line geometry round-trip.
             var majorGLSpPr = GetSpPrChildXml(majorGL);
-            if (majorGLSpPr != null) node.Format["gridline.spPr"] = majorGLSpPr;
+            if (majorGLSpPr != null) node.InternalFormat["gridline.spPr"] = majorGLSpPr;
         }
         else if (valAxisForGrid != null)
         {
@@ -361,7 +361,7 @@ internal static partial class ChartHelper
             node.Format["minorGridlines"] = "true";
             ReadGridlineDetail(minorGL, node, "minorGridline");
             var minorGLSpPr = GetSpPrChildXml(minorGL);
-            if (minorGLSpPr != null) node.Format["minorGridline.spPr"] = minorGLSpPr;
+            if (minorGLSpPr != null) node.InternalFormat["minorGridline.spPr"] = minorGLSpPr;
         }
 
         // GapWidth / Overlap from bar/column chart
@@ -423,9 +423,9 @@ internal static partial class ChartHelper
         var catAxisForTxPr = (OpenXmlElement?)plotArea.GetFirstChild<C.CategoryAxis>()
             ?? plotArea.GetFirstChild<C.DateAxis>();
         var catAxTxPrXml = GetTxPrChildXml(catAxisForTxPr);
-        if (catAxTxPrXml != null) node.Format["catAx.txPr"] = catAxTxPrXml;
+        if (catAxTxPrXml != null) node.InternalFormat["catAx.txPr"] = catAxTxPrXml;
         var valAxTxPrXml = GetTxPrChildXml(valAxisForGrid);
-        if (valAxTxPrXml != null) node.Format["valAx.txPr"] = valAxTxPrXml;
+        if (valAxTxPrXml != null) node.InternalFormat["valAx.txPr"] = valAxTxPrXml;
 
         // Secondary axis — emit the 1-based series indices bound to the
         // secondary axis so dump→replay round-trips. The Setter expects
@@ -523,7 +523,7 @@ internal static partial class ChartHelper
         {
             node.Format["axisTitle"] = valAxisTitle;
             var vPPr = valAxisTitleEl!.Descendants<Drawing.ParagraphProperties>().FirstOrDefault();
-            if (vPPr != null && AxisTitlePPrMeaningful(vPPr)) node.Format["axisTitle.pPr"] = vPPr.OuterXml;
+            if (vPPr != null && AxisTitlePPrMeaningful(vPPr)) node.InternalFormat["axisTitle.pPr"] = vPPr.OuterXml;
         }
 
         var catAxis = plotArea.GetFirstChild<C.CategoryAxis>();
@@ -533,7 +533,7 @@ internal static partial class ChartHelper
         {
             node.Format["catTitle"] = catAxisTitle;
             var cPPr = catAxisTitleEl!.Descendants<Drawing.ParagraphProperties>().FirstOrDefault();
-            if (cPPr != null && AxisTitlePPrMeaningful(cPPr)) node.Format["catTitle.pPr"] = cPPr.OuterXml;
+            if (cPPr != null && AxisTitlePPrMeaningful(cPPr)) node.InternalFormat["catTitle.pPr"] = cPPr.OuterXml;
         }
 
         // CONSISTENCY(cat-axis-type): emit the category-axis kind so Add/Set
@@ -583,11 +583,11 @@ internal static partial class ChartHelper
         // present). These fragments reference theme colours (round-tripped via
         // the theme part) and carry NO external relationships.
         var valAxSpPrXml = GetSpPrChildXml(valAxis);
-        if (valAxSpPrXml != null) node.Format["valAx.spPr"] = valAxSpPrXml;
+        if (valAxSpPrXml != null) node.InternalFormat["valAx.spPr"] = valAxSpPrXml;
         var catAxSpPrXml = GetSpPrChildXml(catAxis);
-        if (catAxSpPrXml != null) node.Format["catAx.spPr"] = catAxSpPrXml;
+        if (catAxSpPrXml != null) node.InternalFormat["catAx.spPr"] = catAxSpPrXml;
         var plotAreaSpPrXml = GetSpPrChildXml(plotArea);
-        if (plotAreaSpPrXml != null) node.Format["plotArea.spPr"] = plotAreaSpPrXml;
+        if (plotAreaSpPrXml != null) node.InternalFormat["plotArea.spPr"] = plotAreaSpPrXml;
 
         // Axis visibility (c:delete)
         var valAxisDelete = valAxis?.GetFirstChild<C.Delete>();
@@ -737,7 +737,7 @@ internal static partial class ChartHelper
             // a:lumMod/a:lumOff (a tx1 frame tinted light gray rebuilt black).
             // Capture the frame fill + border verbatim so the tint round-trips.
             var chartAreaSpPr = chart.Parent != null ? GetSpPrChildXml(chart.Parent) : null;
-            if (chartAreaSpPr != null) node.Format["chartArea.spPr"] = chartAreaSpPr;
+            if (chartAreaSpPr != null) node.InternalFormat["chartArea.spPr"] = chartAreaSpPr;
         }
 
         // Chart-type-specific
@@ -1001,7 +1001,7 @@ internal static partial class ChartHelper
                 {
                     var rawSpPr = serEl.GetFirstChild<C.ChartShapeProperties>();
                     if (rawSpPr != null && HasMeaningfulStyling(rawSpPr))
-                        seriesNode.Format["spPr"] = rawSpPr.OuterXml;
+                        seriesNode.InternalFormat["spPr"] = rawSpPr.OuterXml;
 
                     var rawDpts = serEl.Elements<C.DataPoint>()
                         .Where(dp => dp.GetFirstChild<C.ChartShapeProperties>() != null
@@ -1205,9 +1205,35 @@ internal static partial class ChartHelper
                                 var numStr = firstPt?.GetFirstChild<C.NumericValue>()?.Text;
                                 if (!string.IsNullOrEmpty(numStr)) mag = numStr;
                             }
+                            // Emit direction prefix when it's needed to keep
+                            // round-trip lossless. plus/minus always carry the
+                            // prefix (they're meaningful only with explicit
+                            // direction). For ebDir=both, prefix when the type
+                            // is the "bare direction" default (stdErr — the
+                            // shape Setter produces from `errBars=both`), so
+                            // Get round-trips "both:stdErr" back to the same
+                            // input. Other types under direction=both stay
+                            // implicit ("fixed:5") to preserve the prior
+                            // R55-tested output for non-directional input.
+                            // Always prefix the direction so Set/Get round-trip
+                            // is lossless. R41's earlier guard `typeName ==
+                            // "stdErr"` was too narrow: `both:fixed:5` and
+                            // `both:percentage:10` carry ebDir=both with a
+                            // non-stdErr type, and dropped the prefix on
+                            // readback. Always emitting `both:` for explicit-
+                            // direction Build paths keeps the form recoverable.
+                            // (Sets without an explicit direction keyword
+                            // still default to ebDir=both at Build time, so
+                            // their readback also picks up the prefix — that's
+                            // intentional now that R43 asserts the explicit
+                            // round-trip form.)
+                            var ebDir = errBars.GetFirstChild<C.ErrorBarType>()?.Val?.InnerText;
+                            var dirPrefix = ebDir is "plus" or "minus" or "both"
+                                ? ebDir + ":"
+                                : "";
                             seriesNode.Format["errBars"] = mag != null
-                                ? $"{typeName}:{mag}"
-                                : typeName;
+                                ? $"{dirPrefix}{typeName}:{mag}"
+                                : $"{dirPrefix}{typeName}";
                         }
                     }
                 }

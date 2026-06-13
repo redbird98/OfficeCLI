@@ -208,10 +208,17 @@ public static partial class PptxBatchEmitter
     // re-introducing a spurious slideWidth row on every round-trip.
     // EmitPresentationProps is a no-op for the default case to keep unchanged
     // decks from gaining a spurious item on round-trip.
-    private static readonly string DefaultSlideWidth =
-        Core.EmuConverter.FormatEmu(Core.SlideSizeDefaults.Widescreen16x9Cx);
-    private static readonly string DefaultSlideHeight =
-        Core.EmuConverter.FormatEmu(Core.SlideSizeDefaults.Widescreen16x9Cy);
+    // CONSISTENCY(paired-slide-units): mirror PowerPointHandler.Query.cs
+    // which uses FormatEmuPaired so width+height share a unit. Without this,
+    // DefaultSlideHeight resolved to "19.05cm" while Get / emits "540pt" for
+    // the same EMU value, breaking the idempotency guard and re-emitting
+    // a spurious `slideHeight=540pt` row on every dump of an unchanged deck.
+    private static readonly (string Width, string Height) DefaultSlideSizePair =
+        Core.EmuConverter.FormatEmuPaired(
+            Core.SlideSizeDefaults.Widescreen16x9Cx,
+            Core.SlideSizeDefaults.Widescreen16x9Cy);
+    private static readonly string DefaultSlideWidth = DefaultSlideSizePair.Width;
+    private static readonly string DefaultSlideHeight = DefaultSlideSizePair.Height;
 
     // Presentation-level Format keys that TrySetPresentationSetting accepts
     // on `set /`. The Get side surfaces these via PopulatePresentationSettings

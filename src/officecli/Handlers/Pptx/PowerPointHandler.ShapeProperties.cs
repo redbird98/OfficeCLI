@@ -953,6 +953,7 @@ public partial class PowerPointHandler
                     if (spPr == null) { unsupported.Add(key); break; }
                     var outline = EnsureOutline(spPr);
                     outline.Width = Core.EmuConverter.ParseLineWidth(value);
+                    EnsureOutlineHasFill(outline);
                     break;
                 }
 
@@ -2871,6 +2872,38 @@ public partial class PowerPointHandler
                                     throw new ArgumentException($"Invalid border dash value: '{scParts[3]}'. Valid values: solid, dot, dash, lgDash, dashDot, sysDot, sysDash.");
                             }
                         }
+                        else if (value.Contains(':'))
+                        {
+                            // Colon-delimited form: width:color[:dash], mirroring
+                            // the shape `line=` compound form. Without this branch
+                            // "2pt:FF0000" landed in the space-split path as a
+                            // single token, failed the pt/cm/px check, and the
+                            // color parser uppercased the whole thing into
+                            // "2PT:FF0000" — surfacing as "Invalid color value".
+                            var coParts = value.Split(':');
+                            if (coParts.Length > 0 && !string.IsNullOrEmpty(coParts[0]))
+                            {
+                                var wStr = coParts[0];
+                                if (!wStr.EndsWith("pt", StringComparison.OrdinalIgnoreCase)
+                                    && !wStr.EndsWith("cm", StringComparison.OrdinalIgnoreCase)
+                                    && !wStr.EndsWith("px", StringComparison.OrdinalIgnoreCase)
+                                    && !wStr.EndsWith("emu", StringComparison.OrdinalIgnoreCase))
+                                    wStr += "pt";
+                                borderWidth = Core.EmuConverter.ParseEmu(wStr);
+                                if (borderWidth.Value < 0)
+                                    throw new ArgumentException($"Invalid border width: '{coParts[0]}' (must be >= 0).");
+                            }
+                            if (coParts.Length > 1 && !string.IsNullOrEmpty(coParts[1]))
+                                borderColor = coParts[1].TrimStart('#').ToUpperInvariant();
+                            if (coParts.Length > 2)
+                            {
+                                var d = coParts[2].ToLowerInvariant();
+                                if (d is "solid" or "dot" or "dash" or "lgdash" or "dashdot" or "sysdot" or "sysdash")
+                                    borderDash = d;
+                                else
+                                    throw new ArgumentException($"Invalid border dash value: '{coParts[2]}'. Valid values: solid, dot, dash, lgDash, dashDot, sysDot, sysDash.");
+                            }
+                        }
                         else
                         {
                             // Space-separated format: "2pt dash FF0000"
@@ -2971,6 +3004,14 @@ public partial class PowerPointHandler
                           or "borderbottomlefttotopright.width"
                           or "borderbottomlefttotopright.color"
                           or "borderbottomlefttotopright.dash" => new[] { "tr2bl" },
+                        // PowerPoint UI naming: diagDown = top-left → bottom-right
+                        // (line slopes downward L→R); diagUp = bottom-left → top-right.
+                        // Without these arms, "border.diagdown" fell through to the
+                        // 4-side fallback and applied to every orthogonal border.
+                        "border.diagdown" or "border.diagdown.width"
+                          or "border.diagdown.color" or "border.diagdown.dash" => new[] { "tl2br" },
+                        "border.diagup" or "border.diagup.width"
+                          or "border.diagup.color" or "border.diagup.dash" => new[] { "tr2bl" },
                         _ => new[] { "left", "right", "top", "bottom" }  // "border" or "border.all"
                     };
 

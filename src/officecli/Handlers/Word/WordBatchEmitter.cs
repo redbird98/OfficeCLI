@@ -143,7 +143,7 @@ public static partial class WordBatchEmitter
             ChartSpecs: word.Query("chart").Select(c =>
             {
                 var full = word.Get(c.Path);
-                return new ChartSpec(full.Format, full.Children ?? new List<DocumentNode>());
+                return new ChartSpec(full.Format, full.InternalFormat, full.Children ?? new List<DocumentNode>());
             }).ToList(),
             ChartCursor: new NoteCursor(),
             ParaIdToTargetIdx: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
@@ -471,7 +471,7 @@ public static partial class WordBatchEmitter
         }
     }
 
-    private sealed record ChartSpec(Dictionary<string, object?> Format, IReadOnlyList<DocumentNode> Series);
+    private sealed record ChartSpec(Dictionary<string, object?> Format, Dictionary<string, object?> InternalFormat, IReadOnlyList<DocumentNode> Series);
 
     private sealed record BodyEmitContext(
         List<string> FootnoteTexts,
@@ -583,7 +583,7 @@ public static partial class WordBatchEmitter
         var chartSpecs = charts.Select(c =>
         {
             var full = word.Get(c.Path);
-            return new ChartSpec(full.Format, full.Children ?? new List<DocumentNode>());
+            return new ChartSpec(full.Format, full.InternalFormat, full.Children ?? new List<DocumentNode>());
         }).ToList();
 
         var ctx = new BodyEmitContext(

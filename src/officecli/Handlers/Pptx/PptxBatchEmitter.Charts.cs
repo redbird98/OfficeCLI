@@ -21,6 +21,19 @@ public static partial class PptxBatchEmitter
         // depth=1 so series children materialize with their name/values.
         var fullChart = ppt.Get(chartNode.Path, depth: 1);
         var props = FilterEmittableProps(fullChart.Format);
+        // CONSISTENCY(internal-roundtrip-keys): pull chart-level verbatim
+        // XML metadata (axisTitle.pPr / catTitle.pPr) off InternalFormat
+        // so the dump→replay path still carries them. They live off the
+        // public Format dict to keep user-facing Get output free of raw
+        // OOXML strings, but the Setter consumes them post-build to
+        // restore axis-title paragraph styling.
+        foreach (var (ik, iv) in fullChart.InternalFormat)
+        {
+            if (iv == null) continue;
+            var ivs = iv.ToString();
+            if (string.IsNullOrEmpty(ivs)) continue;
+            if (!props.ContainsKey(ik)) props[ik] = ivs;
+        }
         // Strip Get-only keys AddChart neither expects nor accepts.
         // CONSISTENCY(shape-id-high-range): KEEP the source cNvPr.Id —
         // AcquireShapeId in AddChart honors caller-supplied id, mirror of

@@ -106,18 +106,36 @@ static partial class CommandBuilder
             }
 
             // Pre-validate: check for unknown JSON fields before deserializing
-            using var jsonDoc = System.Text.Json.JsonDocument.Parse(jsonText);
-            // BUG-R7-10: when the batch input is a JSON object/string/etc.
-            // (not an array), Deserialize<List<BatchItem>> threw a generic
-            // JsonException whose message exposed the C# generic type name
-            // (`System.Collections.Generic.List`1[OfficeCli.BatchItem]`).
-            // Convert it to a human-friendly error first so AI agents and
-            // humans see a stable, model-agnostic diagnostic.
-            if (jsonDoc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array
-                && jsonDoc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Null)
+            var jsonDoc = System.Text.Json.JsonDocument.Parse(jsonText);
+            // CONSISTENCY(dump-batch-pipeline): `dump --json` wraps the
+            // BatchItem array in an envelope object (`{"success":true,
+            // "data":[…]}` via OutputFormatter.WrapEnvelope). The natural
+            // pipeline `dump --json > out.json && batch --input out.json`
+            // otherwise threw "Batch input must be a JSON array" because the
+            // root is an object. Auto-unwrap when the envelope has a `data`
+            // array so the pipeline just works without an extra `jq .data`
+            // step. Bare-array inputs (dump without --json) are unaffected.
+            if (jsonDoc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                && jsonDoc.RootElement.TryGetProperty("data", out var envData)
+                && envData.ValueKind == System.Text.Json.JsonValueKind.Array)
             {
+                jsonText = envData.GetRawText();
+                jsonDoc.Dispose();
+                jsonDoc = System.Text.Json.JsonDocument.Parse(jsonText);
+            }
+            using var _jsonDocOwner = jsonDoc;
+            var rootKind = jsonDoc.RootElement.ValueKind;
+            if (rootKind != System.Text.Json.JsonValueKind.Array
+                && rootKind != System.Text.Json.JsonValueKind.Null)
+            {
+                // BUG-R7-10: when the batch input is a JSON object/string/etc.
+                // (not an array), Deserialize<List<BatchItem>> threw a generic
+                // JsonException whose message exposed the C# generic type name
+                // (`System.Collections.Generic.List`1[OfficeCli.BatchItem]`).
+                // Convert it to a human-friendly error first so AI agents and
+                // humans see a stable, model-agnostic diagnostic.
                 throw new ArgumentException(
-                    $"Batch input must be a JSON array. Got: {jsonDoc.RootElement.ValueKind.ToString().ToLowerInvariant()}. "
+                    $"Batch input must be a JSON array. Got: {rootKind.ToString().ToLowerInvariant()}. "
                     + "Wrap a single item like [{\"command\":\"get\",\"path\":\"/\"}].");
             }
             if (jsonDoc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)

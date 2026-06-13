@@ -198,6 +198,66 @@ internal static class EmuConverter
     }
 
     /// <summary>
+    /// Like <see cref="FormatEmu"/>, but tries pt FIRST (then cm, in). Used for
+    /// slide-size paired readback (slideWidth / slideHeight) where the default
+    /// widescreen size (12192000 x 6858000 EMU) is exact in pt for the width
+    /// (960pt) but exact in cm for the height (19.05cm) — so the default
+    /// cm-first ordering mixes units across a semantically paired property.
+    /// Preferring pt keeps both members on the same unit for any pt-exact
+    /// size, with cm/in still reachable for sizes that are clean cm but not
+    /// clean pt (e.g. A4).
+    /// </summary>
+    public static string FormatEmuPtFirst(long emu)
+    {
+        if (emu == 0) return "0pt";
+        return TryFormatUnit(emu, EmuPerPointF, "pt")
+            ?? TryFormatUnit(emu, EmuPerCmF, "cm")
+            ?? TryFormatUnit(emu, EmuPerInchF, "in")
+            ?? emu.ToString(CultureInfo.InvariantCulture) + "emu";
+    }
+
+    /// <summary>
+    /// Format two paired EMU dimensions (e.g. slideWidth + slideHeight) using
+    /// the SAME unit when one exists that exact-round-trips both. Iterates
+    /// pt → cm → in; falls back to per-value <see cref="FormatEmu"/> if no
+    /// shared unit fits. This prevents semantically paired readback (slide
+    /// size, page size, etc.) from mixing units when one value is pt-exact
+    /// and the other is cm-exact.
+    /// </summary>
+    public static (string, string) FormatEmuPaired(long emuA, long emuB)
+    {
+        foreach (var (perUnit, suffix) in new[] {
+            (EmuPerPointF, "pt"), (EmuPerCmF, "cm"), (EmuPerInchF, "in") })
+        {
+            var a = TryFormatUnit(emuA, perUnit, suffix);
+            var b = TryFormatUnit(emuB, perUnit, suffix);
+            if (a != null && b != null) return (a, b);
+        }
+        return (FormatEmu(emuA), FormatEmu(emuB));
+    }
+
+    /// <summary>
+    /// Format <paramref name="emu"/> in human-readable cm/pt/in even when the
+    /// 2-decimal form does NOT round-trip exactly. Used for derived geometry
+    /// like table colWidths (where auto-distribution divides the table width
+    /// across N columns and produces values that don't survive a 2-decimal
+    /// cm round-trip — e.g. 22cm / 3 = 7.33cm = 2640000 EMU, off by 1200 EMU
+    /// = 0.13mm imperceptible). Falling back to raw `<n>emu` integers here
+    /// gives unreadable output for the common UI case; the small round-trip
+    /// loss is acceptable for these derived widths.
+    /// </summary>
+    public static string FormatEmuLossy(long emu)
+    {
+        if (emu == 0) return "0cm";
+        // Prefer exact (same as FormatEmu) when available; otherwise fall
+        // back to nearest cm at 2-decimal precision.
+        return TryFormatUnit(emu, EmuPerCmF, "cm")
+            ?? TryFormatUnit(emu, EmuPerPointF, "pt")
+            ?? TryFormatUnit(emu, EmuPerInchF, "in")
+            ?? (emu / EmuPerCmF).ToString("0.##", CultureInfo.InvariantCulture) + "cm";
+    }
+
+    /// <summary>
     /// Format <paramref name="emu"/> in <paramref name="suffix"/> units with a
     /// 2-decimal "0.##" form, returning the string only when it re-parses back to
     /// the exact source EMU (non-lossy round trip). Returns null when the value

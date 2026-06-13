@@ -506,28 +506,55 @@ public partial class PowerPointHandler
     /// </summary>
     private static void ReadSlideHeaderFooter(Slide slide, DocumentNode node)
     {
+        // First, check legacy p:hf on slide (preserved for round-trip
+        // compatibility with files that already carry the invalid element).
         var hfEl = slide.ChildElements.FirstOrDefault(c => c.LocalName == "hf"
             && c.NamespaceUri == "http://schemas.openxmlformats.org/presentationml/2006/main");
-        if (hfEl == null) return;
-        // Walk raw attributes — GetAttribute(name, ns) on a strongly-typed
-        // HeaderFooter throws when the attribute isn't in its declared schema
-        // (the typed surface bound the missing ones via .Footer/.Header/...).
-        // Iterating the live attribute collection works regardless of whether
-        // the element is OpenXmlUnknownElement (post-reload) or HeaderFooter
-        // (same-session, post-Set).
         static string? Bool(string v) => string.IsNullOrEmpty(v) ? null : (v is "1" or "true" ? "true" : "false");
-        foreach (var attr in hfEl.GetAttributes())
+        if (hfEl != null)
         {
-            var b = Bool(attr.Value ?? "");
-            if (b == null) continue;
-            switch (attr.LocalName)
+            // Walk raw attributes — GetAttribute(name, ns) on a strongly-typed
+            // HeaderFooter throws when the attribute isn't in its declared schema
+            // (the typed surface bound the missing ones via .Footer/.Header/...).
+            // Iterating the live attribute collection works regardless of whether
+            // the element is OpenXmlUnknownElement (post-reload) or HeaderFooter
+            // (same-session, post-Set).
+            foreach (var attr in hfEl.GetAttributes())
             {
-                case "ftr": node.Format["showFooter"] = b; break;
-                case "sldNum": node.Format["showSlideNumber"] = b; break;
-                case "dt": node.Format["showDate"] = b; break;
-                case "hdr": node.Format["showHeader"] = b; break;
+                var b = Bool(attr.Value ?? "");
+                if (b == null) continue;
+                switch (attr.LocalName)
+                {
+                    case "ftr": node.Format["showFooter"] = b; break;
+                    case "sldNum": node.Format["showSlideNumber"] = b; break;
+                    case "dt": node.Format["showDate"] = b; break;
+                    case "hdr": node.Format["showHeader"] = b; break;
+                }
             }
         }
+
+        // Fall back to master placeholder presence — that is the rendering
+        // contract per OOXML (p:hf on p:sld is invalid; visibility is implied
+        // by ftr/sldNum/dt placeholders on the master). Only fill keys not
+        // already set by the legacy p:hf path.
+        var slidePart = slide.SlidePart;
+        var layoutPart = slidePart?.SlideLayoutPart;
+        var master = layoutPart?.SlideMasterPart?.SlideMaster;
+        if (master == null) return;
+        var phTypes = master.CommonSlideData?.ShapeTree?
+            .Descendants<PlaceholderShape>()
+            .Where(ph => ph.Type != null)
+            .Select(ph => ph.Type!.Value)
+            .ToHashSet() ?? new HashSet<PlaceholderValues>();
+        if (!node.Format.ContainsKey("showFooter")
+            && phTypes.Contains(PlaceholderValues.Footer))
+            node.Format["showFooter"] = "true";
+        if (!node.Format.ContainsKey("showSlideNumber")
+            && phTypes.Contains(PlaceholderValues.SlideNumber))
+            node.Format["showSlideNumber"] = "true";
+        if (!node.Format.ContainsKey("showDate")
+            && phTypes.Contains(PlaceholderValues.DateAndTime))
+            node.Format["showDate"] = "true";
     }
 
     internal static void ReadBackground(CommonSlideData? cSld, DocumentNode node)

@@ -171,9 +171,20 @@ public partial class PowerPointHandler
             if (!string.IsNullOrEmpty(rest))
             {
                 var segments = GenericXmlQuery.ParsePathSegments(rest);
-                var target = GenericXmlQuery.NavigateByPath(current, segments);
-                if (target != null) current = target;
-                else throw new ArgumentException($"Element not found: {path}. Resolved table[{tblIdx}] on slide[{slideIdx}] but sub-path '{rest}' does not exist. Available children: {DescribeChildren(current)}");
+                // Step-navigate so the error reports children of the deepest
+                // resolved node — e.g. typing /tr[1]/td[1] should hint that
+                // tr's children are tc (not list table's children).
+                OpenXmlElement? deepest = current;
+                foreach (var seg in segments)
+                {
+                    var next = GenericXmlQuery.NavigateByPath(deepest!, new[] { seg });
+                    if (next == null)
+                    {
+                        throw new ArgumentException($"Element not found: {path}. Resolved table[{tblIdx}] on slide[{slideIdx}] but sub-path '{rest}' does not exist. Available children: {DescribeChildren(deepest!)}");
+                    }
+                    deepest = next;
+                }
+                current = deepest!;
             }
             return (slidePart, current);
         }

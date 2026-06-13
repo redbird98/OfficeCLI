@@ -27,4 +27,15 @@ public class DocumentNode
     public Dictionary<string, object?> Format { get; set; } = new();
     [JsonPropertyName("children")]
     public List<DocumentNode> Children { get; set; } = new();
+
+    /// <summary>
+    /// Internal round-trip metadata that intentionally does not surface in
+    /// user-facing Format (CLI Get output, JSON envelopes). Used to carry
+    /// verbatim OOXML fragments (e.g. axisTitle.pPr, catTitle.pPr, series-
+    /// level spPr) between the chart Reader and the batch emitter without
+    /// polluting the public DocumentNode shape. Consumers that need these
+    /// values read from InternalFormat directly.
+    /// </summary>
+    [JsonIgnore]
+    public Dictionary<string, object?> InternalFormat { get; set; } = new();
 }

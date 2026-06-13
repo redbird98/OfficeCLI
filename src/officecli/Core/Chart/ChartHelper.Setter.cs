@@ -119,6 +119,13 @@ internal static partial class ChartHelper
         var chart = chartSpace?.GetFirstChild<C.Chart>();
         if (chart == null) { unsupported.AddRange(properties.Keys); return unsupported; }
 
+        // CONSISTENCY(series-name-alias): rewrite flat `series{N}Name=` to the
+        // dotted `series{N}.name=` form so Set accepts the same surface as
+        // Add (ParseSeriesData calls this for Add). Without this, series2Name
+        // falls through to the legacy `series{N}=` parser and is reported as
+        // unsupported (int.TryParse("2Name") fails).
+        NormalizeFlatSeriesNameAliases(properties);
+
         // R24-3: expand combined "legend.layout=x:N,y:N,w:N,h:N" (and the same
         // form for plotArea/title/trendlineLabel/displayUnitsLabel) into the
         // individual {prefix}.x/y/w/h keys consumed by the dispatch table
@@ -254,7 +261,20 @@ internal static partial class ChartHelper
                     if (legend == null) { unsupported.Add(key); break; }
                     legend.RemoveAllChildren<C.TextProperties>();
                     var parts = value.Split(':');
-                    var fontSize = parts.Length > 0 && int.TryParse(parts[0], out var fs) ? fs * 100 : 1000;
+                    // Strip "pt" suffix and accept fractional sizes (e.g.
+                    // "10.5pt") — without this, int.TryParse("14pt") fails and
+                    // silently falls back to the 10pt default, ignoring the
+                    // user's intended size.
+                    int fontSize = 1000;
+                    if (parts.Length > 0)
+                    {
+                        var fsStr = parts[0].Trim();
+                        if (fsStr.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
+                            fsStr = fsStr[..^2].Trim();
+                        if (double.TryParse(fsStr, System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out var fsD))
+                            fontSize = (int)Math.Round(fsD * 100);
+                    }
                     var color = parts.Length > 1 ? parts[1] : null;
                     var fontName = parts.Length > 2 ? parts[2] : null;
                     var defRp = new Drawing.DefaultRunProperties { FontSize = fontSize };

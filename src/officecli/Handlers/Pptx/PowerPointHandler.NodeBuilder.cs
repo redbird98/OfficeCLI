@@ -259,10 +259,12 @@ public partial class PowerPointHandler
             grpNode.Format["childOffset"] = $"{grpChOff!.X?.Value ?? 0},{grpChOff.Y?.Value ?? 0}";
         if (grpChExtDiverges)
             grpNode.Format["childExtent"] = $"{grpChExt!.Cx?.Value ?? 0},{grpChExt.Cy?.Value ?? 0}";
-        var grpFillColor = ReadColorFromFill(grp.GroupShapeProperties?.GetFirstChild<Drawing.SolidFill>());
-        if (grpFillColor != null) grpNode.Format["fill"] = grpFillColor;
-        else if (grp.GroupShapeProperties?.GetFirstChild<Drawing.NoFill>() != null) grpNode.Format["fill"] = "none";
-        else if (grp.GroupShapeProperties?.GetFirstChild<Drawing.GradientFill>() != null) grpNode.Format["fill"] = "gradient";
+        // Note: p:grpSpPr has no fill child per OOXML CT_GroupShapeProperties
+        // (only xfrm/scene3d/extLst), so even if a legacy file carries a
+        // stray fill on grpSpPr, PowerPoint silently ignores it. Don't
+        // surface a fill key on group Get — it would mislead callers into
+        // thinking a fill on the group means something visible. Apply fill
+        // to the child shapes instead.
         var grpZIdx = contentElements.IndexOf(grp);
         if (grpZIdx >= 0) grpNode.Format["zorder"] = grpZIdx + 1;
         // Hyperlink (nvGrpSpPr/cNvPr/a:hlinkClick) — same slot as shape/picture.
@@ -329,11 +331,11 @@ public partial class PowerPointHandler
         var creationId = ReadCNvPrCreationId(gf);
         if (creationId != null) node.Format["extLst.creationId"] = creationId;
         var offset = gf.Transform?.Offset;
-        if (offset?.X != null) node.Format["x"] = FormatEmu(offset.X.Value);
-        if (offset?.Y != null) node.Format["y"] = FormatEmu(offset.Y.Value);
+        if (offset?.X != null) node.Format["x"] = Core.EmuConverter.FormatEmuLossy(offset.X.Value);
+        if (offset?.Y != null) node.Format["y"] = Core.EmuConverter.FormatEmuLossy(offset.Y.Value);
         var extents = gf.Transform?.Extents;
-        if (extents?.Cx != null) node.Format["width"] = FormatEmu(extents.Cx.Value);
-        if (extents?.Cy != null) node.Format["height"] = FormatEmu(extents.Cy.Value);
+        if (extents?.Cx != null) node.Format["width"] = Core.EmuConverter.FormatEmuLossy(extents.Cx.Value);
+        if (extents?.Cy != null) node.Format["height"] = Core.EmuConverter.FormatEmuLossy(extents.Cy.Value);
         if (gf.Parent is ShapeTree zTree)
         {
             var contentEls = zTree.ChildElements
@@ -379,7 +381,7 @@ public partial class PowerPointHandler
 
         var gridCols = table?.TableGrid?.Elements<Drawing.GridColumn>().ToList();
         if (gridCols != null && gridCols.Count > 0)
-            node.Format["colWidths"] = string.Join(",", gridCols.Select(gc => gc.Width?.Value is long w ? FormatEmu(w) : "0"));
+            node.Format["colWidths"] = string.Join(",", gridCols.Select(gc => gc.Width?.Value is long w ? Core.EmuConverter.FormatEmuLossy(w) : "0"));
 
         // Table style
         var tblPr = table?.GetFirstChild<Drawing.TableProperties>();
@@ -413,14 +415,14 @@ public partial class PowerPointHandler
         var offset = gf.Transform?.Offset;
         if (offset != null)
         {
-            if (offset.X is not null) node.Format["x"] = FormatEmu(offset.X!);
-            if (offset.Y is not null) node.Format["y"] = FormatEmu(offset.Y!);
+            if (offset.X is not null) node.Format["x"] = Core.EmuConverter.FormatEmuLossy(offset.X!);
+            if (offset.Y is not null) node.Format["y"] = Core.EmuConverter.FormatEmuLossy(offset.Y!);
         }
         var extents = gf.Transform?.Extents;
         if (extents != null)
         {
-            if (extents.Cx is not null) node.Format["width"] = FormatEmu(extents.Cx!);
-            if (extents.Cy is not null) node.Format["height"] = FormatEmu(extents.Cy!);
+            if (extents.Cx is not null) node.Format["width"] = Core.EmuConverter.FormatEmuLossy(extents.Cx!);
+            if (extents.Cy is not null) node.Format["height"] = Core.EmuConverter.FormatEmuLossy(extents.Cy!);
         }
 
         // CONSISTENCY(zorder): mirror shape/picture/connector — emit when
@@ -449,7 +451,7 @@ public partial class PowerPointHandler
 
                 // Row height
                 if (row.Height?.HasValue == true)
-                    rowNode.Format["height"] = FormatEmu(row.Height.Value);
+                    rowNode.Format["height"] = Core.EmuConverter.FormatEmuLossy(row.Height.Value);
 
                 if (depth > 1)
                 {
@@ -2351,23 +2353,54 @@ public partial class PowerPointHandler
         // would fail on every pptx picture. contentType/fileSize follow the
         // same pattern as the Query picture branch so Get and Query agree.
         var embedRel = pic.BlipFill?.Blip?.Embed?.Value;
-        if (!string.IsNullOrEmpty(embedRel))
+        // For video/audio nodes, BlipFill.Blip.Embed points to the poster
+        // thumbnail image (PNG), not the media itself — reading its
+        // contentType/fileSize would surface "image/png" + ~70 bytes for a
+        // 100MB mp4. Prefer the media rel (VideoFromFile.Link /
+        // AudioFromFile.Link) on the nvPr so the readback reflects the
+        // actual media part. Fall back to the embed rel for plain pictures.
+        string? mediaRel = null;
+        if (isVideo) mediaRel = nvPr?.GetFirstChild<Drawing.VideoFromFile>()?.Link?.Value;
+        else if (isAudio) mediaRel = nvPr?.GetFirstChild<Drawing.AudioFromFile>()?.Link?.Value;
+        var sourceRel = mediaRel ?? embedRel;
+        if (!string.IsNullOrEmpty(sourceRel))
         {
-            node.Format["relId"] = embedRel!;
+            node.Format["relId"] = sourceRel!;
             if (slidePart != null)
             {
                 try
                 {
-                    var imgPart = slidePart.GetPartById(embedRel!);
-                    if (imgPart != null)
+                    // Media rels (video/audio) live in the
+                    // DataPartReferenceRelationships collection and resolve
+                    // to a MediaDataPart, not a regular OpenXmlPart — the
+                    // standard GetPartById throws on them. Try the media
+                    // relationship surface first; fall back to the part-by-id
+                    // path for picture embeds.
+                    if (mediaRel != null)
                     {
-                        node.Format["contentType"] = imgPart.ContentType;
-                        // Dispose the stream so the underlying ZipArchiveEntry is
-                        // released — otherwise a subsequent DeletePart (e.g. when
-                        // Set replaces a picture's source) throws "Cannot delete an
-                        // entry currently open for writing".
-                        using var s = imgPart.GetStream();
-                        node.Format["fileSize"] = s.Length;
+                        var dpRel = slidePart.DataPartReferenceRelationships
+                            .FirstOrDefault(r => r.Id == mediaRel);
+                        var dataPart = dpRel?.DataPart;
+                        if (dataPart != null)
+                        {
+                            node.Format["contentType"] = dataPart.ContentType;
+                            using var s = dataPart.GetStream();
+                            node.Format["fileSize"] = s.Length;
+                        }
+                    }
+                    else
+                    {
+                        var srcPart = slidePart.GetPartById(sourceRel!);
+                        if (srcPart != null)
+                        {
+                            node.Format["contentType"] = srcPart.ContentType;
+                            // Dispose the stream so the underlying ZipArchiveEntry is
+                            // released — otherwise a subsequent DeletePart (e.g. when
+                            // Set replaces a picture's source) throws "Cannot delete an
+                            // entry currently open for writing".
+                            using var s = srcPart.GetStream();
+                            node.Format["fileSize"] = s.Length;
+                        }
                     }
                 }
                 catch { /* rel may not resolve on the slide part — leave as relId-only */ }
@@ -2686,20 +2719,25 @@ public partial class PowerPointHandler
         var spPr = new ShapeProperties();
         if (isTitle)
         {
-            // Default title position: top-center area of standard 16:9 slide
+            // Default title position: top-center area of standard 16:9 slide.
+            // EMU values picked to round-trip exactly through FormatEmu in pt
+            // (12700 EMU/pt) so Get readback is unit-qualified, not raw emu.
             spPr.Transform2D = new Drawing.Transform2D
             {
-                Offset = new Drawing.Offset { X = 838200, Y = 365125 },    // ~2.33cm, ~1.01cm
-                Extents = new Drawing.Extents { Cx = 10515600, Cy = 1325563 } // ~29.21cm, ~3.68cm
+                Offset = new Drawing.Offset { X = 838200, Y = 365125 },    // 66pt, 28.75pt
+                Extents = new Drawing.Extents { Cx = 10515600, Cy = 1320800 } // 828pt, 104pt
             };
         }
         else
         {
-            // Default body/content position: below title
+            // Default body/content position: below title.
+            // Cx=10515600=828pt, Cy=4349750=342.5pt, Y=1825625=143.75pt — all
+            // pt-exact so FormatEmu emits clean readback (was Cy=4351338 →
+            // 342.625pt, which fell back to raw emu).
             spPr.Transform2D = new Drawing.Transform2D
             {
-                Offset = new Drawing.Offset { X = 838200, Y = 1825625 },   // ~2.33cm, ~5.07cm
-                Extents = new Drawing.Extents { Cx = 10515600, Cy = 4351338 } // ~29.21cm, ~12.09cm
+                Offset = new Drawing.Offset { X = 838200, Y = 1825625 },   // 66pt, 143.75pt
+                Extents = new Drawing.Extents { Cx = 10515600, Cy = 4349750 } // 828pt, 342.5pt
             };
         }
         shape.ShapeProperties = spPr;

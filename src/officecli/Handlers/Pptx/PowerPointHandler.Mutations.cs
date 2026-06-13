@@ -741,6 +741,25 @@ public partial class PowerPointHandler
                 return $"/slide[{sameIdx}]";
             }
 
+            // --to /slide[K] without explicit after/before/index: treat as a
+            // positional move to slot K. Without this branch the source was
+            // removed and appended at end (silent no-op when K equals current
+            // position; misleading "no movement" otherwise). Resolved against
+            // the post-remove list so K is the user-visible 1-based final
+            // position the source should occupy.
+            int? toIdxFromTarget = null;
+            if (afterAnchor == null && beforeAnchor == null && !index.HasValue
+                && !string.IsNullOrEmpty(targetParentPath))
+            {
+                var toMatch = Regex.Match(targetParentPath, @"^/slide\[(\d+)\]$");
+                if (toMatch.Success)
+                {
+                    var ti = int.Parse(toMatch.Groups[1].Value);
+                    if (ti < 1) throw new ArgumentException($"Invalid --to target: {targetParentPath}");
+                    toIdxFromTarget = ti;
+                }
+            }
+
             slideId.Remove();
 
             if (afterAnchor != null)
@@ -752,6 +771,17 @@ public partial class PowerPointHandler
                 var remaining = slideIdList.Elements<SlideId>().ToList();
                 if (index.Value >= 0 && index.Value < remaining.Count)
                     remaining[index.Value].InsertBeforeSelf(slideId);
+                else
+                    slideIdList.AppendChild(slideId);
+            }
+            else if (toIdxFromTarget.HasValue)
+            {
+                // Insert before the slide currently at (1-based) target index.
+                // Past-end target appends.
+                var remaining = slideIdList.Elements<SlideId>().ToList();
+                var zeroBased = toIdxFromTarget.Value - 1;
+                if (zeroBased >= 0 && zeroBased < remaining.Count)
+                    remaining[zeroBased].InsertBeforeSelf(slideId);
                 else
                     slideIdList.AppendChild(slideId);
             }
@@ -1559,6 +1589,47 @@ public partial class PowerPointHandler
         var srcSlide = GetSlide(srcSlidePart);
         newSlidePart.Slide = (Slide)srcSlide.CloneNode(true);
 
+        // 3b. Reassign every cNvPr id on the cloned slide so the new slide
+        // doesn't share element IDs with the source. Real PowerPoint rejects
+        // a deck with overlapping cNvPr ids across slides (422 "could not
+        // open the file"); the SDK validator doesn't catch this. The
+        // shape-tree-root nvGrpSpPr cNvPr stays as-is (it's a per-slide
+        // wrapper, not a sibling), matching AcquireShapeId's exception list.
+        var newShapeTree = newSlidePart.Slide.CommonSlideData?.ShapeTree;
+        var shapeIdRemap = new Dictionary<uint, uint>();
+        if (newShapeTree != null)
+        {
+            var rootNvPr = newShapeTree.GetFirstChild<NonVisualGroupShapeProperties>()
+                ?.GetFirstChild<NonVisualDrawingProperties>();
+            foreach (var nvPr in newShapeTree.Descendants<NonVisualDrawingProperties>().ToList())
+            {
+                if (ReferenceEquals(nvPr, rootNvPr)) continue;
+                if (nvPr.Id?.HasValue != true) continue;
+                var oldId = nvPr.Id.Value;
+                var newId = GenerateUniqueShapeId(newShapeTree);
+                nvPr.Id = newId;
+                shapeIdRemap[oldId] = newId;
+            }
+
+            // R46: connector endpoints (a:stCxn/@id, a:endCxn/@id) reference
+            // shape IDs by number. Without remapping, the cloned connector's
+            // stCxn/endCxn still point at slide[1]'s shapes — connector draws
+            // via stored geometry but is logically dangling, so dragging a
+            // shape on slide[2] won't move it.
+            foreach (var stCxn in newShapeTree.Descendants<DocumentFormat.OpenXml.Drawing.StartConnection>())
+            {
+                if (stCxn.Id?.HasValue == true
+                    && shapeIdRemap.TryGetValue(stCxn.Id.Value, out var mappedSt))
+                    stCxn.Id = mappedSt;
+            }
+            foreach (var endCxn in newShapeTree.Descendants<DocumentFormat.OpenXml.Drawing.EndConnection>())
+            {
+                if (endCxn.Id?.HasValue == true
+                    && shapeIdRemap.TryGetValue(endCxn.Id.Value, out var mappedEnd))
+                    endCxn.Id = mappedEnd;
+            }
+        }
+
         // 4. Copy all referenced parts (images, charts, embedded objects, media)
         CopySlideParts(srcSlidePart, newSlidePart);
 
@@ -1621,9 +1692,41 @@ public partial class PowerPointHandler
             // Skip NotesSlidePart (handled separately)
             if (part.OpenXmlPart is NotesSlidePart) continue;
 
+            // Charts and embedded objects MUST be deep-copied — both slides
+            // sharing the same ChartPart instance makes real PowerPoint reject
+            // the file (422) even though the SDK validator accepts it. Images
+            // and media are safe to share (truly read-only after creation).
+            if (NeedsDeepCopy(part.OpenXmlPart))
+            {
+                try
+                {
+                    var newPart = CreateNewTypedPartForDeepCopy(target, part.OpenXmlPart);
+                    using (var stream = part.OpenXmlPart.GetStream())
+                        newPart.FeedData(stream);
+                    DeepCopySubParts(part.OpenXmlPart, newPart);
+                    var newRelId = target.GetIdOfPart(newPart);
+                    if (newRelId != part.RelationshipId)
+                        rIdMap[part.RelationshipId] = newRelId;
+                }
+                catch
+                {
+                    // Best-effort fallback: share the part — better than dropping
+                    // the relationship entirely. Real Office may still complain
+                    // but at least the file structure is preserved.
+                    try
+                    {
+                        var fallbackRelId = target.CreateRelationshipToPart(part.OpenXmlPart);
+                        if (fallbackRelId != part.RelationshipId)
+                            rIdMap[part.RelationshipId] = fallbackRelId;
+                    }
+                    catch { }
+                }
+                continue;
+            }
+
             try
             {
-                // Try to add the same part (shares the underlying data)
+                // Share the part (images / media — safe to share).
                 var newRelId = target.CreateRelationshipToPart(part.OpenXmlPart);
                 if (newRelId != part.RelationshipId)
                     rIdMap[part.RelationshipId] = newRelId;
@@ -1664,6 +1767,114 @@ public partial class PowerPointHandler
         {
             RemapRelationshipIds(target.Slide, rIdMap);
             target.Slide.Save();
+        }
+    }
+
+    /// <summary>
+    /// Parts that carry per-slide mutable data and must be cloned (not shared)
+    /// when a slide is duplicated. ChartParts especially: real PowerPoint
+    /// rejects (422) a file in which two slides point to the same chart part,
+    /// even though the SDK validator passes it. Embedded packages / OLE
+    /// objects have the same constraint. Image and media parts are immutable
+    /// after creation and safe to share.
+    /// </summary>
+    /// <summary>
+    /// Create a fresh part of the same concrete type as <paramref name="source"/>
+    /// hung off <paramref name="parent"/>. Using the strongly-typed AddNewPart
+    /// overload is critical: the generic `AddNewPart&lt;OpenXmlPart&gt;(contentType)`
+    /// path can reuse an existing URI (sharing the underlying part), which is
+    /// exactly the bug we're trying to fix — two slides ending up pointing at
+    /// `chart1.xml` despite our deep-copy intent.
+    /// </summary>
+    private static OpenXmlPart CreateNewTypedPartForDeepCopy(OpenXmlPartContainer parent, OpenXmlPart source)
+    {
+        return source switch
+        {
+            DocumentFormat.OpenXml.Packaging.ChartPart
+                when parent is SlidePart sp => sp.AddNewPart<DocumentFormat.OpenXml.Packaging.ChartPart>(),
+            DocumentFormat.OpenXml.Packaging.ChartPart
+                when parent is DocumentFormat.OpenXml.Packaging.ChartDrawingPart cdp
+                => cdp.AddNewPart<DocumentFormat.OpenXml.Packaging.ChartPart>(),
+            DocumentFormat.OpenXml.Packaging.ExtendedChartPart
+                when parent is SlidePart sp2 => sp2.AddNewPart<DocumentFormat.OpenXml.Packaging.ExtendedChartPart>(),
+            DocumentFormat.OpenXml.Packaging.EmbeddedPackagePart
+                => parent.AddNewPart<DocumentFormat.OpenXml.Packaging.EmbeddedPackagePart>(source.ContentType),
+            DocumentFormat.OpenXml.Packaging.EmbeddedObjectPart
+                => parent.AddNewPart<DocumentFormat.OpenXml.Packaging.EmbeddedObjectPart>(source.ContentType),
+            DocumentFormat.OpenXml.Packaging.DiagramDataPart
+                when parent is SlidePart sp3 => sp3.AddNewPart<DocumentFormat.OpenXml.Packaging.DiagramDataPart>(),
+            DocumentFormat.OpenXml.Packaging.DiagramColorsPart
+                when parent is SlidePart sp4 => sp4.AddNewPart<DocumentFormat.OpenXml.Packaging.DiagramColorsPart>(),
+            DocumentFormat.OpenXml.Packaging.DiagramLayoutDefinitionPart
+                when parent is SlidePart sp5 => sp5.AddNewPart<DocumentFormat.OpenXml.Packaging.DiagramLayoutDefinitionPart>(),
+            DocumentFormat.OpenXml.Packaging.DiagramStylePart
+                when parent is SlidePart sp6 => sp6.AddNewPart<DocumentFormat.OpenXml.Packaging.DiagramStylePart>(),
+            DocumentFormat.OpenXml.Packaging.DiagramPersistLayoutPart
+                when parent is SlidePart sp7 => sp7.AddNewPart<DocumentFormat.OpenXml.Packaging.DiagramPersistLayoutPart>(),
+            // Generic fallback — content-type addressed. Less reliable for
+            // uniqueness but at least the method doesn't throw on unknown
+            // parent/child combinations.
+            _ => parent.AddNewPart<OpenXmlPart>(source.ContentType),
+        };
+    }
+
+    private static bool NeedsDeepCopy(OpenXmlPart part) => part is
+        DocumentFormat.OpenXml.Packaging.ChartPart
+        or DocumentFormat.OpenXml.Packaging.ExtendedChartPart
+        or DocumentFormat.OpenXml.Packaging.EmbeddedPackagePart
+        or DocumentFormat.OpenXml.Packaging.EmbeddedObjectPart
+        or DocumentFormat.OpenXml.Packaging.DiagramDataPart
+        or DocumentFormat.OpenXml.Packaging.DiagramColorsPart
+        or DocumentFormat.OpenXml.Packaging.DiagramLayoutDefinitionPart
+        or DocumentFormat.OpenXml.Packaging.DiagramStylePart
+        or DocumentFormat.OpenXml.Packaging.DiagramPersistLayoutPart;
+
+    /// <summary>
+    /// Recursively deep-copy sub-parts (e.g. a ChartPart's embedded workbook,
+    /// chart style, chart color style) into the newly-cloned part. Each
+    /// sub-part either deep-copies (its own NeedsDeepCopy class) or shares
+    /// (everything else — images bundled with the chart, etc.).
+    /// </summary>
+    private static void DeepCopySubParts(OpenXmlPart source, OpenXmlPart target)
+    {
+        var subRIdMap = new Dictionary<string, string>();
+        foreach (var sub in source.Parts)
+        {
+            try
+            {
+                if (NeedsDeepCopy(sub.OpenXmlPart))
+                {
+                    var newSubPart = CreateNewTypedPartForDeepCopy(target, sub.OpenXmlPart);
+                    using (var s = sub.OpenXmlPart.GetStream())
+                        newSubPart.FeedData(s);
+                    DeepCopySubParts(sub.OpenXmlPart, newSubPart);
+                    var newId = target.GetIdOfPart(newSubPart);
+                    if (newId != sub.RelationshipId)
+                        subRIdMap[sub.RelationshipId] = newId;
+                }
+                else
+                {
+                    var newId = target.CreateRelationshipToPart(sub.OpenXmlPart);
+                    if (newId != sub.RelationshipId)
+                        subRIdMap[sub.RelationshipId] = newId;
+                }
+            }
+            catch { /* best-effort copy */ }
+        }
+        if (subRIdMap.Count > 0)
+        {
+            // Rewrite rId references inside the just-cloned part's root XML
+            // when sub-part rIds drifted. Charts reference workbook / style
+            // sub-parts via r:id attributes inside the chart XML.
+            try
+            {
+                if (target.RootElement is OpenXmlPartRootElement root)
+                {
+                    RemapRelationshipIds(root, subRIdMap);
+                    root.Save();
+                }
+            }
+            catch { /* not all parts have a typed RootElement */ }
         }
     }
 
@@ -1753,13 +1964,31 @@ public partial class PowerPointHandler
                 {
                     var referencedPart = sourcePart.GetPartById(oldRelId);
                     string newRelId;
-                    try
+                    // R47: parts with per-slide mutable content (ChartPart,
+                    // EmbeddedPackagePart, Diagram*) must be deep-copied when
+                    // an element referencing them is copied across slides.
+                    // Sharing the same chart1.xml between two slides makes
+                    // real PowerPoint reject the file with 422 AND causes
+                    // edits on one slide to mutate the other. Mirrors the
+                    // NeedsDeepCopy gate in CopySlideParts from R45.
+                    if (NeedsDeepCopy(referencedPart))
                     {
-                        newRelId = targetPart.GetIdOfPart(referencedPart);
+                        var newPart = CreateNewTypedPartForDeepCopy(targetPart, referencedPart);
+                        using (var s = referencedPart.GetStream())
+                            newPart.FeedData(s);
+                        DeepCopySubParts(referencedPart, newPart);
+                        newRelId = targetPart.GetIdOfPart(newPart);
                     }
-                    catch (ArgumentException)
+                    else
                     {
-                        newRelId = targetPart.CreateRelationshipToPart(referencedPart);
+                        try
+                        {
+                            newRelId = targetPart.GetIdOfPart(referencedPart);
+                        }
+                        catch (ArgumentException)
+                        {
+                            newRelId = targetPart.CreateRelationshipToPart(referencedPart);
+                        }
                     }
 
                     if (newRelId != oldRelId)

@@ -750,6 +750,29 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
+    /// Ensure an outline has a fill child element. PowerPoint silently
+    /// drops a bare <a:ln w="N"/> with no fill descendant (no SolidFill /
+    /// NoFill / GradientFill / PatternFill), rendering the shape borderless
+    /// despite the width attribute. Called by callers that set width without
+    /// also setting an explicit line color, so the user's intent ("draw a
+    /// 2pt border") survives to a visible stroke.
+    /// </summary>
+    private static void EnsureOutlineHasFill(Drawing.Outline outline)
+    {
+        if (outline.GetFirstChild<Drawing.SolidFill>() != null
+            || outline.GetFirstChild<Drawing.NoFill>() != null
+            || outline.GetFirstChild<Drawing.GradientFill>() != null
+            || outline.GetFirstChild<Drawing.PatternFill>() != null)
+            return;
+        // Default to black — matches PowerPoint UI behavior when a user
+        // sets "Weight" but not "Color" on Format Shape > Line.
+        var solid = new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = "000000" });
+        // SolidFill must appear before PresetDash/CustomDash/LineJoin/etc.
+        // per CT_LineProperties schema order. Insert at the head of outline.
+        outline.InsertAt(solid, 0);
+    }
+
+    /// <summary>
     /// Set the extrusion color (<a:extrusionClr>) or contour color
     /// (<a:contourClr>) on the shape's sp3d child. Accepts the same
     /// color forms the rest of the handler accepts (hex with or without

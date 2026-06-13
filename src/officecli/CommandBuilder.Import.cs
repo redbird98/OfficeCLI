@@ -237,8 +237,11 @@ static partial class CommandBuilder
                 if (Path.GetExtension(file).Equals(".pptx", StringComparison.OrdinalIgnoreCase))
                 {
                     Console.WriteLine($"  totalSlides: 0");
-                    Console.WriteLine($"  slideWidth: {Core.EmuConverter.FormatEmu(12192000)}");
-                    Console.WriteLine($"  slideHeight: {Core.EmuConverter.FormatEmu(6858000)}");
+                    // Pair the unit so both dimensions agree (matches Get /
+                    // readback after R40 — paired emit avoids mixing pt+cm).
+                    var (cWStr, cHStr) = Core.EmuConverter.FormatEmuPaired(12192000, 6858000);
+                    Console.WriteLine($"  slideWidth: {cWStr}");
+                    Console.WriteLine($"  slideHeight: {cHStr}");
                 }
             }
             return 0;

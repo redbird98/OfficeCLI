@@ -1412,20 +1412,25 @@ public partial class PowerPointHandler
                 SlidePart animSlidePart;
                 DocumentFormat.OpenXml.OpenXmlElement animTarget;
                 bool isChartTarget = false;
+                int parentSlideIdx;
+                int parentPositionalIdx;
+                string parentKind;
                 if (animChartMatch.Success)
                 {
-                    var slideIdx = int.Parse(animChartMatch.Groups[1].Value);
-                    var chartIdx = int.Parse(animChartMatch.Groups[2].Value);
-                    var (sp, gf, _, _) = ResolveChart(slideIdx, chartIdx);
+                    parentSlideIdx = int.Parse(animChartMatch.Groups[1].Value);
+                    parentPositionalIdx = int.Parse(animChartMatch.Groups[2].Value);
+                    parentKind = "chart";
+                    var (sp, gf, _, _) = ResolveChart(parentSlideIdx, parentPositionalIdx);
                     animSlidePart = sp;
                     animTarget = gf;
                     isChartTarget = true;
                 }
                 else
                 {
-                    var animSlideIdx = int.Parse(animMatch.Groups[1].Value);
-                    var animShapeIdx = int.Parse(animMatch.Groups[2].Value);
-                    var (sp, sh) = ResolveShape(animSlideIdx, animShapeIdx);
+                    parentSlideIdx = int.Parse(animMatch.Groups[1].Value);
+                    parentPositionalIdx = int.Parse(animMatch.Groups[2].Value);
+                    parentKind = "shape";
+                    var (sp, sh) = ResolveShape(parentSlideIdx, parentPositionalIdx);
                     animSlidePart = sp;
                     animTarget = sh;
                     // chartBuild is meaningless on plain shapes — hard-reject up
@@ -1559,7 +1564,14 @@ public partial class PowerPointHandler
                 // fly/swivel that emit multiple p:anim per single user effect,
                 // returning a stale path like animation[2] for the first add.
                 var animCount = EnumerateShapeAnimationCTns(animSlidePart, animTarget).Count;
-                return $"{parentPath}/animation[{animCount}]";
+                // CONSISTENCY(query-path-roundtrip): rebuild parent segment so the
+                // returned path uses @id= form when the target has a cNvPr id —
+                // matches AddShape/AddPicture/etc which always emit the id form
+                // via BuildElementPathSegment. ResolveIdPath at Add.cs:37 already
+                // collapsed @id= input to a positional [N] form before dispatch,
+                // so reconstructing here is the only way to surface @id= back.
+                var rebuiltParent = $"/slide[{parentSlideIdx}]/{BuildElementPathSegment(parentKind, animTarget, parentPositionalIdx)}";
+                return $"{rebuiltParent}/animation[{animCount}]";
     }
 
     // L3 sub-B: motion-path animation handler (class=motion). Supports a small
@@ -1633,6 +1645,16 @@ public partial class PowerPointHandler
         GetSlide(slidePart).Save();
 
         var animCount = EnumerateShapeAnimationCTns(slidePart, shape).Count;
+        // CONSISTENCY(query-path-roundtrip): same as AddAnimation — rebuild
+        // parent shape segment so @id= form survives ResolveIdPath collapse.
+        var motionMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]/shape\[(\d+)\]$");
+        if (motionMatch.Success)
+        {
+            var motionSlideIdx = int.Parse(motionMatch.Groups[1].Value);
+            var motionPosIdx = int.Parse(motionMatch.Groups[2].Value);
+            var motionRebuilt = $"/slide[{motionSlideIdx}]/{BuildElementPathSegment("shape", shape, motionPosIdx)}";
+            return $"{motionRebuilt}/animation[{animCount}]";
+        }
         return $"{parentPath}/animation[{animCount}]";
     }
 

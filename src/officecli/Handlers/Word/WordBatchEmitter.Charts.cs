@@ -12,6 +12,19 @@ public static partial class WordBatchEmitter
         // string. Reconstruct that string from the series children Get
         // exposes; categories come from the chart's own Format key.
         var props = FilterEmittableProps(spec.Format);
+        // CONSISTENCY(internal-roundtrip-keys): pull chart-level verbatim
+        // XML metadata (axisTitle.pPr / catTitle.pPr) off InternalFormat
+        // so the dump→replay path still carries them. They live off the
+        // public Format dict to keep user-facing Get output free of raw
+        // OOXML strings, but the Setter consumes them post-build to
+        // restore axis-title paragraph styling.
+        foreach (var (ik, iv) in spec.InternalFormat)
+        {
+            if (iv == null) continue;
+            var ivs = iv.ToString();
+            if (string.IsNullOrEmpty(ivs)) continue;
+            if (!props.ContainsKey(ik)) props[ik] = ivs;
+        }
         // Strip Get-only / SDK-managed keys that AddChart neither expects
         // nor accepts.
         props.Remove("id");
@@ -117,7 +130,11 @@ public static partial class WordBatchEmitter
             // captured spPr; the per-point color key is fully replaced by the
             // verbatim dPt list. Without this gate the round-trip kept dropping
             // <a:ln>/<a:outerShdw>/<c:dPt>/rich <c:dLbls>.
-            bool hasVerbatimSpPr = s.Format.TryGetValue("spPr", out var spObj) && spObj is string sp && sp.Length > 0;
+            // CONSISTENCY(internal-roundtrip-keys): series spPr verbatim XML
+            // lives on InternalFormat (kept off public Format so user-facing
+            // Get output doesn't expose raw OOXML). Reader writes there;
+            // emitters read from there.
+            bool hasVerbatimSpPr = s.InternalFormat.TryGetValue("spPr", out var spObj) && spObj is string sp && sp.Length > 0;
             bool hasVerbatimDpt = s.Format.TryGetValue("dPt", out var dpObj) && dpObj is string dp && dp.Length > 0;
             bool hasVerbatimDLbls = s.Format.TryGetValue("dLbls", out var dlbObj) && dlbObj is string dlb && dlb.Length > 0;
             if (hasVerbatimSpPr)

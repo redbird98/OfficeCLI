@@ -288,7 +288,8 @@ public partial class PowerPointHandler
             bool isRight = key.StartsWith("border.right");
             bool isInsideH = key.StartsWith("border.horizontal") || key.StartsWith("border.insideh");
             bool isInsideV = key.StartsWith("border.vertical")   || key.StartsWith("border.insidev");
-            bool isDiag = key.StartsWith("border.tl2br") || key.StartsWith("border.tr2bl");
+            bool isDiag = key.StartsWith("border.tl2br") || key.StartsWith("border.tr2bl")
+                       || key.StartsWith("border.diagdown") || key.StartsWith("border.diagup");
 
             // Split-form suffix preserved on cell-level key (e.g. ".width" / ".color" / ".dash").
             string splitSuffix = "";
@@ -310,7 +311,10 @@ public partial class PowerPointHandler
             }
             if (isDiag)
             {
-                var diagEdge = key.StartsWith("border.tl2br") ? "border.tl2br" : "border.tr2bl";
+                // diagDown = top-left → bottom-right slope (tl2br). diagUp = tr2bl.
+                var diagEdge = (key.StartsWith("border.tl2br") || key.StartsWith("border.diagdown"))
+                    ? "border.tl2br"
+                    : "border.tr2bl";
                 foreach (var row in rows)
                     foreach (var cell in row.Elements<Drawing.TableCell>())
                         ApplyToCell(cell, diagEdge);
