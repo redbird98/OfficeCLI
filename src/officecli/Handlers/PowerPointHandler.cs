@@ -567,6 +567,54 @@ public partial class PowerPointHandler : IDocumentHandler
         presentation.Save();
     }
 
+    // PowerPoint requires every <p:sldMasterId>/@id AND every
+    // <p:sldLayoutId>/@id (across all masters) to be unique within one shared
+    // id space — PowerPoint's own decks number them as a single monotonic run
+    // (master=N, its layouts=N+1.., next master continues after the last
+    // layout). The SDK and our GrowSlideMasterParts pick master ids starting at
+    // 2147483648 while only avoiding existing *master* ids, so a grown master
+    // can land on a value a source master's sldLayoutIdLst already uses
+    // (e.g. master2 id 2147483649 == master1 layout1 id 2147483649). The SDK
+    // schema-validates this duplicate fine, but PowerPoint rejects the package
+    // with 0x80070570 ("file or directory corrupted"). Reconcile at save: keep
+    // layout ids fixed (slides never reference them), reassign only colliding
+    // master ids to fresh unused values. Runs once per save cycle, after every
+    // raw-set has landed the masters' real sldLayoutIdLst.
+    private void ReconcileSlideMasterIds()
+    {
+        var presentation = _doc.PresentationPart?.Presentation;
+        var sldMasterIdLst = presentation?.SlideMasterIdList;
+        if (presentation == null || sldMasterIdLst == null) return;
+
+        // Collect every layout id (these stay put) plus seed with the values
+        // we will keep for masters as we walk them.
+        var used = new HashSet<uint>();
+        foreach (var mp in _doc.PresentationPart!.SlideMasterParts)
+        {
+            var layoutIds = mp.SlideMaster?.SlideLayoutIdList?.Elements<SlideLayoutId>();
+            if (layoutIds == null) continue;
+            foreach (var lid in layoutIds)
+                if (lid.Id?.Value is uint v) used.Add(v);
+        }
+
+        bool changed = false;
+        foreach (var smId in sldMasterIdLst.Elements<SlideMasterId>())
+        {
+            uint id = smId.Id?.Value ?? 2147483648u;
+            if (used.Contains(id))
+            {
+                uint repl = 2147483648u;
+                while (used.Contains(repl)) repl++;
+                smId.Id = repl;
+                id = repl;
+                changed = true;
+            }
+            used.Add(id);
+        }
+
+        if (changed) presentation.Save();
+    }
+
     public (string RelId, string PartPath) AddPart(string parentPartPath, string partType, Dictionary<string, string>? properties = null)
     {
         var presentationPart = _doc.PresentationPart
@@ -1492,6 +1540,8 @@ public partial class PowerPointHandler : IDocumentHandler
         // out to disk so external readers see the latest bytes immediately.
         if (Modified)
         {
+            try { ReconcileSlideMasterIds(); }
+            catch { /* best-effort id reconcile */ }
             try { OfficeCli.Core.OfficeCliMetadata.StampOnSave(_doc); }
             catch { /* best-effort audit trail */ }
         }
@@ -1508,6 +1558,8 @@ public partial class PowerPointHandler : IDocumentHandler
         // truncate to zero bytes and look like a corrupted zip on reopen.
         if (Modified)
         {
+            try { ReconcileSlideMasterIds(); }
+            catch { /* best-effort id reconcile */ }
             try { OfficeCli.Core.OfficeCliMetadata.StampOnSave(_doc); }
             catch { /* best-effort audit trail */ }
         }
