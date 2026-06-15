@@ -91,11 +91,19 @@ public partial class PowerPointHandler
             };
         }
 
-        // Otherwise treat as external absolute URI
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        // Otherwise treat as external. Both absolute URIs (http/mailto/file/…)
+        // AND relative file targets round-trip: an OOXML external hyperlink may
+        // carry a relative target — a link to a local document beside the deck,
+        // e.g. "项目指南\合同书.docx" with TargetMode="External". PowerPoint
+        // authors these for "link to existing file" hyperlinks; rejecting them
+        // dropped the entire run/placeholder on replay (content loss, not just a
+        // dead link). RequireSafeScheme below no-ops on schemeless relative
+        // targets and still blocks dangerous absolute schemes.
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            && !Uri.TryCreate(url, UriKind.Relative, out uri))
             throw new ArgumentException(
                 $"Invalid hyperlink URL '{url}'. Expected an absolute URI (e.g. 'https://example.com'), " +
-                $"'slide[N]', or a named action (firstslide/lastslide/nextslide/previousslide/endshow).");
+                $"a relative file target, 'slide[N]', or a named action (firstslide/lastslide/nextslide/previousslide/endshow).");
         // CONSISTENCY(hyperlink-scheme-allowlist): reject javascript:, file:,
         // data:, vbscript:, … before they reach the relationships file.
         // Mirrored in ExcelHandler.Set.cs cell link + WordHandler.Set.Element.cs
