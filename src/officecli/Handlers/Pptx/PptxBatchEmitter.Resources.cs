@@ -221,6 +221,28 @@ public static partial class PptxBatchEmitter
             catch { /* best-effort */ }
         }
 
+        // UserDefinedTags parts referenced by the master XML's
+        // <p:custDataLst><p:tags r:id="rIdN"/> — same dangling-rel hazard as the
+        // layout carrier above. Pin each id + verbatim tag XML before the raw-set.
+        try
+        {
+            foreach (var (relId, tagXml) in ppt.GetMasterTagParts(idx))
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add-part",
+                    Parent = $"/slideMaster[{idx}]",
+                    Type = "tags",
+                    Props = new Dictionary<string, string>
+                    {
+                        ["rid"] = relId,
+                        ["data"] = tagXml,
+                    },
+                });
+            }
+        }
+        catch { /* best-effort */ }
+
         items.Add(new BatchItem
         {
             Command = "raw-set",
@@ -286,6 +308,31 @@ public static partial class PptxBatchEmitter
                     {
                         ["rid"] = relId,
                         ["target"] = target,
+                    },
+                });
+            }
+        }
+        catch { /* best-effort */ }
+
+        // UserDefinedTags parts referenced by the layout XML's
+        // <p:custDataLst><p:tags r:id="rIdN"/>. Like the external-hyperlink rel,
+        // the tags part lives in the layout's own .rels (enumerated separately),
+        // so the ImagePart carrier never re-creates it — without this the raw-set'd
+        // r:id="rIdN" dangles and PowerPoint refuses the whole deck (OPC corrupt).
+        // Pin each id + verbatim tag XML BEFORE the raw-set replace.
+        try
+        {
+            foreach (var (relId, tagXml) in ppt.GetLayoutTagParts(idx))
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add-part",
+                    Parent = $"/slideLayout[{idx}]",
+                    Type = "tags",
+                    Props = new Dictionary<string, string>
+                    {
+                        ["rid"] = relId,
+                        ["data"] = tagXml,
                     },
                 });
             }

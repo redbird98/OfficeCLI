@@ -1438,6 +1438,74 @@ public partial class PowerPointHandler : IDocumentHandler
                 return (hlRid, parentPartPath);
             }
 
+            case "tags":
+            {
+                // Re-create a UserDefinedTags part (programmability metadata,
+                // <p:tagLst>) on a host part with a pinned relationship id and the
+                // source tag XML. Layouts/masters are emitted via raw-set (wholesale
+                // XML carrying <p:custDataLst><p:tags r:id="rIdN"/>), but the tags
+                // part lives in the host's own .rels enumerated separately, so the
+                // ImagePart/hyperlink carriers never re-created it — the renumbered
+                // rebuilt layout's r:id="rIdN" dangled and PowerPoint rejected the
+                // whole deck (0x80070570 OPC corrupt). Pinning the id here makes the
+                // raw-set'd reference resolve. The host path is the SOURCE-index
+                // /slideLayout[N] (or master); on replay GrowSlideLayoutParts maps
+                // it to the renumbered part, so the tags rel lands on the same part
+                // the raw-set replaces. (mirrors the add-part hyperlink pattern)
+                if (properties == null
+                    || !properties.TryGetValue("data", out var tagXml) || string.IsNullOrEmpty(tagXml))
+                    throw new ArgumentException("add-part tags requires property 'data' (the <p:tagLst> XML)");
+                if (!properties.TryGetValue("rid", out var tagRid) || string.IsNullOrEmpty(tagRid))
+                    throw new ArgumentException("add-part tags requires property 'rid' (the relationship id to pin)");
+
+                OpenXmlPartContainer tagHost;
+                var tgSmMatch = Regex.Match(parentPartPath, @"^/slideMaster\[(\d+)\]$");
+                var tgSlMatch = tgSmMatch.Success ? null : Regex.Match(parentPartPath, @"^/slideLayout\[(\d+)\]$");
+                var tgSldMatch = (tgSmMatch.Success || (tgSlMatch?.Success ?? false))
+                    ? null : Regex.Match(parentPartPath, @"^/slide\[(\d+)\]$");
+                if (tgSmMatch.Success)
+                {
+                    var i = int.Parse(tgSmMatch.Groups[1].Value);
+                    var parts = presentationPart.SlideMasterParts.ToList();
+                    if (i > parts.Count) { GrowSlideMasterParts(i); parts = presentationPart.SlideMasterParts.ToList(); }
+                    if (i < 1 || i > parts.Count) throw new ArgumentException($"slideMaster index {i} out of range");
+                    tagHost = parts[i - 1];
+                }
+                else if (tgSlMatch != null && tgSlMatch.Success)
+                {
+                    var i = int.Parse(tgSlMatch.Groups[1].Value);
+                    var parts = presentationPart.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+                    if (i > parts.Count) { GrowSlideLayoutParts(i); parts = presentationPart.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList(); }
+                    if (i < 1 || i > parts.Count) throw new ArgumentException($"slideLayout index {i} out of range");
+                    tagHost = parts[i - 1];
+                }
+                else if (tgSldMatch != null && tgSldMatch.Success)
+                {
+                    var i = int.Parse(tgSldMatch.Groups[1].Value);
+                    var parts = GetSlideParts().ToList();
+                    if (i < 1 || i > parts.Count) throw new ArgumentException($"slide index {i} out of range");
+                    tagHost = parts[i - 1];
+                }
+                else
+                    throw new ArgumentException(
+                        "add-part tags: parent must be /slideLayout[N], /slideMaster[N], or /slide[N]");
+
+                // Idempotent: if a relationship with this id already exists, don't
+                // re-add (AddNewPart with a duplicate id throws).
+                if (tagHost.Parts.Any(p => p.RelationshipId == tagRid))
+                    return (tagRid, parentPartPath);
+                var newTagPart = tagHost switch
+                {
+                    SlidePart sp        => sp.AddNewPart<UserDefinedTagsPart>(tagRid),
+                    SlideLayoutPart slp => slp.AddNewPart<UserDefinedTagsPart>(tagRid),
+                    SlideMasterPart smp => smp.AddNewPart<UserDefinedTagsPart>(tagRid),
+                    _ => throw new ArgumentException($"add-part tags: unsupported host part type {tagHost.GetType().Name}"),
+                };
+                using (var sw = new StreamWriter(newTagPart.GetStream(FileMode.Create, FileAccess.Write), new System.Text.UTF8Encoding(false)))
+                    sw.Write(tagXml);
+                return (tagHost.GetIdOfPart(newTagPart), parentPartPath);
+            }
+
             case "theme":
             {
                 // Attach a DISTINCT theme part to a slideMaster / notesMaster with
@@ -1737,6 +1805,50 @@ public partial class PowerPointHandler : IDocumentHandler
         {
             if (rel.IsExternal)
                 result.Add((rel.Id, rel.Uri.OriginalString));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// UserDefinedTags parts (programmability metadata, <c>&lt;p:tagLst&gt;</c>)
+    /// attached to a slideLayout, surfaced as (rId, verbatim tag XML) pairs.
+    /// The layout XML is replayed via raw-set carrying
+    /// <c>&lt;p:custDataLst&gt;&lt;p:tags r:id="rIdN"/&gt;</c>, but the tags part
+    /// lives in the layout's own .rels (enumerated separately) and was never
+    /// re-emitted — the rebuilt layout's <c>r:id="rIdN"</c> then dangled and
+    /// PowerPoint refused the whole deck (0x80070570 OPC corrupt). Emitting an
+    /// <c>add-part tags</c> row that pins each source rId before the layout
+    /// raw-set replace makes the reference resolve. Same shape as
+    /// <see cref="GetLayoutImageParts"/>.
+    /// </summary>
+    internal IReadOnlyList<(string RelId, string TagXml)> GetLayoutTagParts(int layoutIdx)
+    {
+        var pp = _doc.PresentationPart;
+        if (pp == null) return Array.Empty<(string, string)>();
+        var layouts = pp.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+        if (layoutIdx < 1 || layoutIdx > layouts.Count) return Array.Empty<(string, string)>();
+        return ReadTagParts(layouts[layoutIdx - 1]);
+    }
+
+    /// <summary>Same as <see cref="GetLayoutTagParts"/> for a slideMaster.</summary>
+    internal IReadOnlyList<(string RelId, string TagXml)> GetMasterTagParts(int masterIdx)
+    {
+        var pp = _doc.PresentationPart;
+        if (pp == null) return Array.Empty<(string, string)>();
+        var masters = pp.SlideMasterParts.ToList();
+        if (masterIdx < 1 || masterIdx > masters.Count) return Array.Empty<(string, string)>();
+        return ReadTagParts(masters[masterIdx - 1]);
+    }
+
+    private static IReadOnlyList<(string RelId, string TagXml)> ReadTagParts(OpenXmlPartContainer host)
+    {
+        var result = new List<(string, string)>();
+        foreach (var idp in host.Parts)
+        {
+            if (idp.OpenXmlPart is not UserDefinedTagsPart tagPart) continue;
+            using var s = tagPart.GetStream(FileMode.Open, FileAccess.Read);
+            using var sr = new StreamReader(s);
+            result.Add((idp.RelationshipId, sr.ReadToEnd()));
         }
         return result;
     }
