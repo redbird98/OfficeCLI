@@ -586,6 +586,15 @@ public static partial class WordBatchEmitter
                 int nestedTblIdx = 0;
                 bool firstParaSeen = false;
                 bool cellSdtLeftSeed = false; // BUG-DUMP-R36-CELLSDT: SDT raw-set ahead of the cell's auto-seed paragraph
+                // BUG-DUMP-CELLSDT-TRAILP: the typed `add sdt` path (plain /
+                // text-shaped block SDT) CONSUMES the cell's auto-seed paragraph,
+                // unlike the raw-set insert-before-seed path (cellSdtLeftSeed)
+                // which preserves it. When the seed is consumed before any real
+                // paragraph claims it, a following sibling paragraph must be a
+                // fresh `add p` — otherwise it inherits autoPresent=true and its
+                // `set p[last()]` targets a paragraph that no longer exists, the
+                // step fails, and the trailing cell paragraph is silently dropped.
+                bool cellSdtConsumedSeed = false;
 
                 // BUG-DUMP-R27-6: a block-level <w:customXml> wrapper that is a
                 // DIRECT cell child is omitted from cellNode.Children (Navigation
@@ -680,7 +689,7 @@ public static partial class WordBatchEmitter
                             // First cell paragraph (or the SDK auto-trailing one)
                             // reuses an auto-present seeded paragraph; otherwise
                             // create a fresh host paragraph for the equation.
-                            if (firstParaSeen && !eqIsTrailingAutoP)
+                            if ((firstParaSeen || cellSdtConsumedSeed) && !eqIsTrailingAutoP)
                                 items.Add(new BatchItem
                                 {
                                     Command = "add",
@@ -707,7 +716,7 @@ public static partial class WordBatchEmitter
                         // table recursion overwrote the box with its own cell.
                         if (ctx != null) { ctx.CurrentCellXPathBox[0] = cellRawXPath; ctx.CurrentCellPartBox[0] = cellRawPart; }
                         EmitParagraph(word, cc.Path, cellTargetPath, cellParaIdx, items,
-                                      autoPresent: !firstParaSeen || isTrailingAutoP, ctx);
+                                      autoPresent: (!firstParaSeen && !cellSdtConsumedSeed) || isTrailingAutoP, ctx);
                         firstParaSeen = true;
                     }
                     else if (cc.Type == "table")
@@ -728,8 +737,14 @@ public static partial class WordBatchEmitter
                         // document-order ordinal plus the current row/cell index.
                         var rawPart = containerPath == "/body" ? "/document" : containerPath;
                         var cellXPath = $"(//w:tbl)[{tableOrdinal}]/w:tr[{r + 1}]/w:tc[{c + 1}]";
-                        cellSdtLeftSeed |= EmitCellSdt(word, cc.Path, cellTargetPath, cellXPath, rawPart,
+                        bool sdtLeftSeed = EmitCellSdt(word, cc.Path, cellTargetPath, cellXPath, rawPart,
                                     cellHasContent: firstParaSeen, items, ctx);
+                        cellSdtLeftSeed |= sdtLeftSeed;
+                        // Typed `add sdt` (returns false here with no prior cell
+                        // paragraph) consumed the auto-seed; the raw-set seed-left
+                        // path returns true and keeps it. Flag the consumed case so
+                        // a following sibling paragraph emits a fresh `add p`.
+                        if (!sdtLeftSeed && !firstParaSeen) cellSdtConsumedSeed = true;
                     }
                 }
 
@@ -779,7 +794,7 @@ public static partial class WordBatchEmitter
                             cellParaIdx++;
                             if (ctx != null) { ctx.CurrentCellXPathBox[0] = cellRawXPath; ctx.CurrentCellPartBox[0] = cellRawPart; }
                             EmitParagraph(word, ccNode.Path, cellTargetPath, cellParaIdx, items,
-                                          autoPresent: !firstParaSeen, ctx);
+                                          autoPresent: !firstParaSeen && !cellSdtConsumedSeed, ctx);
                             firstParaSeen = true;
                         }
                         else if (kind == "tbl")
@@ -798,8 +813,9 @@ public static partial class WordBatchEmitter
                             if (ccNode == null) continue;
                             var rawPart = containerPath == "/body" ? "/document" : containerPath;
                             var cellXPath = $"(//w:tbl)[{tableOrdinal}]/w:tr[{r + 1}]/w:tc[{c + 1}]";
-                            EmitCellSdt(word, ccNode.Path, cellTargetPath, cellXPath, rawPart,
-                                        cellHasContent: firstParaSeen, items, ctx);
+                            if (!EmitCellSdt(word, ccNode.Path, cellTargetPath, cellXPath, rawPart,
+                                        cellHasContent: firstParaSeen, items, ctx) && !firstParaSeen)
+                                cellSdtConsumedSeed = true;
                         }
                         else if (kind == "customXml")
                         {
@@ -841,7 +857,7 @@ public static partial class WordBatchEmitter
                                 cellParaIdx++;
                                 if (ctx != null) { ctx.CurrentCellXPathBox[0] = cellRawXPath; ctx.CurrentCellPartBox[0] = cellRawPart; }
                                 EmitParagraph(word, innerPath, cellTargetPath, cellParaIdx, items,
-                                              autoPresent: !firstParaSeen, ctx);
+                                              autoPresent: !firstParaSeen && !cellSdtConsumedSeed, ctx);
                                 firstParaSeen = true;
                             }
                         }
