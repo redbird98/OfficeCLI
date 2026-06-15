@@ -53,6 +53,27 @@ public static partial class PptxBatchEmitter
         }
     }
 
+    // Remove every <p:custDataLst> (programmability tag references) from a raw
+    // part XML. A UserDefinedTagsPart added to a slideMaster does not survive
+    // Save, so a master <p:tags r:id> reference left dangling makes PowerPoint
+    // refuse the deck; dropping the (invisible) reference keeps it openable.
+    private static string StripCustDataLst(string xml)
+    {
+        if (string.IsNullOrEmpty(xml) || xml.IndexOf("custDataLst", StringComparison.Ordinal) < 0)
+            return xml;
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(xml);
+            if (doc.Root == null) return xml;
+            var pNs = System.Xml.Linq.XNamespace.Get(
+                "http://schemas.openxmlformats.org/presentationml/2006/main");
+            foreach (var el in doc.Root.DescendantsAndSelf(pNs + "custDataLst").ToList())
+                el.Remove();
+            return doc.Root.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+        }
+        catch { return xml; }
+    }
+
     private static void EmitThemeRaw(PowerPointHandler ppt, List<BatchItem> items)
     {
         // The blank scaffold shares ONE theme part (/ppt/theme/theme1.xml)
@@ -252,27 +273,14 @@ public static partial class PptxBatchEmitter
         }
         catch { /* best-effort */ }
 
-        // UserDefinedTags parts referenced by the master XML's
-        // <p:custDataLst><p:tags r:id="rIdN"/> — same dangling-rel hazard as the
-        // layout carrier above. Pin each id + verbatim tag XML before the raw-set.
-        try
-        {
-            foreach (var (relId, tagXml) in ppt.GetMasterTagParts(idx))
-            {
-                items.Add(new BatchItem
-                {
-                    Command = "add-part",
-                    Parent = $"/slideMaster[{idx}]",
-                    Type = "tags",
-                    Props = new Dictionary<string, string>
-                    {
-                        ["rid"] = relId,
-                        ["data"] = tagXml,
-                    },
-                });
-            }
-        }
-        catch { /* best-effort */ }
+        // Master <p:custDataLst><p:tags r:id="rIdN"/> (programmability tags) are
+        // NOT carried: a UserDefinedTagsPart added to a SlideMasterPart does not
+        // survive Save (the SDK prunes it — unlike a slide/layout tag part), so
+        // pinning the rId left the raw-set'd r:id dangling and PowerPoint refused
+        // the deck (0x80070570). Strip custDataLst from the master XML instead so
+        // there is no dangling reference. Tags are invisible programmability
+        // metadata; this mirrors how slides drop custDataLst on the typed emit.
+        xml = StripCustDataLst(xml);
 
         items.Add(new BatchItem
         {
