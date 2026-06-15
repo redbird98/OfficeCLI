@@ -2075,6 +2075,25 @@ public static partial class WordBatchEmitter
                         Type = "sdt",
                         Props = carrierProps,
                     });
+                    // The carrier ships the whole SDT (including any <w:tbl> in its
+                    // content) verbatim, without routing through EmitTable, so the
+                    // shipped tables never bump ctx.TableOrdinalBox. At replay those
+                    // tables still exist in document order and count toward the
+                    // `(//w:tbl)[N]` XPath that later cell-SDT / tblGrid raw-sets
+                    // resolve against — leaving the ordinal short makes every
+                    // following table's selector land one (or more) tables early, so
+                    // a sibling table's cell-SDT raw-set wraps the wrong cell's
+                    // drawing in a spurious nested SDT that the next SDK re-save drops.
+                    // Bump the box by the table count of the shipped sdtXml so the
+                    // emitter's `(//w:tbl)` numbering stays in lockstep with replay.
+                    // CONSISTENCY(tbl-ordinal): mirrors EmitTable's `++TableOrdinalBox[0]`.
+                    if (ctx != null
+                        && carrierProps.TryGetValue("sdtXml", out var shippedXml)
+                        && !string.IsNullOrEmpty(shippedXml))
+                    {
+                        ctx.TableOrdinalBox[0] += System.Text.RegularExpressions.Regex
+                            .Matches(shippedXml, "<w:tbl[ >]").Count;
+                    }
                     return;
                 }
                 // Unreconstructable references (a header/footer rel inside an
