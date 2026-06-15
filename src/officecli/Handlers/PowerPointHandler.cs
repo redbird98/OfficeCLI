@@ -2200,14 +2200,30 @@ public partial class PowerPointHandler : IDocumentHandler
         var result = new List<BlipCompanionInfo>();
         foreach (var idp in host.Parts)
         {
-            if (idp.OpenXmlPart is not ExtendedPart ep) continue;
-            using var s = ep.GetStream(FileMode.Open, FileAccess.Read);
+            // Arbitrary binary blobs reached by a custom or non-typed-image
+            // relationship: ExtendedPart (hdphoto / Google metadata / …) plus
+            // embedded OLE objects (EmbeddedObjectPart, rel .../oleObject) and
+            // embedded packages (EmbeddedPackagePart, embedded .docx/.xlsx).
+            // A master/layout can host an <p:oleObj r:id> (e.g. clip-art) whose
+            // part is one of the latter two; the raw-set master XML keeps the
+            // r:id, so the part must be re-pinned or the reference dangles and
+            // PowerPoint refuses the deck. ImageParts are carried separately
+            // (GetMasterImageParts), so they are intentionally excluded here.
+            OpenXmlPart? blob = idp.OpenXmlPart switch
+            {
+                ExtendedPart e => e,
+                EmbeddedObjectPart o => o,
+                EmbeddedPackagePart p => p,
+                _ => null
+            };
+            if (blob == null) continue;
+            using var s = blob.GetStream(FileMode.Open, FileAccess.Read);
             using var ms = new MemoryStream();
             s.CopyTo(ms);
-            var ext = System.IO.Path.GetExtension(ep.Uri.OriginalString);
+            var ext = System.IO.Path.GetExtension(blob.Uri.OriginalString);
             if (string.IsNullOrEmpty(ext)) ext = ".bin";
             result.Add(new BlipCompanionInfo(
-                idp.RelationshipId, ep.RelationshipType, ep.ContentType, ext,
+                idp.RelationshipId, blob.RelationshipType, blob.ContentType, ext,
                 Convert.ToBase64String(ms.ToArray())));
         }
         return result;
