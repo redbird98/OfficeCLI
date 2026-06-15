@@ -1002,7 +1002,19 @@ public partial class PowerPointHandler
         // the second Add — false positive against ECMA-376.
         bool phTypeIsTitleFamily = phTypeVal == PlaceholderValues.Title
             || phTypeVal == PlaceholderValues.CenteredTitle;
-        if (phTypeIsTitleFamily)
+        // dump→replay escape: a malformed-but-real source slide can carry two
+        // title/ctrTitle placeholders (PowerPoint keeps them — it only
+        // auto-dedups via the UI, not on load). The uniqueness guard below is a
+        // convenience for interactive `add`; for a faithful round-trip the
+        // emitter sets allowDuplicate so the second title placeholder replays
+        // instead of aborting (which also cascaded the slide's later shapes via
+        // the broken shape count). The flag is consumed here, never written to XML.
+        bool phAllowDuplicate = (properties.TryGetValue("allowDuplicate", out var phAdup)
+                                  || properties.TryGetValue("allowduplicate", out phAdup))
+                                 && IsTruthy(phAdup);
+        properties.Remove("allowDuplicate");
+        properties.Remove("allowduplicate");
+        if (phTypeIsTitleFamily && !phAllowDuplicate)
         {
             var existingTitle = phShapeTree.Elements<Shape>()
                 .FirstOrDefault(s =>

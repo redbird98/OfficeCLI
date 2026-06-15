@@ -319,6 +319,14 @@ public static partial class PptxBatchEmitter
         // <p:timing> tree (round-tripped via raw-set passthrough) pointing
         // at the right shape.
 
+        // Faithful round-trip: a source slide may carry two title/ctrTitle
+        // placeholders (PowerPoint keeps them; it only de-dups via the UI). The
+        // interactive uniqueness guard in AddPlaceholder would abort the second
+        // one — and cascade the slide's later shapes via the broken shape count.
+        // Signal the replay to allow it. Consumed by AddPlaceholder, not written
+        // to XML.
+        props["allowDuplicate"] = "true";
+
         items.Add(new BatchItem
         {
             Command = "add",
