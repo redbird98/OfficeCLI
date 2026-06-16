@@ -60,6 +60,12 @@ officecli set file.docx / --prop mirrorMargins=true --prop gutterAtTop=false \
 Lengths accept `cm`/`in`/`pt` or bare twips. `orientation=landscape` swaps
 width/height. These write the document's section properties (`sectPr`).
 
+> The bare `sectPr=present` toggle is intentionally **not** demonstrated: it's an
+> internal dump→batch round-trip marker (forces an empty `<w:sectPr/>` to survive
+> a rebuild), `get`-invisible and single-valued, never an interactive edit. Like a
+> table's auto-assigned `id`, it's settable only for fidelity — the page-setup
+> props above are how you actually shape a section.
+
 ### 3. docDefaults — document-wide run/paragraph defaults
 
 The defaults an unstyled paragraph inherits. In the generated file the body
