@@ -1983,6 +1983,17 @@ public static partial class WordBatchEmitter
         // run + p[1] already exist after the `add <kind>` above.
         string targetNotePath = $"/{kind}[{targetNoteIdx}]";
 
+        // BUG-DUMP-NOTE-TABSTOPS: the note's first paragraph can carry explicit
+        // tab stops — most importantly <w:tab w:val="clear"/> entries that CLEAR
+        // inherited tab stops (Arabic UN notes clear 7 default stops). `add
+        // <kind>` seeds p[1] with style/spacing/indent/rPr but never the tabs, so
+        // the cleared stops reappeared and shifted tabbed footnote content
+        // horizontally. Emit them the same way a body paragraph does (EmitTabStops
+        // handles every val incl. "clear"); the per-paragraph loop below does the
+        // same for the note's subsequent paragraphs.
+        if (bodyParas.Count > 0 && bodyParas[0].Format.TryGetValue("tabs", out var noteTabs))
+            EmitTabStops($"{targetNotePath}/p[1]", noteTabs, items);
+
         // BUG-R13A: coalesce hyperlink runs so a hyperlink inside a footnote/
         // endnote body round-trips as a typed `add hyperlink` (was dropped as a
         // flat `add r` carrying unsupported url/isHyperlink props).
@@ -2013,6 +2024,10 @@ public static partial class WordBatchEmitter
                     Props = paraProps.Count > 0 ? paraProps : null
                 });
                 targetParaOrdinal++;
+                // BUG-DUMP-NOTE-TABSTOPS: carry this note paragraph's tab stops
+                // (incl. clear-type) — same as p[1] above and the body path.
+                if (paraNode.Format.TryGetValue("tabs", out var subParaTabs))
+                    EmitTabStops($"{targetNotePath}/p[{targetParaOrdinal}]", subParaTabs, items);
                 var runs = paraNode.Children.Where(c => IsRoundTrippableNoteRun(word, c)).ToList();
                 EmitContainerBodyRuns(runs, $"{targetNotePath}/p[{targetParaOrdinal}]", items);
             }
