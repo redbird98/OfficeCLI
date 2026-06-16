@@ -49,12 +49,12 @@
     },
     "zorder": {
       "type": "number",
-      "description": "1-based z-order in slide shape tree. On add, positions the table within the shape tree (1 = back). Post-creation reordering is not supported via Set; use Move/Swap on the table graphic frame, or raw-set the spTree child order.",
+      "description": "z-order in slide shape tree. On add, positions the table (1 = back). On set, re-stacks it: front/back/forward/backward, +1/-1, or a 1-based absolute index.",
       "aliases": ["z-order", "order"],
       "add": true,
-      "set": false,
+      "set": true,
       "get": true,
-      "examples": ["--prop zorder=1"],
+      "examples": ["--prop zorder=1", "--prop zorder=front"],
       "readback": "1-based integer (1 = back)",
       "enforcement": "report"
     },
@@ -94,12 +94,12 @@
     },
     "rowHeight": {
       "type": "length",
-      "description": "uniform row height (EMU). If unspecified, derived from 'height' / rows.",
+      "description": "uniform row height (EMU). On add, if unspecified it's derived from 'height' / rows. On set, applies the given height to EVERY row (a convenience for `tr[R] --prop height` on each); read individual heights back per-row via `tr[R]`.",
       "aliases": [
         "rowheight"
       ],
       "add": true,
-      "set": false,
+      "set": true,
       "get": false,
       "examples": [
         "--prop rowHeight=1cm"

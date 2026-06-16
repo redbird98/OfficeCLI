@@ -306,6 +306,36 @@ public partial class PowerPointHandler
                     }
                     break;
                 }
+                case "rowheight":
+                {
+                    // Uniform row height applied to EVERY row — the table-level
+                    // counterpart of setting each `tr`'s height individually, and
+                    // the settable mirror of the add-time `rowHeight`. Mirrors the
+                    // colWidths case (iterate the structure, then sync the frame).
+                    var table = gf.Descendants<Drawing.Table>().FirstOrDefault();
+                    if (table != null)
+                    {
+                        var rows = table.Elements<Drawing.TableRow>().ToList();
+                        if (rows.Count > 0)
+                        {
+                            var h = ParseEmu(value);
+                            if (h < 0)
+                                throw new ArgumentException(
+                                    $"Invalid rowHeight value '{value}': table row height cannot be negative.");
+                            foreach (var r in rows) r.Height = h;
+                            // CONSISTENCY(table-frame-sync): keep frame Cy aligned with grid.
+                            if (gf.Transform?.Extents != null)
+                                gf.Transform.Extents.Cy = h * rows.Count;
+                        }
+                    }
+                    break;
+                }
+                case "zorder" or "z-order" or "order":
+                    // Re-stack the table (a GraphicFrame) within the slide shape
+                    // tree. Same engine as shape/picture/chart z-order: accepts
+                    // front/back/forward/backward/±1 or a 1-based absolute index.
+                    ApplyZOrder(slidePart, gf, value);
+                    break;
                 case "autofit" or "autowidth":
                 {
                     // Heuristic auto column width: measure max text length per column
@@ -433,7 +463,7 @@ public partial class PowerPointHandler
                     if (!GenericXmlQuery.SetGenericAttribute(gf, key, value))
                     {
                         if (unsupported.Count == 0)
-                            unsupported.Add($"{key} (valid table props: x, y, width, height, name, style, firstRow, lastRow, firstCol, lastCol, bandedRows, bandedCols, colWidths)");
+                            unsupported.Add($"{key} (valid table props: x, y, width, height, name, style, firstRow, lastRow, firstCol, lastCol, bandedRows, bandedCols, colWidths, rowHeight, zorder)");
                         else
                             unsupported.Add(key);
                     }
