@@ -1646,6 +1646,20 @@ public partial class WordHandler
             p.TextId = GenerateParaId();
         }
 
+        // Regenerate sdt ids on cloned content controls. CloneNode copies the
+        // source <w:sdtPr><w:id> verbatim, and Ensure*Ids does not run after a
+        // typed mutation, so without this an `add --from` of an sdt (or content
+        // containing one) lands a duplicate sdt id on disk. Mirrors the paraId /
+        // bookmark regen below. NextSdtId scans the whole doc for max+1 (the
+        // clone is not inserted yet), then we increment for each nested sdt.
+        var sdtIdsInClone = clone.Descendants<SdtId>().ToArray();
+        if (sdtIdsInClone.Length > 0)
+        {
+            var nextSdtId = NextSdtId();
+            foreach (var sid in sdtIdsInClone)
+                sid.Val = nextSdtId++;
+        }
+
         // Regenerate bookmark ids/names so a cloned paragraph containing
         // <w:bookmarkStart>/<w:bookmarkEnd> doesn't introduce duplicate
         // numeric ids or duplicate names (the latter silently breaks
@@ -1653,12 +1667,18 @@ public partial class WordHandler
         var docBody = _doc.MainDocumentPart?.Document?.Body;
         if (docBody != null)
         {
-            var existingIds = docBody.Descendants<BookmarkStart>()
+            // Scan bookmarks across every part (body + headers + footers +
+            // footnotes + endnotes + comments), not just body, so a clone copied
+            // into a header/note can't collide with a bookmark elsewhere.
+            var mainForCopy = _doc.MainDocumentPart!;
+            var allOtherStarts = EnumerateContentRoots(mainForCopy)
+                .SelectMany(r => r.Descendants<BookmarkStart>())
                 .Where(b => !ReferenceEquals(b, clone) && !b.Ancestors().Contains(clone))
+                .ToList();
+            var existingIds = allOtherStarts
                 .Select(b => int.TryParse(b.Id?.Value, out var id) ? id : 0);
             var existingNames = new HashSet<string>(
-                docBody.Descendants<BookmarkStart>()
-                    .Where(b => !ReferenceEquals(b, clone) && !b.Ancestors().Contains(clone))
+                allOtherStarts
                     .Select(b => b.Name?.Value ?? "")
                     .Where(n => n.Length > 0));
             var nextId = existingIds.Any() ? existingIds.Max() + 1 : 1;

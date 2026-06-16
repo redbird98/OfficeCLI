@@ -265,13 +265,16 @@ public partial class WordHandler
     }
 
     /// <summary>
-    /// Enumerate every part root that can hold revision elements
+    /// Enumerate every part root that can hold body-like content
     /// (body + headers + footers + footnotes + endnotes + comments).
-    /// Mirrors the part fan-out in EnsureAllParaIds for the paraId scan.
-    /// Used by both EnsureAllParaIds (revision id pre-registration) and any
-    /// future revision-iteration logic.
+    /// Single source of truth for "which parts to scan" across all unique-id
+    /// management: paraId/revision pre-registration, plus the sdt / docPr /
+    /// bookmark allocators and their Ensure*Ids dedup passes. Keeping every
+    /// allocator and dedup on this one fan-out prevents the scan-scope drift
+    /// that let ids collide in footnotes/endnotes/comments (and headers/footers
+    /// for the body-only scanners).
     /// </summary>
-    private static IEnumerable<OpenXmlElement> EnumerateRevisionRoots(MainDocumentPart mainPart)
+    private static IEnumerable<OpenXmlElement> EnumerateContentRoots(MainDocumentPart mainPart)
     {
         if (mainPart.Document != null) yield return mainPart.Document;
         foreach (var hp in mainPart.HeaderParts)
@@ -367,7 +370,7 @@ public partial class WordHandler
         // GenerateRevisionId() never picks a number that's already taken by
         // either paraId or another revision id. Decimal revision ids are
         // converted to the same 8-char hex form the pool uses.
-        foreach (var rootElem in EnumerateRevisionRoots(mainPart))
+        foreach (var rootElem in EnumerateContentRoots(mainPart))
         {
             foreach (var elem in rootElem.Descendants())
             {
@@ -446,7 +449,7 @@ public partial class WordHandler
               or TableCellPropertiesChange or TableRowPropertiesChange
               or Inserted or Deleted or MoveFrom or MoveTo;
 
-        var revElems = EnumerateRevisionRoots(mainPart)
+        var revElems = EnumerateContentRoots(mainPart)
             .SelectMany(r => r.Descendants())
             .Where(IsRevisionMarker)
             .ToList();
@@ -498,7 +501,7 @@ public partial class WordHandler
         // name → list of move-run ids bracketed by a range with that name.
         var byName = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var root in EnumerateRevisionRoots(mainPart))
+        foreach (var root in EnumerateContentRoots(mainPart))
         {
             // Active range-marker names keyed by their range id (a
             // moveFrom and moveTo range nest independently but share the
@@ -558,19 +561,24 @@ public partial class WordHandler
 
     /// <summary>
     /// Generate a deterministic unique SdtId by scanning max existing value + 1.
+    /// Scans every part that can hold an sdt (body + headers + footers +
+    /// footnotes + endnotes + comments) via <see cref="EnumerateContentRoots"/>,
+    /// not just the body — a body-only scan handed out colliding ids when an
+    /// sdt was added into a header/footer (the counter never saw the sibling).
     /// </summary>
     private int NextSdtId()
     {
         const int overflowReset = 872011;
         int maxId = 0;
-        var body = _doc.MainDocumentPart?.Document?.Body;
-        if (body != null)
+        var main = _doc.MainDocumentPart;
+        if (main != null)
         {
-            foreach (var sdtId in body.Descendants<SdtId>())
-            {
-                if (sdtId.Val?.HasValue == true && sdtId.Val.Value > maxId)
-                    maxId = sdtId.Val.Value;
-            }
+            foreach (var root in EnumerateContentRoots(main))
+                foreach (var sdtId in root.Descendants<SdtId>())
+                {
+                    if (sdtId.Val?.HasValue == true && sdtId.Val.Value > maxId)
+                        maxId = sdtId.Val.Value;
+                }
         }
         var next = maxId + 1;
         return next > int.MaxValue - 1 ? overflowReset : next;
@@ -595,14 +603,11 @@ public partial class WordHandler
         var mainPart = _doc.MainDocumentPart;
         if (mainPart?.Document?.Body == null) return;
 
-        var allDocProps = mainPart.Document.Body.Descendants<DW.DocProperties>().ToList();
-
-        foreach (var headerPart in mainPart.HeaderParts)
-            if (headerPart.Header != null)
-                allDocProps.AddRange(headerPart.Header.Descendants<DW.DocProperties>());
-        foreach (var footerPart in mainPart.FooterParts)
-            if (footerPart.Footer != null)
-                allDocProps.AddRange(footerPart.Footer.Descendants<DW.DocProperties>());
+        // Scan every part that can host a <w:drawing> (body + headers + footers
+        // + footnotes + endnotes + comments) — matches NextDocPropId's allocator
+        // scan so dedup covers the same id space the allocator does.
+        var allDocProps = EnumerateContentRoots(mainPart)
+            .SelectMany(r => r.Descendants<DW.DocProperties>()).ToList();
 
         var usedIds = new HashSet<uint>();
         var duplicates = new List<DW.DocProperties>();
@@ -636,13 +641,11 @@ public partial class WordHandler
         var mainPart = _doc.MainDocumentPart;
         if (mainPart?.Document?.Body == null) return;
 
-        var allSdtIds = mainPart.Document.Body.Descendants<SdtId>().ToList();
-        foreach (var headerPart in mainPart.HeaderParts)
-            if (headerPart.Header != null)
-                allSdtIds.AddRange(headerPart.Header.Descendants<SdtId>());
-        foreach (var footerPart in mainPart.FooterParts)
-            if (footerPart.Footer != null)
-                allSdtIds.AddRange(footerPart.Footer.Descendants<SdtId>());
+        // Scan every part that can hold an sdt (body + headers + footers +
+        // footnotes + endnotes + comments) — a 3-part scan left sdt ids in
+        // footnotes/endnotes/comments out of the collision set.
+        var allSdtIds = EnumerateContentRoots(mainPart)
+            .SelectMany(r => r.Descendants<SdtId>()).ToList();
 
         var usedIds = new HashSet<int>();
         var duplicates = new List<SdtId>();
@@ -683,11 +686,10 @@ public partial class WordHandler
         var mainPart = _doc.MainDocumentPart;
         if (mainPart?.Document?.Body == null) return;
 
-        var roots = new List<OpenXmlElement> { mainPart.Document.Body };
-        foreach (var hp in mainPart.HeaderParts)
-            if (hp.Header != null) roots.Add(hp.Header);
-        foreach (var fp in mainPart.FooterParts)
-            if (fp.Footer != null) roots.Add(fp.Footer);
+        // Scan every part that can hold a bookmark (body + headers + footers +
+        // footnotes + endnotes + comments) — a 3-part scan left bookmark ids in
+        // footnotes/endnotes/comments out of the collision set.
+        var roots = EnumerateContentRoots(mainPart).ToList();
 
         // Pair start→end in document order per part; collect pairs globally.
         var pairs = new List<(BookmarkStart start, BookmarkEnd? end, int? id)>();

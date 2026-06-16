@@ -409,7 +409,15 @@ public partial class WordHandler
         // requires; only the display name repeats. Warn instead of failing:
         // /bookmark[@name=X] then resolves to the first match, but the bookmark
         // is preserved. (Mirrors the duplicate form-field-name handling.)
-        var existingStarts = body.Descendants<BookmarkStart>().ToList();
+        // Scan every part that can hold a bookmark (body + headers + footers +
+        // footnotes + endnotes + comments), not just body — a body-only scan
+        // allocated a colliding max+1 when a bookmark already lived in a
+        // header/footer/note, and missed cross-part name duplicates. Mirrors
+        // EnsureBookmarkIds' scan scope so allocator and dedup agree.
+        var mainForBk = _doc.MainDocumentPart;
+        var existingStarts = mainForBk != null
+            ? EnumerateContentRoots(mainForBk).SelectMany(r => r.Descendants<BookmarkStart>()).ToList()
+            : body.Descendants<BookmarkStart>().ToList();
         if (existingStarts.Any(b => string.Equals(b.Name?.Value, bkName, StringComparison.Ordinal)))
         {
             LastAddWarnings.Add(

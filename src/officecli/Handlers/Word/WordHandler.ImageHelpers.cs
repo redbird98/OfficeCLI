@@ -28,23 +28,14 @@ public partial class WordHandler
         // part that can host a <w:drawing>.
         var main = _doc.MainDocumentPart;
         uint maxId = 0;
-        void Scan(OpenXmlElement? root)
-        {
-            if (root == null) return;
-            foreach (var dp in root.Descendants<DW.DocProperties>())
-            {
-                if (dp.Id?.HasValue == true && dp.Id.Value > maxId)
-                    maxId = dp.Id.Value;
-            }
-        }
-        Scan(main?.Document?.Body);
         if (main != null)
         {
-            foreach (var hp in main.HeaderParts) Scan(hp.Header);
-            foreach (var fp in main.FooterParts) Scan(fp.Footer);
-            Scan(main.FootnotesPart?.Footnotes);
-            Scan(main.EndnotesPart?.Endnotes);
-            Scan(main.WordprocessingCommentsPart?.Comments);
+            foreach (var root in EnumerateContentRoots(main))
+                foreach (var dp in root.Descendants<DW.DocProperties>())
+                {
+                    if (dp.Id?.HasValue == true && dp.Id.Value > maxId)
+                        maxId = dp.Id.Value;
+                }
         }
         return maxId + 1;
     }
