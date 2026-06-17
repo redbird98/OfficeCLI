@@ -1980,7 +1980,7 @@ public partial class PowerPointHandler
                 var created = GenericXmlQuery.TryCreateTypedElement(fbParent, type, properties, index);
                 if (created == null)
                     throw new CliException($"Unknown element type '{type}' for {parentPath}. " +
-                        "Valid types: slide, shape, textbox, picture, table, chart, ole (object, embed), paragraph, run, connector, group, video, audio, equation, notes, zoom. " +
+                        "Valid types: slide, shape, textbox, picture, table, chart, ole (object, embed), paragraph, run, connector, group, video, audio, model3d (3dmodel), equation, notes, zoom. " +
                         "Use 'officecli pptx add' for details.")
                         { Code = "invalid_type" };
 
