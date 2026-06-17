@@ -2705,6 +2705,21 @@ public static partial class WordBatchEmitter
                     chartProps[$"userShapes.ext{uei}.target"] = ext.Target;
                 }
             }
+            // BUG-DUMP-CHART-SIDECARS: carry the native chart's sidecar parts
+            // (chartStyle / chartColorStyle / themeOverride / embedded data
+            // workbook) so AddChart re-attaches them instead of rebuilding a
+            // chart stripped of its theme, custom colours, and editable data.
+            var sidecars = word.GetChartSidecarEmitData(run.Path);
+            if (sidecars != null)
+            {
+                foreach (var (role, ct, bytes) in sidecars)
+                {
+                    // One part per role for native charts (style/colors/
+                    // themeOverride/package each appear at most once).
+                    chartProps[$"sidecar.{role}.data"] =
+                        $"data:{ct};base64,{System.Convert.ToBase64String(bytes)}";
+                }
+            }
             items.Add(new BatchItem
             {
                 Command = "add",

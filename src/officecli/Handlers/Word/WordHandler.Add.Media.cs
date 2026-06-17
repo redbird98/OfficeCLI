@@ -141,6 +141,12 @@ public partial class WordHandler
         else
             chartPart.ChartSpace.Save();
 
+        // BUG-DUMP-CHART-SIDECARS: re-attach the source chart's sidecar parts
+        // (chartStyle / chartColorStyle / themeOverride / embedded data
+        // workbook) captured by the dump, so the rebuilt native chart keeps its
+        // theme, custom colours and editable data instead of a bare default.
+        AttachChartSidecars(chartPart, properties);
+
         // Re-attach a captured c:userShapes overlay (logo/photo/annotation drawn
         // on top of the chart) so it round-trips through dump→batch.
         AttachChartUserShapes(chartPart, properties);
@@ -179,6 +185,72 @@ public partial class WordHandler
         var allCharts = GetAllWordCharts();
         var docOrderIdx = allCharts.FindIndex(c => ReferenceEquals(c.Container, frame));
         return $"/chart[{(docOrderIdx >= 0 ? docOrderIdx + 1 : allCharts.Count)}]";
+    }
+
+    /// <summary>
+    /// Re-attach a native chart's sidecar parts captured by the dump under
+    /// <c>sidecar.{style|colors|themeOverride|package}.data</c> (base64 data
+    /// URIs). chartStyle/chartColorStyle/themeOverride are related to the chart
+    /// part by relationship type (no in-XML reference); the embedded data
+    /// workbook is wired via a fresh <c>&lt;c:externalData r:id&gt;</c>. No-op
+    /// when the chart carried no sidecars (e.g. a freshly authored chart).
+    /// </summary>
+    private void AttachChartSidecars(ChartPart chartPart, Dictionary<string, string> properties)
+    {
+        static (string Ct, byte[] Bytes)? ParseDataUri(string v)
+        {
+            if (string.IsNullOrEmpty(v) || !v.StartsWith("data:", StringComparison.Ordinal)) return null;
+            var comma = v.IndexOf(";base64,", StringComparison.Ordinal);
+            if (comma < 0) return null;
+            var ct = v.Substring(5, comma - 5);
+            try { return (ct, System.Convert.FromBase64String(v[(comma + 8)..])); }
+            catch { return null; }
+        }
+
+        void Feed(OpenXmlPart part, byte[] bytes)
+        {
+            using var ms = new MemoryStream(bytes);
+            part.FeedData(ms);
+        }
+
+        if (properties.TryGetValue("sidecar.style.data", out var styleV)
+            && ParseDataUri(styleV) is { } st)
+            Feed(chartPart.AddNewPart<ChartStylePart>(), st.Bytes);
+
+        if (properties.TryGetValue("sidecar.colors.data", out var colorsV)
+            && ParseDataUri(colorsV) is { } co)
+            Feed(chartPart.AddNewPart<ChartColorStylePart>(), co.Bytes);
+
+        if (properties.TryGetValue("sidecar.themeOverride.data", out var toV)
+            && ParseDataUri(toV) is { } to)
+            Feed(chartPart.AddNewPart<ThemeOverridePart>(), to.Bytes);
+
+        if (properties.TryGetValue("sidecar.package.data", out var pkgV)
+            && ParseDataUri(pkgV) is { } pk)
+        {
+            var pkgPart = chartPart.AddNewPart<EmbeddedPackagePart>(pk.Ct);
+            Feed(pkgPart, pk.Bytes);
+            var pkgRelId = chartPart.GetIdOfPart(pkgPart);
+            var chartSpace = chartPart.ChartSpace;
+            if (chartSpace != null
+                && chartSpace.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.ExternalData>() == null)
+            {
+                var extData = new DocumentFormat.OpenXml.Drawing.Charts.ExternalData
+                {
+                    Id = pkgRelId,
+                    AutoUpdate = new DocumentFormat.OpenXml.Drawing.Charts.AutoUpdate { Val = false },
+                };
+                // CT_ChartSpace order: …chart, spPr, txPr, externalData,
+                // printSettings, userShapes, extLst. Insert before the first of
+                // those trailing elements if present, else append.
+                var anchor = chartSpace.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.PrintSettings>() as OpenXmlElement
+                    ?? chartSpace.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.UserShapes>() as OpenXmlElement
+                    ?? chartSpace.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.ChartSpaceExtensionList>() as OpenXmlElement;
+                if (anchor != null) chartSpace.InsertBefore(extData, anchor);
+                else chartSpace.AppendChild(extData);
+                chartSpace.Save();
+            }
+        }
     }
 
     /// <summary>

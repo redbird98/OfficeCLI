@@ -673,6 +673,39 @@ public partial class WordHandler : IDocumentHandler
         return GuardCarrierContentTypes(new ActiveXEmitData(xml, parts, externals));
     }
 
+    // BUG-DUMP-CHART-SIDECARS: the typed `add chart` path rebuilds a native
+    // DrawingML chart from semantic props and does NOT carry the source chart's
+    // sidecar parts — its chartStyle, chartColorStyle, themeOverride, and the
+    // embedded data workbook (referenced by <c:externalData>). Gather them so
+    // AddChart can re-attach them. Returns (role, contentType, bytes) where role
+    // is one of style/colors/themeOverride/package. The ChartDrawingPart
+    // (userShapes) and image parts are excluded — those have their own carriers.
+    internal List<(string Role, string ContentType, byte[] Bytes)>? GetChartSidecarEmitData(string runPath)
+    {
+        var chartPart = ResolveChartPartFromRunPath(runPath);
+        if (chartPart == null) return null;
+        var result = new List<(string, string, byte[])>();
+        foreach (var rel in chartPart.Parts)
+        {
+            var part = rel.OpenXmlPart;
+            string? role = part switch
+            {
+                ChartStylePart => "style",
+                ChartColorStylePart => "colors",
+                ThemeOverridePart => "themeOverride",
+                EmbeddedPackagePart => "package",
+                EmbeddedObjectPart => "package",
+                _ => null,
+            };
+            if (role == null) continue;
+            byte[] bytes;
+            try { bytes = ReadPartBytes(part); }
+            catch { continue; }
+            result.Add((role, part.ContentType, bytes));
+        }
+        return result.Count > 0 ? result : null;
+    }
+
     private ChartPart? ResolveChartPartFromRunPath(string runPath)
     {
         OpenXmlElement? element;
