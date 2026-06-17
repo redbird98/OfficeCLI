@@ -646,6 +646,20 @@ public partial class WordHandler
             ? new RunProperties(new RunStyle { Val = fnRefStyle })
             : new RunProperties(new VerticalTextAlignment { Val = VerticalPositionValues.Superscript });
         var footnote = new Footnote { Id = fnId };
+        // BUG-DUMP-NOTEREF-CUSTOMMARK-BODY: a CUSTOM-mark footnote's body does NOT
+        // begin with the auto-number <w:footnoteRef> — its leading run is the
+        // literal custom glyph (*, †, …) in a run styled FootnoteReference, and
+        // the body reference in the document carries w:customMarkFollows="1" so
+        // Word suppresses the auto-number. Injecting <w:footnoteRef> here prepended
+        // the auto-number to the custom glyph on rebuild ("6*" instead of "*").
+        // When the dump signals a custom mark (referenceCustomMark[Follows]), the
+        // `text` prop already IS that glyph — emit it as a styled mark run and
+        // skip the auto-number FootnoteReferenceMark. Otherwise keep the standard
+        // auto-number mark + text run.
+        bool fnCustomMark =
+            IsTruthy(properties.GetValueOrDefault("referenceCustomMarkFollows"))
+            || (properties.TryGetValue("referenceCustomMark", out var fnBodyMark)
+                && !string.IsNullOrEmpty(fnBodyMark));
         // The authored text run carries `text` VERBATIM — no synthetic leading
         // space. Real Word footnotes place no space between the reference mark
         // and the first content run (the mark's own glyph spacing handles the
@@ -653,11 +667,21 @@ public partial class WordHandler
         // first <w:t> byte-for-byte. A previously prepended " " inflated every
         // rebuilt footnote's first run by one U+0020; GetFootnoteText trimmed it
         // back on readback (hiding it from get/view) while the on-disk XML drifted.
-        var fnContentPara = new Paragraph(
-            new ParagraphProperties(new ParagraphStyleId { Val = "FootnoteText" }),
-            new Run(fnRefMarkRPr, new FootnoteReferenceMark()),
-            new Run(new Text(fnText) { Space = SpaceProcessingModeValues.Preserve })
-        );
+        Paragraph fnContentPara;
+        if (fnCustomMark)
+            // Custom mark: the glyph (text) IS the mark run, styled like the
+            // source (fnRefMarkRPr carries the FootnoteReference rStyle when the
+            // dump forwarded it). No auto-number <w:footnoteRef>.
+            fnContentPara = new Paragraph(
+                new ParagraphProperties(new ParagraphStyleId { Val = "FootnoteText" }),
+                new Run(fnRefMarkRPr, new Text(fnText) { Space = SpaceProcessingModeValues.Preserve })
+            );
+        else
+            fnContentPara = new Paragraph(
+                new ParagraphProperties(new ParagraphStyleId { Val = "FootnoteText" }),
+                new Run(fnRefMarkRPr, new FootnoteReferenceMark()),
+                new Run(new Text(fnText) { Space = SpaceProcessingModeValues.Preserve })
+            );
         footnote.AppendChild(fnContentPara);
         // i18n: route remaining keys (direction, font.cs, bold.cs, etc.)
         // through the same paragraph + run helpers SetFootnotePath uses.
@@ -741,12 +765,27 @@ public partial class WordHandler
             ? new RunProperties(new RunStyle { Val = enRefStyle })
             : new RunProperties(new VerticalTextAlignment { Val = VerticalPositionValues.Superscript });
         var endnote = new Endnote { Id = enId };
+        // BUG-DUMP-NOTEREF-CUSTOMMARK-BODY: mirror AddFootnote — a custom-mark
+        // endnote's body leads with the literal glyph (styled EndnoteReference),
+        // not the auto-number <w:endnoteRef>. Injecting the auto-number prepended
+        // it to the glyph ("6*"). Suppress it when the dump signals a custom mark.
+        bool enCustomMark =
+            IsTruthy(properties.GetValueOrDefault("referenceCustomMarkFollows"))
+            || (properties.TryGetValue("referenceCustomMark", out var enBodyMark)
+                && !string.IsNullOrEmpty(enBodyMark));
         // Verbatim text run — no synthetic leading space (mirrors AddFootnote).
-        var enContentPara = new Paragraph(
-            new ParagraphProperties(new ParagraphStyleId { Val = "EndnoteText" }),
-            new Run(enRefMarkRPr, new EndnoteReferenceMark()),
-            new Run(new Text(enText) { Space = SpaceProcessingModeValues.Preserve })
-        );
+        Paragraph enContentPara;
+        if (enCustomMark)
+            enContentPara = new Paragraph(
+                new ParagraphProperties(new ParagraphStyleId { Val = "EndnoteText" }),
+                new Run(enRefMarkRPr, new Text(enText) { Space = SpaceProcessingModeValues.Preserve })
+            );
+        else
+            enContentPara = new Paragraph(
+                new ParagraphProperties(new ParagraphStyleId { Val = "EndnoteText" }),
+                new Run(enRefMarkRPr, new EndnoteReferenceMark()),
+                new Run(new Text(enText) { Space = SpaceProcessingModeValues.Preserve })
+            );
         endnote.AppendChild(enContentPara);
         // i18n: route remaining keys through the same helper as footnote.
         var enUnsupported = new List<string>();
