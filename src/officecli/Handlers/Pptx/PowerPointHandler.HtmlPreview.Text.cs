@@ -141,7 +141,7 @@ public partial class PowerPointHandler
                               || pProps?.GetFirstChild<Drawing.AutoNumberedBullet>() != null;
             // Bulletless hanging indent: marL>0 paired with indent<0 hangs the
             // first line |indent| left of the marL margin (real PowerPoint renders
-            // this even without a bullet — officeshot-confirmed). Emit the negative
+            // this even without a bullet — real-PowerPoint-confirmed). Emit the negative
             // text-indent with padding-left=marL so the first line hangs while
             // wrapped lines align to the margin. Guard the bleed the prior code
             // worried about: only emit the negative shift when marL >= |indent|,
@@ -612,13 +612,15 @@ public partial class PowerPointHandler
             if (rp.Spacing?.HasValue == true)
                 styles.Add($"letter-spacing:{rp.Spacing.Value / 100.0:0.##}pt");
 
-            // Superscript/subscript
+            // Superscript/subscript. OOXML baseline is a raw integer where
+            // 1000 == 1% (so super preset 30000 == 30%, sub preset -25000 == -25%).
+            // Map proportionally to CSS vertical-align:<percent>% — positive raises,
+            // negative lowers — instead of a binary super/sub keyword so distinct
+            // baselines render at distinct heights (matches real PowerPoint).
             if (rp.Baseline?.HasValue == true && rp.Baseline.Value != 0)
             {
-                if (rp.Baseline.Value > 0)
-                    styles.Add("vertical-align:super;font-size:smaller");
-                else
-                    styles.Add("vertical-align:sub;font-size:smaller");
+                double percent = rp.Baseline.Value / 1000.0;
+                styles.Add($"vertical-align:{percent:0.##}%;font-size:smaller");
             }
         }
         // R7-2: run with no <a:rPr> at all — still inherit the cascade default color.
