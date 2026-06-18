@@ -1724,7 +1724,6 @@ public class ResidentServer : IDisposable
     private static string FormatUnsupportedLine(List<string> unsupported, string? scope = null)
     {
         bool hasNamedAlternative = unsupported.Any(u => u.Contains("(valid ", StringComparison.Ordinal));
-        var prefix = hasNamedAlternative ? "UNSUPPORTED props" : "UNSUPPORTED props (use raw-set instead)";
         // Attach per-key "did you mean" suggestions (mirrors the non-resident
         // CommandBuilder.FormatUnsupported path) so guidance like the 1-based
         // cell-key hint for a 0-based r0c0 reaches resident-mode users too.
@@ -1734,7 +1733,15 @@ public class ResidentServer : IDisposable
             var s = CommandBuilder.SuggestPropertyScoped(u, scope);
             return s != null ? $"{u} (did you mean: {s}?)" : u;
         });
-        return $"{prefix}: {string.Join(", ", parts)}";
+        var body = $"UNSUPPORTED props: {string.Join(", ", parts)}";
+        // When the handler already named the valid alternative, that specific
+        // hint beats generic guidance. Otherwise point at help (prop discovery)
+        // first and raw-set (escape hatch) second — mirrors the non-resident
+        // CommandBuilder.FormatUnsupported message so both paths steer the user
+        // to discover the real prop instead of reaching for raw XML.
+        return hasNamedAlternative
+            ? body
+            : $"{body}. Run 'officecli help <format> <element>' to see valid props, or raw-set for raw XML.";
     }
 
     private void ExecuteAdd(ResidentRequest req)

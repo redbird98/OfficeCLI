@@ -1016,7 +1016,7 @@ static partial class CommandBuilder
             var suggestion = SuggestPropertyScoped(prop, scope);
             parts.Add(suggestion != null ? $"{prop} (did you mean: {suggestion}?)" : prop);
         }
-        return $"UNSUPPORTED props: {string.Join(", ", parts)}. Use 'officecli help <format>-set' to see available properties, or use raw-set for direct XML manipulation.";
+        return $"UNSUPPORTED props: {string.Join(", ", parts)}. Run 'officecli help <format> <element>' to see valid props, or raw-set for raw XML.";
     }
 
     /// <summary>
