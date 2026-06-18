@@ -4731,7 +4731,17 @@ public partial class WordHandler
             // `r, r, bookmark` (every bookmark hoisted to the tail of
             // node.Children). The trailing standalone bookmark loop below
             // is now skipped when this branch surfaces them.
-            var paraBookmarks = para.Elements<BookmarkStart>().ToList();
+            // BUG-DUMP-BMINDEL: a bookmark can live INSIDE a revision wrapper
+            // (<w:ins>/<w:del>) — e.g. a PAGEREF/REF target bookmark sitting in a
+            // tracked-deleted run. Those are NOT direct <w:p> children, so the
+            // bare Elements<BookmarkStart>() walk dropped them and every field
+            // pointing at one rendered "Error! Bookmark not defined." Include the
+            // ins/del-nested starts too (mirrors inlineEqsAll above); descendantPos
+            // already positions them by DOM order.
+            var paraBookmarks = para.Elements<BookmarkStart>()
+                .Concat(para.Elements<InsertedRun>().SelectMany(ins => ins.Elements<BookmarkStart>()))
+                .Concat(para.Elements<DeletedRun>().SelectMany(del => del.Elements<BookmarkStart>()))
+                .ToList();
             // BUG-DUMP-BMSPAN: a bookmark that WRAPS content (runs/equations
             // between BookmarkStart and the matching BookmarkEnd) must round-
             // trip with the End placed AFTER the wrapped content, not adjacent
@@ -4743,6 +4753,8 @@ public partial class WordHandler
             // Empty/zero-length bookmarks (End immediately follows Start) keep
             // the single combined `add bookmark` op so they stay empty.
             var paraBookmarkEnds = para.Elements<BookmarkEnd>()
+                .Concat(para.Elements<InsertedRun>().SelectMany(ins => ins.Elements<BookmarkEnd>()))
+                .Concat(para.Elements<DeletedRun>().SelectMany(del => del.Elements<BookmarkEnd>()))
                 .Where(be => be.Id?.Value != null && IsContentSpanBookmark(be))
                 .ToList();
             // BUG-DUMP-PERM: ranged editing-permission markers (<w:permStart>/
