@@ -135,6 +135,28 @@
       "examples": ["--prop lang=en-US"],
       "readback": "BCP-47 tag as written",
       "enforcement": "strict"
+    },
+    "list": {
+      "type": "string",
+      "description": "paragraph bullet style. Named presets (bullet, dash, arrow, check, star, none) or a literal bullet character; 'numbered'/'alpha'/'roman'/... map to auto-numbered schemes. Mutually exclusive with bulletRaw — when a non-standard bullet (custom buFont/buChar/buBlip) is present, Get emits bulletRaw instead of list.",
+      "aliases": ["bullet"],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": ["--prop list=bullet", "--prop list=numbered", "--prop list=none"],
+      "readback": "named preset or literal char; absent when bulletRaw is emitted",
+      "enforcement": "report"
+    },
+    "tabs": {
+      "type": "string",
+      "description": "custom tab stops as a compact comma-separated list of pos:align pairs (e.g. '1in:l,2in:r'). Alignment aliases: l (left), ctr (center), r (right), dec (decimal). Writes a:tabLst on the paragraph. An invalid alignment token rejects the whole value and leaves existing tab stops intact.",
+      "aliases": ["tablist"],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": ["--prop tabs=1in:l,2in:r"],
+      "readback": "compact pos:align list",
+      "enforcement": "report"
     }
   }
 }

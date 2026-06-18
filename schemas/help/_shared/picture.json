@@ -5,7 +5,7 @@
   "properties": {
     "alt": {
       "type": "string",
-      "description": "alternative text (DocProperties.Description). Defaults to the source file name on add. Aliases: alttext, description.",
+      "description": "alternative text (DocProperties.Description). When omitted, no description is written (intentional: an auto-filled filename is worse than none for screen readers). Aliases: alttext, description.",
       "aliases": [
         "altText",
         "alttext",
