@@ -1255,9 +1255,13 @@ public partial class PowerPointHandler
             return Star5Polygon(presetGeom);
         if (preset == "star4") return StarNPolygon(4, 38250, presetGeom);
         if (preset == "star6") return StarNPolygon(6, 28868, presetGeom);
+        if (preset == "star7") return StarNPolygon(7, 34601, presetGeom);
         if (preset == "star8") return StarNPolygon(8, 37500, presetGeom);
         if (preset == "star10") return StarNPolygon(10, 42533, presetGeom);
         if (preset == "star12") return StarNPolygon(12, 37500, presetGeom);
+        if (preset == "star16") return StarNPolygon(16, 37500, presetGeom);
+        if (preset == "star24") return StarNPolygon(24, 37500, presetGeom);
+        if (preset == "star32") return StarNPolygon(32, 37500, presetGeom);
 
         // R19 BUG A: parametric quads/polys honoring avLst (slant/notch/inset)
         if (preset == "parallelogram") return ParallelogramPolygon(presetGeom);
