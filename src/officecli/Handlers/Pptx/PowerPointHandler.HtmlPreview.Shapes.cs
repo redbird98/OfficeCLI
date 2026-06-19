@@ -667,12 +667,23 @@ public partial class PowerPointHandler
             // columns CSS must live on a BLOCK-level wrapper INSIDE the flex div
             // — the flex parent still handles vertical anchoring while the inner
             // block establishes the multi-column formatting context.
+            // column-fill:auto + a BOUNDED height make PowerPoint's newspaper-style
+            // sequential fill (column 1 filled top-to-bottom before column 2) instead
+            // of the CSS default `balance` (even split). The wrapper is a block child
+            // of the display:flex .shape-text; a flex child's height:100% does not
+            // reliably resolve into a definite height for column-fill, so we set an
+            // explicit height equal to the shape's text content box (shape ext height
+            // minus the top+bottom body insets), in pt — the same insets used above
+            // for the text-frame padding.
             string columnStyle = "";
             if (bodyPr?.ColumnCount?.HasValue == true && bodyPr.ColumnCount.Value > 1)
             {
-                columnStyle = $"column-count:{bodyPr.ColumnCount.Value};";
+                columnStyle = $"column-count:{bodyPr.ColumnCount.Value};column-fill:auto;";
                 if (bodyPr.ColumnSpacing?.HasValue == true)
                     columnStyle += $"column-gap:{Units.EmuToPt(bodyPr.ColumnSpacing.Value):0.##}pt;";
+                var contentHeightEmu = cy - tIns - bIns;
+                if (contentHeightEmu > 0)
+                    columnStyle += $"height:{Units.EmuToPt(contentHeightEmu):0.##}pt;";
             }
 
             var textStyle = !string.IsNullOrEmpty(flipStyle) || !string.IsNullOrEmpty(clipPathCss) || !string.IsNullOrEmpty(rtlColStyle) || !string.IsNullOrEmpty(wrapNoneStyle) || !string.IsNullOrEmpty(vertStyle) || !string.IsNullOrEmpty(anchorCtrStyle)
