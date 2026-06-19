@@ -3061,6 +3061,33 @@ public static partial class WordBatchEmitter
         }
     }
 
+    // BUG-DUMP-STYLE-TABS: render a style's pPr tab-stop list (the `tabs` Format
+    // value — IEnumerable<Dictionary>) into the POS[:ALIGN[:LEADER]] comma-joined
+    // shorthand that AddStyle's ApplyTabsShorthand consumes, so style tab stops
+    // round-trip on the `add style` op instead of via unresolvable per-stop
+    // `add tab parent=/styles/<id>` rows. Mirrors EmitTabStops' field reads.
+    internal static string BuildTabsShorthand(object? tabsVal)
+    {
+        if (tabsVal is not System.Collections.Generic.IEnumerable<Dictionary<string, object?>> list)
+            return "";
+        var segs = new List<string>();
+        foreach (var t in list)
+        {
+            if (!t.TryGetValue("pos", out var p) || p == null) continue;
+            var pos = p.ToString();
+            if (string.IsNullOrEmpty(pos)) continue;
+            var val = t.TryGetValue("val", out var v) && v != null ? v.ToString() ?? "" : "";
+            var leader = t.TryGetValue("leader", out var l) && l != null ? l.ToString() ?? "" : "";
+            // ApplyTabsShorthand defaults an empty ALIGN to left, so "pos::leader"
+            // is valid when a leader is present without an explicit alignment.
+            string seg = !string.IsNullOrEmpty(leader) ? $"{pos}:{val}:{leader}"
+                       : !string.IsNullOrEmpty(val) ? $"{pos}:{val}"
+                       : pos!;
+            segs.Add(seg);
+        }
+        return string.Join(",", segs);
+    }
+
     private static void EmitStyles(WordHandler word, List<BatchItem> items)
     {
         // Use query() rather than walking Get("/styles").Children — the
@@ -3141,6 +3168,21 @@ public static partial class WordBatchEmitter
             var emitId = props.GetValueOrDefault("id") ?? props.GetValueOrDefault("styleId");
             if (!string.IsNullOrEmpty(emitId) && !seenStyleIds.Add(emitId))
                 continue; // duplicate styleId — keep first, skip the rest (Word's behavior)
+            // BUG-DUMP-STYLE-TABS: a style's pPr tab stops must round-trip via the
+            // `tabs=` shorthand prop on the `add style` op — NOT as separate
+            // `add tab parent=/styles/<id>` rows. Unlike a paragraph (/body/p[N]
+            // resolves as a tab-add parent), `/styles/<id>` is not navigable for
+            // tab insertion, so the per-stop ops failed ("Path not found:
+            // /styles/TextBox") and the style's tab strip was dropped. AddStyle
+            // already consumes `tabs=` via ApplyTabsShorthand; build the shorthand
+            // here so FilterEmittableProps' drop of the (non-stringable) tabs list
+            // is compensated inline on the style op itself.
+            if (!props.ContainsKey("tabs") && !props.ContainsKey("tabstops")
+                && full.Format.TryGetValue("tabs", out var styleTabsForProp))
+            {
+                var tabsShorthand = BuildTabsShorthand(styleTabsForProp);
+                if (!string.IsNullOrEmpty(tabsShorthand)) props["tabs"] = tabsShorthand;
+            }
             // BUG-X6-03: built-in style ids (Normal / Heading1-9 / Title /
             // …) collide with the blank template's reservations on a
             // fresh batch target. AddStyle is now idempotent for those
@@ -3155,17 +3197,11 @@ public static partial class WordBatchEmitter
                 Type = "style",
                 Props = props
             });
-            // BUG-X4-T1: FilterEmittableProps drops the `tabs` scalar (it's a
-            // List<Dict>, not stringable). EmitParagraph compensates by
-            // emitting per-stop `add tab` rows; EmitStyles must do the same
-            // or paragraph-level custom tab stops on a style (Heading TOC
-            // leader tabs, etc.) silently disappear on round-trip.
-            var styleId = props.TryGetValue("id", out var sid) ? sid
-                : props.TryGetValue("styleId", out sid) ? sid : null;
-            if (styleId != null && full.Format.TryGetValue("tabs", out var styleTabs))
-            {
-                EmitTabStops($"/styles/{styleId}", styleTabs, items);
-            }
+            // BUG-X4-T1 / BUG-DUMP-STYLE-TABS: style tab stops are folded into the
+            // `tabs=` prop above (see comment at the seenStyleIds guard) — the old
+            // per-stop `add tab parent=/styles/<id>` emit failed to resolve and is
+            // retired for styles. (Paragraphs still use EmitTabStops via their own
+            // navigable /body/p[N] parent.)
             // STYLE-RAW-FALLBACK: if this style is a table style whose verbatim
             // XML we captured, replace the just-added <w:style> wholesale so
             // its tblPr / tblStylePr / shd / trPr / tcPr survive. Keyed by the
