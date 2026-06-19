@@ -1396,7 +1396,15 @@ public static partial class WordBatchEmitter
         // a non-empty rPr. Restricted to /body hosts with no external rels (same
         // constraints as the other raw-set fallbacks) so no r:id/r:embed can
         // dangle; everything else stays on the lossless typed `add pagebreak`.
-        if (parentPath == "/body")
+        // BUG-DUMP-DELBREAK: a break run wrapped in <w:del>/<w:ins>/move (e.g. a
+        // tracked-DELETED page break — invisible in Word's final view) must NOT
+        // take the verbatim raw-set path below: RawElementXml(run.Path) returns
+        // the bare <w:r>, NOT the surrounding <w:del>, so the deletion wrapper is
+        // dropped and the break resurrects as a LIVE page break (each one adds a
+        // page). Route revision-wrapped breaks through the typed `add pagebreak`
+        // path, which forwards revision.* so AddBreak re-wraps the rebuilt run.
+        bool isRevisionWrapped = run.Format.ContainsKey("revision.type");
+        if (parentPath == "/body" && !isRevisionWrapped)
         {
             var rawXml = word.RawElementXml(run.Path);
             if (!string.IsNullOrEmpty(rawXml)
@@ -1421,6 +1429,14 @@ public static partial class WordBatchEmitter
         if (run.Format.TryGetValue("breakClear", out var brkClear)
             && brkClear?.ToString() is { Length: > 0 } brkClearS)
             brkProps["breakClear"] = brkClearS;
+        // BUG-DUMP-DELBREAK: forward the tracked-change attribution so AddBreak
+        // re-wraps the rebuilt break run in <w:del>/<w:ins>/move. Without this a
+        // deleted (invisible) page break replays as a live break and inflates the
+        // page count. Mirrors the deleted-field forwarding (WrapRunsInRevision).
+        foreach (var rk in new[] { "revision.type", "revision.author", "revision.date", "revision.id" })
+            if (run.Format.TryGetValue(rk, out var rv)
+                && rv?.ToString() is { Length: > 0 } rvs)
+                brkProps[rk] = rvs;
         items.Add(new BatchItem
         {
             Command = "add",
