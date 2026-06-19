@@ -437,18 +437,25 @@ public partial class PowerPointHandler
                 // defRPr, applied as a fallback when the run sets neither.
                 bool? inhBold = inheritedDefRp?.Bold?.HasValue == true ? inheritedDefRp.Bold.Value : null;
                 bool? inhItalic = inheritedDefRp?.Italic?.HasValue == true ? inheritedDefRp.Italic.Value : null;
-                foreach (var run in runs)
+                // R63: walk the paragraph's children IN DOCUMENT ORDER so that a
+                // soft line break (<a:br>, Drawing.Break) interleaved between runs
+                // emits its <br> at the right position. Previously runs were all
+                // rendered first and breaks dumped at the paragraph's end, so a
+                // "run / br / run" sequence collapsed onto one line. Each <br>
+                // also resets the tab column (the next line's tabs measure from
+                // the line's left edge again).
+                foreach (var child in para.Elements())
                 {
-                    RenderRun(sb, run, themeColors, defaultFontSizeHundredths, placeholderPart, themeFontFallback, fontScale, defaultRunColor, inhBold, inhItalic, tabCtx);
+                    if (child is Drawing.Run run)
+                    {
+                        RenderRun(sb, run, themeColors, defaultFontSizeHundredths, placeholderPart, themeFontFallback, fontScale, defaultRunColor, inhBold, inhItalic, tabCtx);
+                    }
+                    else if (child is Drawing.Break)
+                    {
+                        sb.Append("<br>");
+                        tabCtx.ResetColumn();
+                    }
                 }
-            }
-
-            // Line breaks within paragraph. Each <br> resets the tab column
-            // (the next line's tabs measure from the line's left edge again).
-            foreach (var br in para.Elements<Drawing.Break>())
-            {
-                sb.Append("<br>");
-                tabCtx.ResetColumn();
             }
 
             sb.AppendLine("</div>");
