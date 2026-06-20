@@ -1079,11 +1079,11 @@ public partial class WordHandler
         var indent = new string(' ', ilvl * 2);
         var numFmt = GetNumberingFormat(numId.Value, ilvl);
 
-        // Bullet lists render a plain "• " in text mode — the lvlText for a
-        // bullet level is a private-use Wingdings code point that is garbage
-        // as plain text.
+        // Bullet lists render their lvlText glyph in text mode — a custom glyph
+        // (★ ▶ ● …) passes through verbatim to match Word and the HTML preview;
+        // standard/Wingdings bullets map to •/◦/▪. See BulletGlyphForText.
         if (numFmt.Equals("bullet", StringComparison.OrdinalIgnoreCase))
-            return $"{indent}• ";
+            return $"{indent}{BulletGlyphForText(GetLevelText(numId.Value, ilvl))} ";
 
         // Stateless fallback: no walk context → render from the level start.
         var st = state ?? new OrderedListNumberingState();

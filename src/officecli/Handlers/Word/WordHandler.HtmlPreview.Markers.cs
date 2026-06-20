@@ -379,4 +379,27 @@ public partial class WordHandler
         "▪" => "square",      // ▪ BLACK SMALL SQUARE
         _ => null
     };
+
+    // CONSISTENCY(bullet-glyph-map): plain-text counterpart of
+    // BulletGlyphToCssKeyword. `view text` must show the SAME bullet Word
+    // renders, which for a custom lvlText glyph (★ ▶ ● …) is the glyph itself —
+    // the old code collapsed every bullet to "•", so custom glyphs vanished and
+    // text disagreed with both the HTML preview (which passes them through via
+    // list-style-type) and Word. Map the recognized standard bullets to their
+    // visible glyph, pass real Unicode glyphs through verbatim, and fall back to
+    // "•" for an empty lvlText or an unmapped private-use (Wingdings/Symbol)
+    // code point that would render as tofu in plain text.
+    private static string BulletGlyphForText(string? lvlText)
+    {
+        switch (BulletGlyphToCssKeyword(lvlText ?? ""))
+        {
+            case "disc": return "•";
+            case "circle": return "◦";
+            case "square": return "▪";
+        }
+        if (string.IsNullOrEmpty(lvlText)) return "•";
+        var c = lvlText![0];
+        if (c >= 0xF000 && c <= 0xF0FF) return "•"; // unmapped PUA -> generic disc
+        return lvlText;
+    }
 }
