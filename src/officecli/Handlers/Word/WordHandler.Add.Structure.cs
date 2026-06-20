@@ -187,11 +187,13 @@ public partial class WordHandler
         });
 
         // Allow per-section overrides
-        if (properties.TryGetValue("pagewidth", out var sw) || properties.TryGetValue("pageWidth", out sw) || properties.TryGetValue("width", out sw))
+        bool explicitWidth = properties.TryGetValue("pagewidth", out var sw) || properties.TryGetValue("pageWidth", out sw) || properties.TryGetValue("width", out sw);
+        if (explicitWidth)
         {
             (EnsureSectPrChild<PageSize>(sectPr)).Width = ParseTwips(sw);
         }
-        if (properties.TryGetValue("pageheight", out var sh) || properties.TryGetValue("pageHeight", out sh) || properties.TryGetValue("height", out sh))
+        bool explicitHeight = properties.TryGetValue("pageheight", out var sh) || properties.TryGetValue("pageHeight", out sh) || properties.TryGetValue("height", out sh);
+        if (explicitHeight)
         {
             (EnsureSectPrChild<PageSize>(sectPr)).Height = ParseTwips(sh);
         }
@@ -201,11 +203,24 @@ public partial class WordHandler
             ps.Orient = orient.ToLowerInvariant() == "landscape"
                 ? PageOrientationValues.Landscape
                 : PageOrientationValues.Portrait;
-            // Swap width/height if dimensions don't match orientation
-            if (ps.Orient == PageOrientationValues.Landscape && ps.Width < ps.Height)
-                (ps.Width!.Value, ps.Height!.Value) = (ps.Height.Value, ps.Width.Value);
-            if (ps.Orient == PageOrientationValues.Portrait && ps.Width > ps.Height)
-                (ps.Width!.Value, ps.Height!.Value) = (ps.Height.Value, ps.Width.Value);
+            // BUG-DUMP-SECT-ORIENT-SWAP: only auto-swap W/H to match the
+            // orientation flag when the caller did NOT supply both explicit
+            // dimensions. `add section --prop orientation=landscape` with
+            // inherited portrait dims wants the swap (a convenience); but on
+            // dump→batch replay the source's pgSz is authoritative — Word
+            // renders w:w/w:h literally and w:orient is only a printer/UI hint.
+            // A section legitimately carrying w<h with orient=landscape (e.g. an
+            // 11"-wide × 15.75"-tall page) must NOT be rotated, or it becomes
+            // 15.75"×11", shrinks the usable height, and reflows onto an extra
+            // page on round-trip.
+            bool dimsAuthoritative = explicitWidth && explicitHeight;
+            if (!dimsAuthoritative)
+            {
+                if (ps.Orient == PageOrientationValues.Landscape && ps.Width < ps.Height)
+                    (ps.Width!.Value, ps.Height!.Value) = (ps.Height.Value, ps.Width.Value);
+                if (ps.Orient == PageOrientationValues.Portrait && ps.Width > ps.Height)
+                    (ps.Width!.Value, ps.Height!.Value) = (ps.Height.Value, ps.Width.Value);
+            }
         }
         else
         {
