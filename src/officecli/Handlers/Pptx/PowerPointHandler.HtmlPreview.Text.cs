@@ -294,7 +294,12 @@ public partial class PowerPointHandler
                     ? bulletAuto.Type.InnerText : "arabicPeriod") + "@" + paraLevel;
                 if (lastAutoKey != schemeKey)
                 {
-                    autoNumCounters[schemeKey] = 0;
+                    // Each (scheme,level) keeps its own counter that persists across
+                    // the text body. Only initialize when the key is genuinely new —
+                    // returning to a parent level after a deeper sub-level must NOT
+                    // reset the parent's count (PowerPoint continues 1.,2.,...).
+                    if (!autoNumCounters.ContainsKey(schemeKey))
+                        autoNumCounters[schemeKey] = 0;
                     lastAutoKey = schemeKey;
                 }
                 int startAt = bulletAuto.StartAt?.Value ?? 1;
