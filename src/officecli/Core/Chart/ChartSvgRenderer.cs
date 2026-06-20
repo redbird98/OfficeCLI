@@ -75,6 +75,13 @@ internal partial class ChartSvgRenderer
     // axis tick labels and its (major+minor) gridlines are suppressed.
     public bool ValAxisVisible { get; set; } = true;
     public bool CatAxisVisible { get; set; } = true;
+    // Major tick marks (<c:majorTickMark val="out|in|cross|none">). Short
+    // perpendicular lines drawn at each major label position. Null/"none" => no
+    // ticks. Synced from ChartInfo; only drawn when the element is present.
+    public string? ValMajorTickMark { get; set; }
+    public string? CatMajorTickMark { get; set; }
+    // Length of a major tick mark in px (PowerPoint draws ~4-5px).
+    public const int MajorTickLen = 4;
     public string AxisLineColor { get; set; } = "#555";
     public int ValFontPx { get; set; } = 9;
     public int CatFontPx { get; set; } = 9;
@@ -434,6 +441,9 @@ internal partial class ChartSvgRenderer
                 var dataIdx = catCount - 1 - c;
                 var label = dataIdx < categories.Length ? categories[dataIdx] : "";
                 var ly = oy + c * groupH + groupH / 2;
+                // Horizontal bars: category axis is VERTICAL on the left (x=plotOx).
+                if (TickMarkVisible(CatMajorTickMark))
+                    EmitVAxisTick(sb, plotOx, ly, CatMajorTickMark!);
                 sb.AppendLine($"        <text x=\"{plotOx - 4}\" y=\"{ly:0.#}\" fill=\"{CatColor}\" font-size=\"{catFontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\">{HtmlEncode(label)}</text>");
             }
             if (ValAxisVisible)
@@ -443,6 +453,9 @@ internal partial class ChartSvgRenderer
                 if (val > niceMax + 1e-9) continue; // BUG1(R25): no label past axisMax
                 var label = percentStacked ? $"{(int)val}%" : FormatAxisValue(val, valNumFmt);
                 var tx = TickX((double)t / nTicks);
+                // Horizontal bars: value axis is HORIZONTAL at the bottom (y=oy+ph).
+                if (TickMarkVisible(ValMajorTickMark))
+                    EmitHAxisTick(sb, tx, oy + ph, ValMajorTickMark!);
                 sb.AppendLine($"        <text x=\"{tx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{AxisColor}\" font-size=\"{valFontSize}\" text-anchor=\"middle\">{label}</text>");
             }
             // Reference-line overlays: horizontal bars → vertical line at value position on the X (value) axis.
@@ -667,6 +680,9 @@ internal partial class ChartSvgRenderer
             {
                 var label = c < categories.Length ? categories[c] : "";
                 var lx = ox + c * groupW + groupW / 2;
+                // Vertical columns: category axis is HORIZONTAL at the bottom (y=oy+ph).
+                if (TickMarkVisible(CatMajorTickMark))
+                    EmitHAxisTick(sb, lx, oy + ph, CatMajorTickMark!);
                 sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{catFontSize}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
             }
             if (ValAxisVisible)
@@ -679,6 +695,9 @@ internal partial class ChartSvgRenderer
                 if (val > niceMax + 1e-9) continue;
                 var label = percentStacked ? $"{(int)val}%" : FormatAxisValue(val, valNumFmt);
                 var ty = TickY((double)t / nTicks);
+                // Vertical columns: value axis is VERTICAL on the left (x=ox).
+                if (TickMarkVisible(ValMajorTickMark))
+                    EmitVAxisTick(sb, ox, ty, ValMajorTickMark!);
                 sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{valFontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
             }
             // Reference-line overlays: vertical bars/columns → horizontal line at value position on the Y (value) axis.
@@ -1213,14 +1232,16 @@ internal partial class ChartSvgRenderer
             }
         }
 
-        // Category labels
+        // Category labels (+ major tick marks below the bottom axis)
         for (int c = 0; c < catCount; c++)
         {
             var label = c < categories.Length ? categories[c] : "";
+            if (CatAxisVisible && TickMarkVisible(CatMajorTickMark))
+                EmitHAxisTick(sb, MapX(c), oy + ph, CatMajorTickMark!);
             sb.AppendLine($"        <text x=\"{MapX(c):0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
         }
 
-        // Value axis labels
+        // Value axis labels (+ major tick marks left of the value axis)
         for (int t = 0; t <= nTicks; t++)
         {
             double tickVal;
@@ -1237,6 +1258,8 @@ internal partial class ChartSvgRenderer
                 label = FormatAxisValue(tickVal, valNumFmt);
             }
             var ty = MapY(tickVal);
+            if (ValAxisVisible && TickMarkVisible(ValMajorTickMark))
+                EmitVAxisTick(sb, ox, ty, ValMajorTickMark!);
             sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
     }
@@ -1572,6 +1595,8 @@ internal partial class ChartSvgRenderer
         {
             var label = c < categories.Length ? categories[c] : "";
             var lx = ox + (catCount > 1 ? (double)pw * c / (catCount - 1) : pw / 2.0);
+            if (TickMarkVisible(CatMajorTickMark))
+                EmitHAxisTick(sb, lx, oy + ph, CatMajorTickMark!);
             sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
         }
         if (ValAxisVisible)
@@ -1584,6 +1609,8 @@ internal partial class ChartSvgRenderer
             var label = percent ? (val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}")
                 : FormatAxisValue(val, valNumFmt);
             var ty = oy + ph - (double)ph * t / tickCount;
+            if (TickMarkVisible(ValMajorTickMark))
+                EmitVAxisTick(sb, ox, ty, ValMajorTickMark!);
             sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
     }
@@ -2308,6 +2335,10 @@ internal partial class ChartSvgRenderer
         /// <summary>False when the category axis is deleted (&lt;c:delete val="1"/&gt;). Default true.</summary>
         public bool CatAxisVisible { get; set; } = true;
         public string? AxisLineColor { get; set; }
+        /// <summary>Value axis &lt;c:majorTickMark val="..."/&gt; ("out"/"in"/"cross"/"none"). Null when absent.</summary>
+        public string? ValMajorTickMark { get; set; }
+        /// <summary>Category axis &lt;c:majorTickMark val="..."/&gt; ("out"/"in"/"cross"/"none"). Null when absent.</summary>
+        public string? CatMajorTickMark { get; set; }
         public int DataLabelFontPx { get; set; } = 8;
         /// <summary>Reference-line overlays (horizontal dashed lines at constant values).
         /// Filled by ExtractChartInfo from any ref-line-only LineChart in the plot area.</summary>
@@ -2631,6 +2662,10 @@ internal partial class ChartSvgRenderer
             var valSpPr = valAxis.Elements().FirstOrDefault(e => e.LocalName == "spPr");
             info.AxisLineColor = ExtractLineColor(valSpPr);
 
+            // Major tick marks (short perpendicular lines at each major label)
+            var valTickEl = valAxis.Elements().FirstOrDefault(e => e.LocalName == "majorTickMark");
+            info.ValMajorTickMark = valTickEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+
             // Value axis number format (e.g. "$#,##0")
             var numFmtEl = valAxis.Elements().FirstOrDefault(e => e.LocalName == "numFmt");
             var fmtCode = numFmtEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "formatCode").Value;
@@ -2641,6 +2676,8 @@ internal partial class ChartSvgRenderer
         {
             info.CatMajorGridlines = catAxis.Elements().Any(e => e.LocalName == "majorGridlines");
             info.CatMinorGridlines = catAxis.Elements().Any(e => e.LocalName == "minorGridlines");
+            var catTickEl = catAxis.Elements().FirstOrDefault(e => e.LocalName == "majorTickMark");
+            info.CatMajorTickMark = catTickEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
             var catDeleteEl = catAxis.Elements().FirstOrDefault(e => e.LocalName == "delete");
             var catDelVal = catDeleteEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
             info.CatAxisVisible = catDelVal != "1";
@@ -3132,6 +3169,36 @@ internal partial class ChartSvgRenderer
         return v;
     }
 
+    /// <summary>True when a <c:majorTickMark val="..."/> value should draw ticks
+    /// (present and not "none"). PowerPoint draws short perpendicular lines at
+    /// each major label for "out"/"in"/"cross". Absent/"none" => no ticks.</summary>
+    private static bool TickMarkVisible(string? v)
+        => v != null && v != "none";
+
+    /// <summary>Emit a single major tick mark on a vertical axis (value axis on the
+    /// left, or horizontal-bar category axis): a short horizontal line at y.
+    /// "out" extends left of the axis (x=axisX), "in" right, "cross" straddles.</summary>
+    private void EmitVAxisTick(StringBuilder sb, double axisX, double y, string mode)
+    {
+        double x1 = axisX, x2 = axisX;
+        if (mode == "out") { x1 = axisX - MajorTickLen; x2 = axisX; }
+        else if (mode == "in") { x1 = axisX; x2 = axisX + MajorTickLen; }
+        else if (mode == "cross") { x1 = axisX - MajorTickLen; x2 = axisX + MajorTickLen; }
+        sb.AppendLine($"        <line x1=\"{x1:0.#}\" y1=\"{y:0.#}\" x2=\"{x2:0.#}\" y2=\"{y:0.#}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
+    }
+
+    /// <summary>Emit a single major tick mark on a horizontal axis (category axis at
+    /// bottom, or horizontal-bar value axis): a short vertical line at x.
+    /// "out" extends below the axis (y=axisY), "in" above, "cross" straddles.</summary>
+    private void EmitHAxisTick(StringBuilder sb, double x, double axisY, string mode)
+    {
+        double y1 = axisY, y2 = axisY;
+        if (mode == "out") { y1 = axisY; y2 = axisY + MajorTickLen; }
+        else if (mode == "in") { y1 = axisY - MajorTickLen; y2 = axisY; }
+        else if (mode == "cross") { y1 = axisY - MajorTickLen; y2 = axisY + MajorTickLen; }
+        sb.AppendLine($"        <line x1=\"{x:0.#}\" y1=\"{y1:0.#}\" x2=\"{x:0.#}\" y2=\"{y2:0.#}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
+    }
+
     /// <summary>Normalize a chart color for direct emission into an SVG
     /// fill/stroke attribute or CSS color. Bare OOXML hex ("FF0000") gets a
     /// '#' prefix; values already '#'-prefixed or non-hex (named/scheme
@@ -3159,6 +3226,8 @@ internal partial class ChartSvgRenderer
         ShowValMinorGridlines = info.ValMinorGridlines;
         ValAxisVisible = info.ValAxisVisible;
         CatAxisVisible = info.CatAxisVisible;
+        ValMajorTickMark = info.ValMajorTickMark;
+        CatMajorTickMark = info.CatMajorTickMark;
         if (info.AxisLineColor != null) AxisLineColor = CssHexColor(info.AxisLineColor);
         DataLabelFontPx = info.DataLabelFontPx;
         DataLabelPos = info.DataLabelPos;
