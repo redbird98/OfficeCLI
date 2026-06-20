@@ -2342,6 +2342,10 @@ internal partial class ChartSvgRenderer
         /// <summary>Chart-area outline width in EMU. Null defaults to PowerPoint's ~0.75pt.</summary>
         public long? ChartBorderWidthEmu { get; set; }
         public bool HasLegend { get; set; }
+        /// <summary>Series indices whose &lt;c:legendEntry&gt;&lt;c:delete val="1"/&gt;
+        /// hides the legend swatch+label while the series still plots. Empty
+        /// for charts with no deleted entries (the common case).</summary>
+        public HashSet<int> DeletedLegendEntries { get; set; } = new();
         /// <summary>#7f: OOXML c:legendPos InnerText — "r" (right, ECMA-376
         /// CT_LegendPos default), "b" (bottom), "t" (top), "l" (left),
         /// "tr" (top-right). Default is "r" to match the schema default that
@@ -2796,6 +2800,19 @@ internal partial class ChartSvgRenderer
             var posEl = legendEl.Elements().FirstOrDefault(e => e.LocalName == "legendPos");
             var posVal = posEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
             if (!string.IsNullOrEmpty(posVal)) info.LegendPos = posVal!;
+            // <c:legendEntry><c:idx val="N"/><c:delete val="1"/></c:legendEntry>
+            // hides the legend swatch+label for series N (idx = series index for
+            // bar/column/line/area). The series still plots; only its legend
+            // entry is suppressed. No entries → empty set → all series shown.
+            foreach (var entryEl in legendEl.Elements().Where(e => e.LocalName == "legendEntry"))
+            {
+                var entryDelEl = entryEl.Elements().FirstOrDefault(e => e.LocalName == "delete");
+                var entryDelVal = entryDelEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+                if (entryDelVal != "1" && entryDelVal != "true") continue;
+                var idxEl = entryEl.Elements().FirstOrDefault(e => e.LocalName == "idx");
+                var idxVal = idxEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+                if (int.TryParse(idxVal, out var idx)) info.DeletedLegendEntries.Add(idx);
+            }
         }
         else
         {
@@ -3536,6 +3553,8 @@ internal partial class ChartSvgRenderer
             for (int k = 0; k < info.Series.Count; k++)
             {
                 int i = isHorizBarLegend ? info.Series.Count - 1 - k : k;
+                // <c:legendEntry> delete: hide this series' swatch+label (it still plots).
+                if (info.DeletedLegendEntries.Contains(i)) continue;
                 var color = i < info.Colors.Count ? info.Colors[i] : DefaultColors[i % DefaultColors.Length];
                 sb.Append($"<span style=\"display:inline-flex;align-items:center;gap:4px\"><span style=\"display:inline-block;width:12px;height:12px;background:{color};border-radius:1px\"></span>{HtmlEncode(info.Series[i].name)}</span>");
             }
