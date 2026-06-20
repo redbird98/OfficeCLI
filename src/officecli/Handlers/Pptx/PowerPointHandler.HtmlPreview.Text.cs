@@ -286,9 +286,23 @@ public partial class PowerPointHandler
                 }
             }
 
+            // Determine paragraph emptiness BEFORE resolving bullets/auto-numbers.
+            // Real PowerPoint suppresses the bullet/number glyph on a paragraph that
+            // has no run text and no visible field/math, AND does NOT advance the
+            // auto-number counter for it (empty paras are skipped in numbering, so
+            // subsequent real items number continuously: 1.,2. not 3.,4.). The same
+            // hasVisibleText/hasVisibleField notion is reused below for the &nbsp;
+            // empty-line placeholder.
+            var hasMath = para.OuterXml.Contains("oMath");
+            var runs = para.Elements<Drawing.Run>().ToList();
+            bool hasVisibleField = para.Elements<Drawing.Field>()
+                .Any(f => !string.IsNullOrEmpty(ResolveFieldText(f, slideNumber)));
+            bool hasVisibleText = runs.Any(r => !string.IsNullOrEmpty(r.Text?.Text)) || hasVisibleField;
+            bool isEmptyPara = !hasVisibleText && !hasMath;
+
             // Resolve auto-numbered glyph (e.g. "1.", "a.", "iv.") and track per-scheme counter.
             string? autoNumGlyph = null;
-            if (bulletAuto != null)
+            if (bulletAuto != null && !isEmptyPara)
             {
                 int paraLevel = pProps?.Level?.Value ?? 0;
                 string schemeKey = (bulletAuto.Type?.HasValue == true && !string.IsNullOrEmpty(bulletAuto.Type.InnerText)
@@ -322,7 +336,7 @@ public partial class PowerPointHandler
 
             sb.Append($"<div class=\"para\" style=\"{string.Join(";", paraStyles)}\">");
 
-            if (hasBullet)
+            if (hasBullet && !isEmptyPara)
             {
                 // Image bullets have no glyph; use a generic marker so the
                 // bullet span is non-empty (the source blip relationship is not
@@ -429,22 +443,15 @@ public partial class PowerPointHandler
             // instead of the old hardcoded 0.5in spacer.
             var tabCtx = new TabContext(pProps?.GetFirstChild<Drawing.TabStopList>(), defTabPt);
 
-            var hasMath = paraXml.Contains("oMath");
-            var runs = para.Elements<Drawing.Run>().ToList();
             // A paragraph is visually empty when it has no runs OR all its runs
             // carry empty <a:t> (RenderRun emits nothing for empty text). Real
             // PowerPoint still reserves a full line of vertical space for such a
             // paragraph, sized to its effective font size (the run's/endParaRPr's
             // sz, default 18pt). Without a placeholder, an empty-text run div
             // collapses to zero height and the blank line disappears. Emit a
-            // sized &nbsp; so the line occupies its proper height.
-            // A field (<a:fld>) with non-empty effective text (cached <a:t> or a
-            // recomputed slidenum) is visible too — a field-only paragraph must
-            // not be treated as an empty/blank line and get the &nbsp; placeholder.
-            bool hasVisibleField = para.Elements<Drawing.Field>()
-                .Any(f => !string.IsNullOrEmpty(ResolveFieldText(f, slideNumber)));
-            bool hasVisibleText = runs.Any(r => !string.IsNullOrEmpty(r.Text?.Text)) || hasVisibleField;
-            if (!hasVisibleText && !hasMath)
+            // sized &nbsp; so the line occupies its proper height. (hasVisibleText/
+            // hasVisibleField/isEmptyPara computed above, before bullet resolution.)
+            if (isEmptyPara)
             {
                 // Empty paragraph (blank line) — size the &nbsp; to the effective
                 // font size so it isn't zero-height. Precedence: first run rPr sz
