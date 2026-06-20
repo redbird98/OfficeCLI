@@ -953,6 +953,14 @@ public partial class WordHandler
         // or its lvlText is absent and "" when val="" is present, so the
         // distinction is clean at this layer.
         var template = lvlText ?? $"%{ilvl + 1}";
+        // isLgl (ECMA-376 §17.9.10 w:isLgl) on the CURRENT level forces every
+        // placeholder in this level's lvlText to render as decimal (arabic),
+        // regardless of each referenced level's own numFmt — e.g. an
+        // upperRoman level 0 referenced as "%1" inside an isLgl level renders
+        // "1" not "I". Read off the current (ilvl) level definition.
+        var legal = GetLevel(numId, ilvl)?.GetFirstChild<IsLegalNumberingStyle>();
+        var isLgl = legal != null &&
+            (legal.Val == null || legal.Val.Value); // CT_OnOff default-true
         // Only %1..%9 are valid Word level placeholders (CT_LevelText / lvlText
         // references 1-based level indices 1-9). %0 is not a placeholder — Word
         // leaves it literal — and matching it here produced k=-1 →
@@ -962,7 +970,15 @@ public partial class WordHandler
         return System.Text.RegularExpressions.Regex.Replace(template, @"%([1-9])", m =>
         {
             var k = int.Parse(m.Groups[1].Value) - 1;
-            var lvlFmt = GetNumberingFormat(numId, k);
+            var lvlFmt = isLgl ? "decimal" : GetNumberingFormat(numId, k);
+            // A placeholder referencing an UNDEFINED level (or one whose fmt
+            // resolves to "bullet") must emit nothing for an ordered marker —
+            // Word renders an unstarted/undefined level as empty, NOT a bullet
+            // glyph. Without this, lvlText "%1.%2.%3." with only level 0 defined
+            // produced "1.•.•." (bullet pollution). isLgl forces decimal so it
+            // never hits this branch.
+            if (!isLgl && lvlFmt.Equals("bullet", StringComparison.OrdinalIgnoreCase))
+                return "";
             var counter = st.MultiLevelCounters.GetValueOrDefault(k, 0);
             return OfficeCli.Core.WordNumFmtRenderer.Render(counter, lvlFmt);
         });
@@ -970,12 +986,34 @@ public partial class WordHandler
 
     private string GetListPrefix(Paragraph para, OrderedListNumberingState? state = null)
     {
-        var numProps = para.ParagraphProperties?.NumberingProperties;
-        if (numProps == null) return "";
+        // A direct <w:numPr><w:numId val="0"/> explicitly suppresses numbering
+        // (e.g. a heading that opts out of its style's list). Honor it before
+        // resolving the style chain so suppressed paragraphs stay marker-less.
+        if (IsNumberingSuppressed(para)) return "";
 
-        var numId = numProps.NumberingId?.Val?.Value;
-        var ilvl = numProps.NumberingLevelReference?.Val?.Value ?? 0;
-        if (numId == null || numId == 0) return "";
+        // Direct numPr wins; otherwise fall back to the paragraph/character
+        // style chain so STYLE-inherited numbering (custom list styles AND
+        // Heading1..9) gets a text marker — matching the HTML preview, which
+        // already resolves via ResolveNumPrFromStyle. Reading only direct
+        // numPr left these paragraphs with no marker in `view text` while
+        // `view html` rendered "1.", "1.1.", etc.
+        var numProps = para.ParagraphProperties?.NumberingProperties;
+        int numIdVal;
+        int ilvl;
+        var directNumId = numProps?.NumberingId?.Val?.Value;
+        if (directNumId != null && directNumId != 0)
+        {
+            numIdVal = directNumId.Value;
+            ilvl = numProps!.NumberingLevelReference?.Val?.Value ?? 0;
+        }
+        else
+        {
+            var resolved = ResolveNumPrFromStyle(para);
+            if (resolved == null) return "";
+            (numIdVal, ilvl) = resolved.Value;
+            if (numIdVal == 0) return "";
+        }
+        int? numId = numIdVal;
 
         // Clamp ilvl to the OOXML-legal range [0, 8] ONCE before any use.
         // Malformed docs (raw-zip fuzz) carry ilvl negative (→ new string(' ',
