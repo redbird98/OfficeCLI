@@ -27,10 +27,10 @@ public partial class PowerPointHandler
         // border (which fakes a thin filled rect and loses zero-width/height
         // line semantics — observed on slide 2 of test-samples/07.pptx).
         var prstGeomEarly = shape.ShapeProperties?.GetFirstChild<Drawing.PresetGeometry>();
-        if (overridePos == null && prstGeomEarly?.Preset?.HasValue == true
+        if (prstGeomEarly?.Preset?.HasValue == true
             && prstGeomEarly.Preset.InnerText == "line")
         {
-            RenderConnector(sb, shape.ShapeProperties, themeColors, dataPath);
+            RenderConnector(sb, shape.ShapeProperties, themeColors, dataPath, overridePos);
             return;
         }
 
@@ -111,11 +111,11 @@ public partial class PowerPointHandler
         // pipeline, which already draws zero-dimension lines with the correct
         // color/width/dash (DashTypeToSvgDasharray). Only when the shape has no
         // text — a text-bearing collapsed shape is unusual; keep the div path.
-        if (overridePos == null && (cx == 0 || cy == 0)
+        if ((cx == 0 || cy == 0)
             && shape.ShapeProperties?.GetFirstChild<Drawing.Outline>() != null
             && string.IsNullOrWhiteSpace(GetShapeText(shape)))
         {
-            RenderConnector(sb, shape.ShapeProperties, themeColors, dataPath);
+            RenderConnector(sb, shape.ShapeProperties, themeColors, dataPath, overridePos);
             return;
         }
 
