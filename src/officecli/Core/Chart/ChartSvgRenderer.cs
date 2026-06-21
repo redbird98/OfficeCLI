@@ -1324,6 +1324,19 @@ internal partial class ChartSvgRenderer
         var maxExpl = explosions != null && explosions.Count > 0 ? explosions.Max() : 0.0;
         if (maxExpl > 0) r /= (1 + maxExpl);
         var innerR = r * holeRatio;
+
+        // Multi-series DOUGHNUT: PowerPoint draws one concentric ring per series,
+        // sharing the center hole, each ring an equal-width band of the annulus
+        // [innerR, r]. Series 0 is OUTERMOST. Each ring colors its slices by
+        // category index (the same per-category palette as a single ring).
+        // Single-series doughnut and all pie charts (holeRatio == 0) fall through
+        // to the original single-ring path below, unchanged.
+        if (holeRatio > 0 && series.Count > 1)
+        {
+            RenderMultiRingDoughnut(sb, series, categories, colors, cx, cy, r, innerR,
+                showDataLabels, showVal, showPercent, showCatName);
+            return;
+        }
         // firstSliceAng rotates the start edge clockwise from 12 o'clock. SVG y
         // grows downward, so a clockwise rotation adds to the angle directly.
         var firstSliceOffset = FirstSliceAngle * Math.PI / 180.0;
@@ -1419,6 +1432,88 @@ internal partial class ChartSvgRenderer
                 var labelFill = labelOutside ? "#444" : "#fff";
                 if (!string.IsNullOrEmpty(label))
                     sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{lx:0.#}\" y=\"{ly:0.#}\" fill=\"{labelFill}\" font-size=\"{DataLabelFontPx}\" font-weight=\"bold\" text-anchor=\"middle\" dominant-baseline=\"central\">{label}</text>");
+                labelAngle += sliceAngle;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Multi-series doughnut: one concentric ring per series. The annulus
+    /// [innerR, r] is split into N equal-width bands; series[0] occupies the
+    /// OUTERMOST band, series[N-1] the innermost (nearest the hole), matching
+    /// PowerPoint. Each ring colors its slices by category index using the
+    /// shared per-category palette. Data labels are drawn on the outer ring
+    /// only (PowerPoint labels every ring, but the outer ring keeps single-ring
+    /// label behavior intact and avoids label crowding in the thin inner bands).
+    /// </summary>
+    private void RenderMultiRingDoughnut(StringBuilder sb, List<(string name, double[] values)> series,
+        string[] categories, List<string> colors, double cx, double cy, double r, double innerR,
+        bool showDataLabels, bool showVal, bool showPercent, bool showCatName)
+    {
+        var firstSliceOffset = FirstSliceAngle * Math.PI / 180.0;
+        var bandWidth = (r - innerR) / series.Count;
+
+        for (int s = 0; s < series.Count; s++)
+        {
+            var values = series[s].values ?? [];
+            if (values.Length == 0) continue;
+            var total = values.Sum();
+            if (total <= 0) continue;
+
+            // Series 0 = outermost band. Band s spans [bandInner, bandOuter].
+            var bandOuter = r - s * bandWidth;
+            var bandInner = bandOuter - bandWidth;
+            var startAngle = -Math.PI / 2 + firstSliceOffset;
+
+            for (int i = 0; i < values.Length; i++)
+            {
+                var sliceAngle = 2 * Math.PI * values[i] / total;
+                var endAngle = startAngle + sliceAngle;
+                var color = i < colors.Count ? colors[i] : DefaultColors[i % DefaultColors.Length];
+                var sliceOpacity = FillOpacity(i);
+
+                if (sliceAngle >= 2 * Math.PI - 1e-6)
+                {
+                    sb.AppendLine($"        <path d=\"M {cx - bandOuter:0.#},{cy:0.#} A {bandOuter:0.#},{bandOuter:0.#} 0 1,1 {cx + bandOuter:0.#},{cy:0.#} A {bandOuter:0.#},{bandOuter:0.#} 0 1,1 {cx - bandOuter:0.#},{cy:0.#} Z M {cx - bandInner:0.#},{cy:0.#} A {bandInner:0.#},{bandInner:0.#} 0 1,1 {cx + bandInner:0.#},{cy:0.#} A {bandInner:0.#},{bandInner:0.#} 0 1,1 {cx - bandInner:0.#},{cy:0.#} Z\" fill=\"{color}\" fill-rule=\"evenodd\" opacity=\"{sliceOpacity}\"/>");
+                }
+                else
+                {
+                    var ox1 = cx + bandOuter * Math.Cos(startAngle); var oy1 = cy + bandOuter * Math.Sin(startAngle);
+                    var ox2 = cx + bandOuter * Math.Cos(endAngle); var oy2 = cy + bandOuter * Math.Sin(endAngle);
+                    var ix1 = cx + bandInner * Math.Cos(endAngle); var iy1 = cy + bandInner * Math.Sin(endAngle);
+                    var ix2 = cx + bandInner * Math.Cos(startAngle); var iy2 = cy + bandInner * Math.Sin(startAngle);
+                    var largeArc = sliceAngle > Math.PI ? 1 : 0;
+                    sb.AppendLine($"        <path d=\"M {ox1:0.#},{oy1:0.#} A {bandOuter:0.#},{bandOuter:0.#} 0 {largeArc},1 {ox2:0.#},{oy2:0.#} L {ix1:0.#},{iy1:0.#} A {bandInner:0.#},{bandInner:0.#} 0 {largeArc},0 {ix2:0.#},{iy2:0.#} Z\" fill=\"{color}\" opacity=\"{sliceOpacity}\"/>");
+                }
+                startAngle = endAngle;
+            }
+        }
+
+        // Labels on the outermost ring only (series 0).
+        if (showDataLabels)
+        {
+            var outerVals = series[0].values ?? [];
+            var outerTotal = outerVals.Sum();
+            if (outerTotal <= 0) return;
+            var labelR = r - bandWidth / 2;
+            var labelAngle = -Math.PI / 2 + firstSliceOffset;
+            for (int i = 0; i < outerVals.Length; i++)
+            {
+                var sliceAngle = 2 * Math.PI * outerVals[i] / outerTotal;
+                var midAngle = labelAngle + sliceAngle / 2;
+                var lx = cx + labelR * Math.Cos(midAngle);
+                var ly = cy + labelR * Math.Sin(midAngle);
+                var pct = outerVals[i] / outerTotal * 100;
+                string label;
+                if (showVal && !showPercent) label = pct >= 5 ? $"{outerVals[i]:0.##}" : "";
+                else if (showPercent && !showVal) label = pct >= 5 ? $"{pct:0}%" : "";
+                else if (showVal && showPercent) label = pct >= 5 ? $"{outerVals[i]:0.##} ({pct:0}%)" : "";
+                else if (showCatName && !showVal && !showPercent) label = "";
+                else label = pct >= 5 ? $"{pct:0}%" : "";
+                if (showCatName && pct >= 5 && i < categories.Length && !string.IsNullOrEmpty(categories[i]))
+                    label = string.IsNullOrEmpty(label) ? categories[i] : $"{categories[i]}, {label}";
+                if (!string.IsNullOrEmpty(label))
+                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{lx:0.#}\" y=\"{ly:0.#}\" fill=\"#fff\" font-size=\"{DataLabelFontPx}\" font-weight=\"bold\" text-anchor=\"middle\" dominant-baseline=\"central\">{label}</text>");
                 labelAngle += sliceAngle;
             }
         }

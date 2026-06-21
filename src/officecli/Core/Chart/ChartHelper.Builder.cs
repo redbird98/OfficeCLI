@@ -946,11 +946,16 @@ internal static partial class ChartHelper
         string[]? colors = null)
     {
         var chart = new C.DoughnutChart(new C.VaryColors { Val = true });
-        if (seriesData.Count > 0)
+        // Unlike pie, a doughnut legitimately supports multiple series —
+        // PowerPoint renders one concentric ring per series. Emit one
+        // <c:ser> per series (was previously hardcoded to seriesData[0],
+        // silently dropping inner rings). Per-data-point colors apply to
+        // each series' slices (PowerPoint colors every ring by category).
+        for (int s = 0; s < seriesData.Count; s++)
         {
-            var series = BuildPieSeries(0, seriesData[0].name,
-                categories, seriesData[0].values);
-            ApplyDataPointColors(series, seriesData[0].values.Length, colors);
+            var series = BuildPieSeries((uint)s, seriesData[s].name,
+                categories, seriesData[s].values);
+            ApplyDataPointColors(series, seriesData[s].values.Length, colors);
             chart.AppendChild(series);
         }
         chart.AppendChild(new C.HoleSize { Val = 50 });
