@@ -2002,6 +2002,31 @@ public partial class PowerPointHandler
              + $"{P(x4, y1)},{P(x4, h)},0 100%)";
     }
 
+    // leftUpArrow: a two-pronged L-shaped double arrow (one arm points left, one points
+    // up). Was missing from the switch (rendered as a plain rectangle). adj1=stem width,
+    // adj2=arrowhead half-width, adj3=stem length (fractions of ss). 12 straight-edge
+    // vertices, single connected. Verified against real PowerPoint (default + non-default).
+    private static string LeftUpArrowPolygon(long widthEmu, long heightEmu, Drawing.PresetGeometry? presetGeom)
+    {
+        double w = widthEmu, h = heightEmu, ss = Math.Min(w, h);
+        var a2 = Math.Clamp(ReadAdjValueCss(presetGeom, 1, 25000), 0, 50000);
+        double maxAdj1 = a2 * 2;
+        var a1 = Math.Clamp(ReadAdjValueCss(presetGeom, 0, 25000), 0, maxAdj1);
+        double maxAdj3 = 100000 - maxAdj1;
+        var a3 = Math.Clamp(ReadAdjValueCss(presetGeom, 2, 25000), 0, maxAdj3);
+        double x1 = ss * a3 / 100000.0;
+        double dx2 = ss * a2 / 50000.0, x2 = w - dx2, y2 = h - dx2;
+        double dx4 = ss * a2 / 100000.0, x4 = w - dx4, y4 = h - dx4;
+        double dx3 = ss * a1 / 200000.0, x3 = x4 - dx3, x5 = x4 + dx3, y3 = y4 - dx3, y5 = y4 + dx3;
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        string X(double v) => (v / w * 100).ToString("0.##", ci);
+        string Y(double v) => (v / h * 100).ToString("0.##", ci);
+        string P(double x, double y) => $"{X(x)}% {Y(y)}%";
+        return "clip-path:polygon("
+             + $"0 {Y(y4)}%,{P(x1, y2)},{P(x1, y3)},{P(x3, y3)},{P(x3, x1)},{P(x2, x1)},"
+             + $"{P(x4, 0)},{P(w, x1)},{P(x5, x1)},{P(x5, y5)},{P(x1, y5)},{P(x1, h)})";
+    }
+
     private static string PresetGeometryToCss(string preset, long widthEmu, long heightEmu,
         Drawing.PresetGeometry? presetGeom)
     {
@@ -2096,6 +2121,8 @@ public partial class PowerPointHandler
             return QuadArrowCalloutPolygon(widthEmu, heightEmu, presetGeom);
         if (preset == "bentUpArrow" && widthEmu > 0 && heightEmu > 0)
             return BentUpArrowPolygon(widthEmu, heightEmu, presetGeom);
+        if (preset == "leftUpArrow" && widthEmu > 0 && heightEmu > 0)
+            return LeftUpArrowPolygon(widthEmu, heightEmu, presetGeom);
         // corner (L-shape): adj1 = bottom (horizontal) arm height %, adj2 = left
         // (vertical) arm width %; both default 50000. Inner corner at (adj2, 100-adj1).
         // The old hardcoded 50/50 ignored both, so a thin-armed L looked fat.
