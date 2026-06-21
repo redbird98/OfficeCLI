@@ -1498,9 +1498,20 @@ public partial class PowerPointHandler
         string? duotoneFilter = null;
         if (picDuotone != null)
         {
-            var highlight = picDuotone.ChildElements
-                .OfType<Drawing.RgbColorModelHex>()
-                .LastOrDefault()?.Val?.Value;
+            // The highlight (lighter) color is the LAST color child. It may be a
+            // <a:srgbClr> OR a <a:schemeClr> (PowerPoint's built-in duotone presets and
+            // the CLI both write schemeClr). Resolving only srgbClr left schemeClr
+            // duotones at hue 0 (sepia-orange) regardless of the actual accent — a blue
+            // accent duotone previewed orange. Resolve the scheme color via themeColors.
+            var lastColorEl = picDuotone.ChildElements
+                .LastOrDefault(e => e is Drawing.RgbColorModelHex or Drawing.SchemeColor);
+            string? highlight = lastColorEl switch
+            {
+                Drawing.RgbColorModelHex rgbH => rgbH.Val?.Value,
+                Drawing.SchemeColor schH when schH.Val?.InnerText is string sn
+                    && themeColors.TryGetValue(sn, out var shx) => shx,
+                _ => null,
+            };
             var hue = !string.IsNullOrEmpty(highlight) ? RgbHexToHueDeg(highlight!) : 0.0;
             duotoneFilter = $"grayscale(1) sepia(1) saturate(3) hue-rotate({hue:0.#}deg)";
         }
