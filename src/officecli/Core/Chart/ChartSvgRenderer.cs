@@ -227,7 +227,14 @@ internal partial class ChartSvgRenderer
                 tickStep = ooxmlMajorUnit.Value;
                 nTicks = (int)Math.Round(niceMax / tickStep);
             }
-            else (niceMax, tickStep, nTicks) = ComputeNiceAxis(ooxmlMax ?? maxVal);
+            else
+            {
+                (niceMax, tickStep, nTicks) = ComputeNiceAxis(ooxmlMax ?? maxVal);
+                // An explicit axis max with no major unit must be honored exactly
+                // (PowerPoint pins the top to the entered value); ComputeNiceAxis
+                // would round it up. Mirrors the line/area-chart fix (R25).
+                if (ooxmlMax.HasValue) niceMax = ooxmlMax.Value;
+            }
             // Extend the axis floor below zero for negative data (mirrors the
             // line-chart DataToY path): snap the negative floor to the same
             // tickStep so a gridline lands on zero and on the negative extreme.
