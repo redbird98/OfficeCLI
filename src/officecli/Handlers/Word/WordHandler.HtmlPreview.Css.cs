@@ -2244,9 +2244,17 @@ public partial class WordHandler
             if (wm != null) parts.Add($"writing-mode:{wm}");
         }
 
-        // Cell noWrap — prevents content wrapping within the cell
+        // Cell noWrap — prevents content wrapping within the cell. Pair with
+        // overflow:hidden so that under a fixed-layout table (table-layout:fixed,
+        // where the column width is a hard cap) over-long single-line content is
+        // clipped at the cell's own edge instead of visually bleeding across the
+        // neighbouring columns. In autofit tables the column grows to fit the
+        // nowrap content, so the overflow guard never triggers there.
         if (tcPr.NoWrap != null)
+        {
             parts.Add("white-space:nowrap");
+            parts.Add("overflow:hidden");
+        }
 
         // #7a0: vertical-writing cell + noWrap interaction. When both are
         // present, flex alignment + min-height otherwise position text in

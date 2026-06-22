@@ -196,6 +196,19 @@ public partial class WordHandler
                 tableStyles.Add("direction:rtl");
         }
 
+        // Fixed-layout tables (w:tblLayout type="fixed") encode hard per-column
+        // widths in tblGrid. Word treats those widths as upper bounds and wraps
+        // long cell content within the column. Without CSS table-layout:fixed the
+        // browser treats <col> widths as *minimums* and lets unbreakable content
+        // (esp. long header text) expand the column past its declared width, which
+        // overflows the page right edge. Pin table-layout:fixed so the colgroup
+        // widths become hard caps and over-long cell text wraps inside the column,
+        // matching Word. Only applied when an explicit tblGrid is present (autofit /
+        // no-grid tables keep their content-driven sizing).
+        var isTableFixedLayout = tblPr?.TableLayout?.Type?.InnerText == "fixed";
+        if (isTableFixedLayout && table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().Any() == true)
+            tableStyles.Add("table-layout:fixed");
+
         var tableClass = tableBordersNone ? "borderless" : "";
         var tableStyleAttr = tableStyles.Count > 0 ? $" style=\"{string.Join(";", tableStyles)}\"" : "";
         var dataPathAttr = !string.IsNullOrEmpty(dataPath) ? $" data-path=\"{dataPath}\"" : "";
