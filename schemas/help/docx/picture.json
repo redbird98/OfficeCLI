@@ -136,7 +136,7 @@
       "add": true,
       "set": true,
       "get": true,
-      "description": "absolute horizontal anchor position in cm (positionH/posOffset).",
+      "description": "absolute horizontal anchor position (positionH/posOffset). Always pass a unit (cm/in/pt) — a bare number is interpreted as raw EMU (914400 per inch), so hPosition=3 is a 3-EMU offset.",
       "examples": [
         "--prop hPosition=3cm"
       ],
@@ -148,7 +148,7 @@
       "add": true,
       "set": true,
       "get": true,
-      "description": "absolute vertical anchor position in cm (positionV/posOffset).",
+      "description": "absolute vertical anchor position (positionV/posOffset). Always pass a unit (cm/in/pt) — a bare number is interpreted as raw EMU (914400 per inch), so vPosition=4 is a 4-EMU offset.",
       "examples": [
         "--prop vPosition=4cm"
       ],
@@ -211,30 +211,30 @@
     },
     "width": {
       "type": "length",
-      "description": "width — cm length (extent.Cy/Cx in EMU formatted to cm).",
+      "description": "width (extent.Cx). Always pass a unit (cm/in/pt) — a bare number is interpreted as raw EMU (914400 per inch), so width=5 renders an effectively invisible 5-EMU image.",
       "aliases": ["w"],
       "add": true,
       "set": true,
       "get": true,
       "examples": [
-        "--prop width=5",
+        "--prop width=5cm",
         "--prop width=3in",
-        "--prop w=3in"
+        "--prop w=120pt"
       ],
       "readback": "length string",
       "enforcement": "report"
     },
     "height": {
       "type": "length",
-      "description": "height — cm length (extent.Cy/Cx in EMU formatted to cm).",
+      "description": "height (extent.Cy). Always pass a unit (cm/in/pt) — a bare number is interpreted as raw EMU (914400 per inch), so height=5 renders an effectively invisible 5-EMU image.",
       "aliases": ["h"],
       "add": true,
       "set": true,
       "get": true,
       "examples": [
-        "--prop height=5",
+        "--prop height=4cm",
         "--prop height=2in",
-        "--prop h=2in"
+        "--prop h=90pt"
       ],
       "readback": "length string",
       "enforcement": "report"
