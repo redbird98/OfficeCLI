@@ -1484,9 +1484,24 @@ public partial class WordHandler
             // serif/sans-serif class when neither the primary nor the CJK fallback
             // is installed (matters in headless browsers like Playwright).
             var generic = GenericFontFamily(font);
+            // Latin slot (ascii/hAnsi). When a run carries BOTH a Latin face and a
+            // distinct EastAsia face, Word renders ASCII with the Latin face and
+            // CJK with the EastAsia face. The EA-priority resolution above picked
+            // the EastAsia face as `font`, dropping the Latin one — prepend it so
+            // the browser uses Latin first and falls back to EastAsia (+ its CJK
+            // chain) for glyphs the Latin face lacks. LTR runs only; the RTL path
+            // already resolves CS/Latin and never wants an EastAsia prefix.
+            var latinFont = isRtlRun ? null
+                : (fonts?.Ascii?.Value ?? ResolveThemeFont(fonts?.AsciiTheme?.InnerText)
+                   ?? fonts?.HighAnsi?.Value ?? ResolveThemeFont(fonts?.HighAnsiTheme?.InnerText));
+            var latinPrefix = (latinFont != null
+                && !latinFont.StartsWith("+", StringComparison.Ordinal)
+                && !string.Equals(latinFont, font, StringComparison.Ordinal))
+                ? $"'{CssSanitize(latinFont)}',"
+                : "";
             parts.Add(fallback != null
-                ? $"font-family:'{CssSanitize(font)}',{fallback},{generic}"
-                : $"font-family:'{CssSanitize(font)}',{generic}");
+                ? $"font-family:{latinPrefix}'{CssSanitize(font)}',{fallback},{generic}"
+                : $"font-family:{latinPrefix}'{CssSanitize(font)}',{generic}");
         }
 
         // Size (stored as half-points)
