@@ -324,7 +324,13 @@ public partial class PowerPointHandler
                 // unchanged. Empty text body falls back to "" (renders nothing).
                 var cellBody = new StringBuilder();
                 if (cell.TextBody != null)
-                    RenderTextBody(cellBody, cell.TextBody, themeColors);
+                    // Forward `part` as placeholderPart so cell text resolves the deck's
+                    // theme font (RenderTextBody's themeFontFallback) and hyperlink
+                    // relationships — matching shape text. Without it, runs with no
+                    // explicit a:latin emitted no font-family and rendered in the page
+                    // default instead of the theme minor font.
+                    RenderTextBody(cellBody, cell.TextBody, themeColors,
+                        placeholderShape: null, placeholderPart: part, fontRefDefaultColor: null);
                 var cellHtml = cellBody.ToString();
                 var styleStr = cellStyles.Count > 0 ? $" style=\"{string.Join(";", cellStyles)}\"" : "";
 
