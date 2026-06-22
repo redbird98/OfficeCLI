@@ -442,20 +442,64 @@
       "readback": "unit-qualified pt, e.g. \"1pt\"",
       "enforcement": "report"
     },
-    "shading": {
+    "fill": {
       "type": "color",
-      "description": "background shading color or '<pattern>;<fill>;<color>' triplet.",
+      "description": "run background shading (w:shd @fill). A solid background reads back as this canonical key (matching table cells and paragraphs). Accepts a solid color — hex ('FF0000'), '#'-prefixed hex ('#FF0000'), named color ('red'), or rgb(...) notation. For a true pattern shading (pct*/stripe/cross) or a foreground pattern color, pass the legacy `shading`/`shd` triplet form 'PATTERN;FILL[;COLOR]' instead; those read back via the shading.* detail keys. Distinct from `highlight` (w:highlight marker) and the w14 text shadow.",
       "aliases": [
+        "shading",
         "shd"
       ],
       "add": true,
       "set": true,
       "get": true,
       "examples": [
+        "--prop fill=FFFF00",
+        "--prop fill=#FF0000",
+        "--prop shd=\"pct25;FF0000;0000FF\""
+      ],
+      "readback": "#RRGGBB uppercase",
+      "enforcement": "report"
+    },
+    "shading": {
+      "type": "color",
+      "description": "background shading color or '<pattern>;<fill>;<color>' triplet. Set-side alias for `fill`; a solid background reads back via the canonical `fill` key.",
+      "aliases": [
+        "shd"
+      ],
+      "add": true,
+      "set": true,
+      "get": false,
+      "examples": [
         "--prop shading=FFFF00",
         "--prop shd=clear;FFFF00;auto"
       ],
-      "readback": "fill #RRGGBB",
+      "enforcement": "report"
+    },
+    "shading.val": {
+      "type": "string",
+      "description": "shading pattern value. Emitted on get only for a true pattern shading (pct*/stripe/cross); a solid background reads back as the canonical `fill` key. Add/Set use `fill`/`shading`/`shd`.",
+      "add": false,
+      "set": false,
+      "get": true,
+      "readback": "shading pattern token (pattern shading only)",
+      "enforcement": "report"
+    },
+    "shading.fill": {
+      "type": "string",
+      "description": "shading fill color hex. Emitted on get only for a true pattern shading; a solid background reads back as the canonical `fill` key.",
+      "add": false,
+      "set": false,
+      "get": true,
+      "readback": "#RRGGBB (pattern shading only)",
+      "enforcement": "report"
+    },
+    "shading.color": {
+      "type": "string",
+      "description": "shading foreground (pattern) color hex. Pattern shading only.",
+      "add": false,
+      "set": false,
+      "get": true,
+      "readback": "#RRGGBB (pattern shading only)",
       "enforcement": "report"
     },
     "textOutline": {

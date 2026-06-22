@@ -1159,7 +1159,7 @@ public partial class WordHandler
             "outlinelvl", "outlineLvl",
             "rstyle", "rStyle",
             "tabs", "tabstops",
-            "border", "borders", "shd", "shading",
+            "border", "borders", "shd", "shading", "fill",
             "font", "size", "fontsize", "fontSize", "bold", "italic", "color", "highlight",
             "underline", "strike", "strikethrough", "doublestrike", "dstrike",
             "vanish", "outline", "shadow", "emboss", "imprint", "noproof",
@@ -2354,11 +2354,15 @@ public partial class WordHandler
                 : (int)Math.Round(ParseHelpers.SafeParseDouble(rCharSp, "charspacing"), MidpointRounding.AwayFromZero);
             newRProps.Spacing = new Spacing { Val = rCsTwips };
         }
-        if (properties.TryGetValue("shd", out var rShd) || properties.TryGetValue("shading", out rShd))
+        if (properties.TryGetValue("shd", out var rShd) || properties.TryGetValue("shading", out rShd)
+            || properties.TryGetValue("fill", out rShd))
         {
             // BUG-DUMP-R41-4: route through the shared ParseShadingValue so the
             // run-level <w:shd> theme-linkage (themeFill=…/themeColor=…) tail
             // round-trips; preserves the prior VAL;FILL;COLOR semantics.
+            // CONSISTENCY(shd-canonical-fill): `fill` is the canonical Get key
+            // for a solid run shading — accept it as an Add alias so dump→batch
+            // (which now carries `fill`) replays via `add run --prop fill=…`.
             newRProps.Shading = ParseShadingValue(rShd);
         }
 
@@ -2539,7 +2543,7 @@ public partial class WordHandler
             "charspacing", "letterspacing",
             "caps", "smallcaps", "allcaps",
             "boldcs", "italiccs", "sizecs",
-            "shd", "shading",
+            "shd", "shading", "fill",
             "rstyle", "rStyle",
             "annotationRef", "annotationref",
             "hyphen",

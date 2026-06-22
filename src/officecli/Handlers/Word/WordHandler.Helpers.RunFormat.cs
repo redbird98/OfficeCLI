@@ -984,7 +984,12 @@ public partial class WordHandler
                 props.RemoveAllChildren<Spacing>();
                 InsertRunPropInSchemaOrder(props, new Spacing { Val = csTwips });
                 return true;
-            case "shading" or "shd":
+            case "shading" or "shd" or "fill":
+                // CONSISTENCY(shd-canonical-fill): `fill` is the canonical key
+                // Get emits for a solid run <w:shd>; accept it as a Set/Add alias
+                // alongside the legacy shading/shd so the dump→batch round-trip
+                // (which now carries `fill`) replays. ParseShadingValue treats a
+                // bare #RRGGBB as <w:shd w:val="clear" w:fill="…"/>.
                 props.RemoveAllChildren<Shading>();
                 InsertRunPropInSchemaOrder(props, ParseShadingValue(value));
                 return true;

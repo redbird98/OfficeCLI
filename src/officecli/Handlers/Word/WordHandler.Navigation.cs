@@ -2199,17 +2199,12 @@ public partial class WordHandler
         }
         if (run.RunProperties?.Shading != null)
         {
-            // BUG-DUMP22-01/02: surface val/fill/color sub-keys instead of
-            // a bare `shading=fill` value. The bare form silently coerced
-            // val to "clear" and dropped color on dump round-trip. Mirrors
-            // the paragraph/table/cell shading reader (round-21 fix).
-            var rShdVal = run.RunProperties.Shading.Val?.InnerText;
-            var rShdFill = run.RunProperties.Shading.Fill?.Value;
-            var rShdColor = run.RunProperties.Shading.Color?.Value;
-            if (!string.IsNullOrEmpty(rShdVal)) node.Format["shading.val"] = rShdVal;
-            if (!string.IsNullOrEmpty(rShdFill)) node.Format["shading.fill"] = ParseHelpers.FormatHexColor(rShdFill);
-            if (!string.IsNullOrEmpty(rShdColor)) node.Format["shading.color"] = ParseHelpers.FormatHexColor(rShdColor);
-            ReadShadingTheme(run.RunProperties.Shading, node);
+            // CONSISTENCY(shd-canonical-fill): solid run shading reads back as
+            // the canonical `fill` key (matches table cells / paragraphs); true
+            // pattern/theme keeps the shading.val/.fill/.color detail keys (the
+            // dump→batch fold consumes them). w:highlight and the w14 text
+            // shadow are separate elements handled elsewhere — only w:shd here.
+            ReadShadingCanonical(run.RunProperties.Shading, node);
         }
         // w14 text effects
         ReadW14TextEffects(run.RunProperties, node);
@@ -3828,15 +3823,10 @@ public partial class WordHandler
             }
             if (pProps.Shading != null)
             {
-                // CONSISTENCY(canonical-keys): split shading into shading.val/.fill/.color sub-keys
-                // matching the OOXML attribute structure. No compound semicolon string.
-                var shdVal = pProps.Shading.Val?.InnerText;
-                var shdFill = pProps.Shading.Fill?.Value;
-                var shdColor = pProps.Shading.Color?.Value;
-                if (!string.IsNullOrEmpty(shdVal)) node.Format["shading.val"] = shdVal;
-                if (!string.IsNullOrEmpty(shdFill)) node.Format["shading.fill"] = ParseHelpers.FormatHexColor(shdFill);
-                if (!string.IsNullOrEmpty(shdColor)) node.Format["shading.color"] = ParseHelpers.FormatHexColor(shdColor);
-                ReadShadingTheme(pProps.Shading, node);
+                // CONSISTENCY(shd-canonical-fill): solid paragraph shading reads
+                // back as the canonical `fill` key (matches table cells / runs);
+                // true pattern/theme keeps the shading.val/.fill/.color detail keys.
+                ReadShadingCanonical(pProps.Shading, node);
             }
 
             var pBdr = pProps.ParagraphBorders;
@@ -6220,6 +6210,51 @@ public partial class WordHandler
     // present so a plain (non-themed) shading keeps the legacy 3-key shape.
     // WordBatchEmitter's shading fold appends these as `key=val` tail segments;
     // ParseShadingValue strips them and ApplyShadingTheme re-stamps them.
+    // CONSISTENCY(shd-canonical-fill): emit a solid <w:shd> background as the
+    // canonical `fill` key, matching the table-cell shading reader (~line 5938).
+    // A solid background is <w:shd w:val="clear"|"solid" w:fill="RRGGBB"/> —
+    // fully expressible as one color, so emit `fill` (#RRGGBB uppercase via
+    // FormatHexColor). A real pattern (w:val = pct*/stripe/cross), a separate
+    // pattern color, or theme-linkage attrs cannot collapse to one solid color
+    // and keep the shading.val/.fill/.color/.theme* detail keys (consumed by the
+    // dump→batch fold in WordBatchEmitter.Filters.cs). <w:shd w:val="clear"
+    // w:fill="auto"/> ("no shading") emits nothing.
+    private static void ReadShadingCanonical(Shading shd, DocumentNode node)
+    {
+        var shdVal = shd.Val?.InnerText;
+        var shdFill = shd.Fill?.Value;
+        var shdColor = shd.Color?.Value;
+        bool hasFillColor = !string.IsNullOrEmpty(shdFill)
+            && !string.Equals(shdFill, "auto", StringComparison.OrdinalIgnoreCase);
+        bool isSolidVal = string.IsNullOrEmpty(shdVal)
+            || string.Equals(shdVal, "clear", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(shdVal, "solid", StringComparison.OrdinalIgnoreCase);
+        bool hasPatternColor = !string.IsNullOrEmpty(shdColor);
+        bool hasTheme = shd.ThemeFill?.HasValue == true
+            || shd.ThemeFillShade?.Value != null || shd.ThemeFillTint?.Value != null
+            || shd.ThemeColor?.HasValue == true
+            || shd.ThemeShade?.Value != null || shd.ThemeTint?.Value != null;
+
+        bool effectivelyNone = isSolidVal && !hasFillColor && !hasPatternColor && !hasTheme;
+
+        if (effectivelyNone)
+        {
+            // intentionally emit no key (matches no <w:shd> at all)
+        }
+        else if (isSolidVal && hasFillColor && !hasPatternColor && !hasTheme)
+        {
+            node.Format["fill"] = ParseHelpers.FormatHexColor(shdFill);
+        }
+        else
+        {
+            // Pattern / theme / pattern-color: keep the detail keys verbatim.
+            if (!string.IsNullOrEmpty(shdVal)) node.Format["shading.val"] = shdVal;
+            if (!string.IsNullOrEmpty(shdFill)) node.Format["shading.fill"] = ParseHelpers.FormatHexColor(shdFill);
+            if (hasPatternColor) node.Format["shading.color"] = ParseHelpers.FormatHexColor(shdColor);
+            ReadShadingTheme(shd, node);
+        }
+    }
+
     private static void ReadShadingTheme(Shading shd, DocumentNode node)
     {
         if (shd.ThemeFill?.HasValue == true) node.Format["shading.themeFill"] = shd.ThemeFill.InnerText ?? "";
