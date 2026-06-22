@@ -3222,7 +3222,7 @@ internal partial class ChartSvgRenderer
             info.ValMajorGridlines = majorGridlines != null;
             info.ValMinorGridlines = valAxis.Elements().Any(e => e.LocalName == "minorGridlines");
             var gridSpPr = majorGridlines?.Elements().FirstOrDefault(e => e.LocalName == "spPr");
-            info.GridlineColor = ExtractLineColor(gridSpPr);
+            info.GridlineColor = ExtractLineColor(gridSpPr, themeColors);
             // Value-axis major-gridline dash style (<a:ln><a:prstDash val="dash"/>).
             var gridLnEl = gridSpPr?.Elements().FirstOrDefault(e => e.LocalName == "ln");
             var gridDashEl = gridLnEl?.Elements().FirstOrDefault(e => e.LocalName == "prstDash");
@@ -3242,7 +3242,7 @@ internal partial class ChartSvgRenderer
 
             // Axis line color
             var valSpPr = valAxis.Elements().FirstOrDefault(e => e.LocalName == "spPr");
-            info.AxisLineColor = ExtractLineColor(valSpPr);
+            info.AxisLineColor = ExtractLineColor(valSpPr, themeColors);
 
             // Major tick marks (short perpendicular lines at each major label)
             var valTickEl = valAxis.Elements().FirstOrDefault(e => e.LocalName == "majorTickMark");
@@ -3327,11 +3327,11 @@ internal partial class ChartSvgRenderer
         // Plot / chart fill
         var plotSpPr = plotArea.Elements().FirstOrDefault(e => e.LocalName == "spPr");
         info.PlotFillColor = ExtractFillColor(plotSpPr);
-        info.PlotBorderColor = ExtractLineColor(plotSpPr);
+        info.PlotBorderColor = ExtractLineColor(plotSpPr, themeColors);
         info.PlotBorderWidthEmu = ExtractLineWidthEmu(plotSpPr);
         var chartSpPr = chart?.Parent?.Elements().FirstOrDefault(e => e.LocalName == "spPr");
         info.ChartFillColor = ExtractFillColor(chartSpPr);
-        info.ChartBorderColor = ExtractLineColor(chartSpPr);
+        info.ChartBorderColor = ExtractLineColor(chartSpPr, themeColors);
         info.ChartBorderWidthEmu = ExtractLineWidthEmu(chartSpPr);
 
         // Legend
@@ -3438,7 +3438,7 @@ internal partial class ChartSvgRenderer
                 var markerSpPr = marker?.Elements().FirstOrDefault(e => e.LocalName == "spPr");
                 var mFill = ExtractFillColor(markerSpPr, themeColors);
                 info.MarkerFillColors.Add(mFill != null ? $"#{mFill}" : null);
-                var mLine = ExtractLineColor(markerSpPr);
+                var mLine = ExtractLineColor(markerSpPr, themeColors);
                 info.MarkerLineColors.Add(mLine != null ? $"#{mLine}" : null);
                 serIdx++;
 
@@ -3492,7 +3492,7 @@ internal partial class ChartSvgRenderer
                     // Trendline styling
                     var tlSpPr = trendlineEl.Elements().FirstOrDefault(e => e.LocalName == "spPr");
                     var tlLn = tlSpPr?.Elements().FirstOrDefault(e => e.LocalName == "ln");
-                    tlInfo.Color = ExtractLineColor(tlSpPr);
+                    tlInfo.Color = ExtractLineColor(tlSpPr, themeColors);
                     if (tlLn?.GetAttributes().FirstOrDefault(a => a.LocalName == "w").Value is string tlw
                         && int.TryParse(tlw, out var tlwPt))
                         tlInfo.Width = Math.Round(tlwPt / EmuConverter.EmuPerPointF, 1);
@@ -3525,7 +3525,7 @@ internal partial class ChartSvgRenderer
                         ebInfo.Value = ebVal;
                     // Error bar styling
                     var ebSpPr = errBarsEl.Elements().FirstOrDefault(e => e.LocalName == "spPr");
-                    ebInfo.Color = ExtractLineColor(ebSpPr);
+                    ebInfo.Color = ExtractLineColor(ebSpPr, themeColors);
                     var ebLn = ebSpPr?.Elements().FirstOrDefault(e => e.LocalName == "ln");
                     if (ebLn?.GetAttributes().FirstOrDefault(a => a.LocalName == "w").Value is string ebw
                         && int.TryParse(ebw, out var ebwPt))
@@ -3543,7 +3543,7 @@ internal partial class ChartSvgRenderer
             {
                 var dlSpPr = dropLinesEl.Elements().FirstOrDefault(e => e.LocalName == "spPr");
                 var dlLn = dlSpPr?.Elements().FirstOrDefault(e => e.LocalName == "ln");
-                info.DropLineColor = ExtractLineColor(dlSpPr);
+                info.DropLineColor = ExtractLineColor(dlSpPr, themeColors);
                 if (dlLn?.GetAttributes().FirstOrDefault(a => a.LocalName == "w").Value is string dlw
                     && int.TryParse(dlw, out var dlwPt))
                     info.DropLineWidth = Math.Round(dlwPt / EmuConverter.EmuPerPointF, 1);
@@ -3556,7 +3556,7 @@ internal partial class ChartSvgRenderer
             {
                 var hlSpPr = hiLowEl.Elements().FirstOrDefault(e => e.LocalName == "spPr");
                 var hlLn = hlSpPr?.Elements().FirstOrDefault(e => e.LocalName == "ln");
-                info.HighLowLineColor = ExtractLineColor(hlSpPr);
+                info.HighLowLineColor = ExtractLineColor(hlSpPr, themeColors);
                 if (hlLn?.GetAttributes().FirstOrDefault(a => a.LocalName == "w").Value is string hlw
                     && int.TryParse(hlw, out var hlwPt))
                     info.HighLowLineWidth = Math.Round(hlwPt / EmuConverter.EmuPerPointF, 1);
@@ -3816,8 +3816,9 @@ internal partial class ChartSvgRenderer
         return rot / 60000;
     }
 
-    /// <summary>Extract line/outline color from spPr (ln > solidFill > srgbClr).</summary>
-    private static string? ExtractLineColor(OpenXmlElement? spPr)
+    /// <summary>Extract line/outline color from spPr (ln > solidFill > srgbClr, or
+    /// > schemeClr resolved through the theme).</summary>
+    private static string? ExtractLineColor(OpenXmlElement? spPr, Dictionary<string, string>? themeColors = null)
     {
         if (spPr == null) return null;
         var ln = spPr.Elements().FirstOrDefault(e => e.LocalName == "ln");
@@ -3825,6 +3826,23 @@ internal partial class ChartSvgRenderer
         var solidFill = ln.Elements().FirstOrDefault(e => e.LocalName == "solidFill");
         var srgb = solidFill?.Elements().FirstOrDefault(e => e.LocalName == "srgbClr");
         var val = srgb?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+        // schemeClr (accent1.., tx1, bg1, ...): resolve through the theme map so a
+        // gridline / axis line / trendline / error bar / drop line / hi-low line /
+        // marker line / plot or chart border styled with a scheme color renders its
+        // theme hex instead of falling back to a default or the series color.
+        // Mirrors ExtractFillColor / ExtractFontColor.
+        if (val == null && themeColors != null)
+        {
+            var scheme = solidFill?.Elements().FirstOrDefault(e => e.LocalName == "schemeClr");
+            var schemeName = scheme?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+            if (!string.IsNullOrEmpty(schemeName))
+            {
+                var canonical = ParseHelpers.NormalizeSchemeColorName(schemeName) ?? schemeName;
+                if (themeColors.TryGetValue(canonical, out var themeHex)
+                    || themeColors.TryGetValue(schemeName, out themeHex))
+                    val = themeHex;
+            }
+        }
         return HexOrNull(val);
     }
 
