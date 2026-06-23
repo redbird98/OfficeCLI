@@ -1600,11 +1600,17 @@ public partial class WordHandler
                 gridLinePitchPt = lp / 20.0; // twips to pt
         }
 
-        // Default text color: docDefaults → theme dk1
+        // Default text color: explicit docDefaults w:color only; otherwise black.
+        // Word does NOT derive the default run color from theme dk1 — an
+        // uncolored run is "auto" (rendered black on a light backdrop). A
+        // brand-colored dk1 (e.g. srgbClr B82326) must not bleed onto every
+        // run that lacks an explicit w:color / themeColor. Runs that DO carry
+        // w:themeColor="text1"/"dark1" still resolve to dk1 via ResolveRunColor;
+        // auto-on-dark-bg reverse-out (R39) is handled separately in
+        // ResolveEffectiveBackgroundForRun.
         var color = "#000000";
         var cv = rPr?.Color?.Val?.Value;
         if (cv != null && cv != "auto" && IsHexColor(cv)) color = $"#{cv}";
-        else if (GetThemeColors().TryGetValue("dk1", out var dk1) && IsHexColor(dk1)) color = $"#{dk1}";
 
         // Space after: Normal style pPr → docDefaults pPr → 0
         double spaceAfterPt = 0;
