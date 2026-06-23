@@ -73,7 +73,13 @@ internal static class FileSource
 
     private static (MemoryStream, string) ResolveUrl(string url)
     {
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        // SSRF guard: same connect-time public-IP enforcement as image fetch —
+        // refuse loopback / private / link-local / cloud-metadata targets. See
+        // SsrfGuard. Without this, a caller-supplied data=/model3d=/media= URL
+        // is an SSRF primitive when officecli runs on untrusted input.
+        var handler = SsrfGuard.CreateGuardedHandler("file");
+
+        using var client = new HttpClient(handler, disposeHandler: true) { Timeout = TimeSpan.FromSeconds(30) };
         client.DefaultRequestHeaders.Add("User-Agent", "OfficeCLI");
 
         var response = client.GetAsync(url).GetAwaiter().GetResult();
