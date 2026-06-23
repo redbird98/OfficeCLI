@@ -945,19 +945,31 @@ public partial class PowerPointHandler
                 if (decoStyle != null) styles.Add($"text-decoration-style:{decoStyle}");
                 if (decoThickness != null) styles.Add($"text-decoration-thickness:{decoThickness}");
 
-                // Underline color (a:uFill). When distinct from the text color,
-                // PowerPoint paints the underline in its own color; emit
-                // text-decoration-color so the line isn't drawn in the text color.
+                // Underline color + width. PowerPoint exposes underline appearance
+                // through TWO sibling slots: <a:uFill> (fill-only color) and <a:uLn>
+                // (full line properties — its own <a:solidFill> color AND a @w width).
+                // We honored uFill but dropped uLn, so a colored/thick underline
+                // authored via uLn (the common slot when a custom WIDTH is wanted,
+                // since uFill has no @w) rendered in the text color at default
+                // thickness. Mirror NodeBuilder's Get path: uFill color wins; uLn is
+                // the color fallback and the sole source of the line width.
                 var uFill = rp.GetFirstChild<Drawing.UnderlineFill>();
-                if (uFill != null)
+                var uColor = uFill != null
+                    ? ResolveFillColor(uFill.GetFirstChild<Drawing.SolidFill>(), themeColors) : null;
+                var uLn = rp.GetFirstChild<Drawing.Underline>();
+                if (uLn != null)
                 {
-                    var uColor = ResolveFillColor(uFill.GetFirstChild<Drawing.SolidFill>(), themeColors);
-                    if (uColor != null)
-                    {
-                        var textColor = ResolveFillColor(rp.GetFirstChild<Drawing.SolidFill>(), themeColors);
-                        if (!string.Equals(uColor, textColor, StringComparison.OrdinalIgnoreCase))
-                            styles.Add($"text-decoration-color:{uColor}");
-                    }
+                    uColor ??= ResolveFillColor(uLn.GetFirstChild<Drawing.SolidFill>(), themeColors);
+                    if (uLn.Width?.HasValue == true)
+                        // Explicit uLn @w (EMU) overrides any heuristic decoThickness
+                        // emitted above (CSS last-wins within the inline style).
+                        styles.Add($"text-decoration-thickness:{Units.EmuToPt(uLn.Width.Value):0.##}pt");
+                }
+                if (uColor != null)
+                {
+                    var textColor = ResolveFillColor(rp.GetFirstChild<Drawing.SolidFill>(), themeColors);
+                    if (!string.Equals(uColor, textColor, StringComparison.OrdinalIgnoreCase))
+                        styles.Add($"text-decoration-color:{uColor}");
                 }
             }
 
