@@ -638,7 +638,16 @@ public partial class WordHandler
                         {
                             var leading = sb.ToString(segStart, sb.Length - segStart);
                             sb.Length = segStart;
-                            sb.Append($"<span style=\"display:inline-block;width:{widthPt:0.##}pt;{cssLeader}white-space:nowrap;overflow:hidden;vertical-align:bottom\">{leading}</span>");
+                            // Use min-width (not fixed width): a tab advances the
+                            // pen to AT LEAST the stop position, so when the leading
+                            // text is shorter than the gap the box is exactly widthPt
+                            // (following text lands on the absolute tab stop) and when
+                            // it is longer the box grows to fit and pushes the
+                            // following text past the stop — matching Word. A fixed
+                            // width + overflow:hidden/nowrap instead CLIPPED any
+                            // leading text wider than the gap, silently dropping
+                            // visible body text (Word never clips at a tab stop).
+                            sb.Append($"<span style=\"display:inline-block;min-width:{widthPt:0.##}pt;{cssLeader}vertical-align:bottom\">{leading}</span>");
                         }
                         else
                         {
