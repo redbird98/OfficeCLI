@@ -479,6 +479,27 @@ public partial class PowerPointHandler
             style = "dashed";
         }
 
+        // CONSISTENCY(compound-line): a border <a:ln cmpd="dbl"/thickThin/thinThick/tri>
+        // renders as parallel lines in PowerPoint. CSS border-style has only "double",
+        // so map any non-single compound type to "double" (mirrors the shape outline
+        // path, which emits border-style:double for cmpd != "sng"). Only applies to an
+        // otherwise-solid border — a dashed compound border keeps the dash approximation.
+        if (style == "solid")
+        {
+            var cmpd = borderProps switch
+            {
+                Drawing.LeftBorderLineProperties lb => lb.CompoundLineType?.InnerText,
+                Drawing.RightBorderLineProperties rb => rb.CompoundLineType?.InnerText,
+                Drawing.TopBorderLineProperties tb => tb.CompoundLineType?.InnerText,
+                Drawing.BottomBorderLineProperties bb => bb.CompoundLineType?.InnerText,
+                Drawing.TopLeftToBottomRightBorderLineProperties tlbr => tlbr.CompoundLineType?.InnerText,
+                Drawing.BottomLeftToTopRightBorderLineProperties bltr => bltr.CompoundLineType?.InnerText,
+                _ => null
+            };
+            if (!string.IsNullOrEmpty(cmpd) && cmpd != "sng")
+                style = "double";
+        }
+
         return $"{widthPt:0.##}pt {style} {color}";
     }
 
