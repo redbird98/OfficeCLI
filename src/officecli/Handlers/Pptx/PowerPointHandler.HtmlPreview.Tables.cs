@@ -468,6 +468,16 @@ public partial class PowerPointHandler
                 _ => "solid"
             };
         }
+        else if (borderProps.GetFirstChild<Drawing.CustomDash>() != null)
+        {
+            // CONSISTENCY(dash-pattern): <a:custDash> (mutually exclusive with prstDash)
+            // also makes the border dashed. A CSS border-style cannot express an
+            // arbitrary dash array, so approximate to "dashed" — same compromise the
+            // dashDot presets above take. Without this a custom-dashed border rendered
+            // SOLID (the shape/connector path emits a real stroke-dasharray; a CSS <td>
+            // border can't, so dashed is the faithful approximation).
+            style = "dashed";
+        }
 
         return $"{widthPt:0.##}pt {style} {color}";
     }
