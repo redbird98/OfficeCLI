@@ -72,6 +72,44 @@ public partial class WordHandler
             && t.Leader?.InnerText is null or "none") == true;
     }
 
+    /// <summary>
+    /// True when any run after <paramref name="run"/> in the paragraph carries
+    /// visible content (text, symbol, drawing, or another tab). Used by the
+    /// aligned-tab band renderer to recognize a trailing underlined tab (a
+    /// full-width heading underline rule): when the underlined tab is the last
+    /// content, the band gets a stretching bottom-border instead of a zero-width
+    /// empty span. A trailing run that holds only the paragraph mark or empty
+    /// rPr is not content.
+    /// </summary>
+    private static bool RunHasContentAfter(Run run, Paragraph para)
+    {
+        bool seenRun = false;
+        foreach (var child in para.ChildElements)
+        {
+            if (!seenRun)
+            {
+                if (ReferenceEquals(child, run)) seenRun = true;
+                continue;
+            }
+            switch (child)
+            {
+                case Run r:
+                    if (r.Descendants<Text>().Any(t => !string.IsNullOrEmpty(t.Text))
+                        || r.Descendants<TabChar>().Any()
+                        || r.Descendants<SymbolChar>().Any()
+                        || r.Descendants<Drawing>().Any()
+                        || r.Descendants<CarriageReturn>().Any()
+                        || r.Descendants<Break>().Any())
+                        return true;
+                    break;
+                case Hyperlink:
+                case DocumentFormat.OpenXml.Math.Paragraph:
+                    return true;
+            }
+        }
+        return false;
+    }
+
     private void RenderParagraphHtml(StringBuilder sb, Paragraph para)
     {
         // Use <div> instead of <p> when paragraph contains block-level elements (text boxes, charts, shapes)
@@ -520,11 +558,43 @@ public partial class WordHandler
                     if (needsSpan) { sb.Append("</span>"); needsSpan = false; }
                     var bandStart = _ctx.CurrentParagraphTabSegmentStart;
                     var bandAlign = _ctx.CurrentAlignedTabAlign;
+                    // Underlined (or otherwise decorated) tab to a stop with no
+                    // trailing content: Word draws the run's text-decoration
+                    // continuously across the tab gap, producing a full-width
+                    // underlined heading separator ("Experience" + an underline
+                    // rule out to the right tab stop). The band model otherwise
+                    // renders the tab run as a zero-width empty span, so the
+                    // underline stops at the word. Detect this case (decoration on
+                    // the tab run AND nothing after this tab) and render the band
+                    // with a stretching bottom-border that spans to the next stop.
+                    bool underlineTab = !string.IsNullOrEmpty(style)
+                        && style.Contains("text-decoration:underline", StringComparison.Ordinal);
+                    bool tabIsLast = underlineTab && !RunHasContentAfter(run, para);
                     if (bandStart >= 0 && bandStart <= sb.Length)
                     {
                         var leading = sb.ToString(bandStart, sb.Length - bandStart);
                         sb.Length = bandStart;
-                        sb.Append($"<span class=\"atab-band\" style=\"text-align:{bandAlign}\">{leading}</span>");
+                        if (tabIsLast)
+                        {
+                            // The band grows (flex:1) to fill the row; a solid
+                            // bottom-border on it draws the underline continuously
+                            // from the leading text out to the right edge. Suppress
+                            // the trailing empty band so this band is the only flex
+                            // child and spans the full content width.
+                            sb.Append($"<span class=\"atab-band\" style=\"text-align:{bandAlign};border-bottom:1px solid currentColor\">{leading}</span>");
+                        }
+                        else
+                        {
+                            sb.Append($"<span class=\"atab-band\" style=\"text-align:{bandAlign}\">{leading}</span>");
+                        }
+                    }
+                    if (tabIsLast)
+                    {
+                        // -1 makes the trailing-band logic skip (bandStart >= 0
+                        // guard), so no empty right band steals flex space.
+                        _ctx.CurrentParagraphTabIndex++;
+                        _ctx.CurrentParagraphTabSegmentStart = -1;
+                        continue;
                     }
                     // Arm the alignment for the band this tab opens.
                     var alignedStops = tabs?
