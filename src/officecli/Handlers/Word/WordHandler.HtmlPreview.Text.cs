@@ -81,6 +81,50 @@ public partial class WordHandler
     /// empty span. A trailing run that holds only the paragraph mark or empty
     /// rPr is not content.
     /// </summary>
+    // Map an underlined run's already-computed inline CSS (`style`) to a
+    // border-bottom declaration for an EMPTY tab spacer. The run's w:u becomes
+    // text-decoration:underline in `style`, but text-decoration paints over
+    // glyphs only — an empty inline-block spacer shows nothing. Re-express the
+    // underline as the spacer's own border so the fill-in rule is visible across
+    // the tab gap. Returns "" (no border) when the run isn't underlined.
+    //   single        → 1px solid     double → 3px double
+    //   dotted         → 1px dotted    dashed → 1px dashed   wavy → 1px solid (no border equiv)
+    //   thick/*Heavy   → 2px solid
+    // Color follows the run text (currentColor) unless w:u carries an explicit
+    // text-decoration-color, which we honour.
+    private static string UnderlineBorderFromStyle(string? style)
+    {
+        if (string.IsNullOrEmpty(style)
+            || !style.Contains("text-decoration:underline", StringComparison.Ordinal))
+            return "";
+        // line-through-only (text-decoration:line-through) won't contain
+        // "text-decoration:underline" so it's already excluded above.
+        var width = "1px";
+        var lineStyle = "solid";
+        if (style.Contains("text-decoration-style:double", StringComparison.Ordinal))
+        { width = "3px"; lineStyle = "double"; }
+        else if (style.Contains("text-decoration-style:dotted", StringComparison.Ordinal))
+            lineStyle = "dotted";
+        else if (style.Contains("text-decoration-style:dashed", StringComparison.Ordinal))
+            lineStyle = "dashed";
+        // wavy has no border equivalent → keep solid.
+        if (style.Contains("text-decoration-thickness:2px", StringComparison.Ordinal))
+            width = "2px";
+        // Honour an explicit underline color; else follow the text color.
+        var color = "currentColor";
+        const string colorKey = "text-decoration-color:";
+        var ci = style.IndexOf(colorKey, StringComparison.Ordinal);
+        if (ci >= 0)
+        {
+            var start = ci + colorKey.Length;
+            var end = style.IndexOf(';', start);
+            if (end < 0) end = style.Length;
+            var c = style.Substring(start, end - start).Trim();
+            if (!string.IsNullOrEmpty(c)) color = c;
+        }
+        return $"border-bottom:{width} {lineStyle} {color};";
+    }
+
     private static bool RunHasContentAfter(Run run, Paragraph para)
     {
         bool seenRun = false;
@@ -809,6 +853,16 @@ public partial class WordHandler
                             "underscore" or "heavy" => "border-bottom:1px solid #000;",
                             _ => "",
                         };
+                        // Underlined tab gap (form fill-in line "Supplier: ____"):
+                        // the run carries w:u, so `style` already holds
+                        // text-decoration:underline — but an EMPTY inline-block
+                        // spacer has no glyph for text-decoration to paint over,
+                        // so the underline is invisible across the tab gap. Draw
+                        // the rule as the spacer's OWN border-bottom (mirrors the
+                        // aligned-tab band path above). Only when no positional
+                        // leader already supplies a bottom-border.
+                        if (string.IsNullOrEmpty(cssLeader))
+                            cssLeader = UnderlineBorderFromStyle(style);
                         // Tab absolute-alignment fix: instead of an EMPTY fixed-width
                         // spacer emitted AFTER the leading text (which makes the
                         // following text start at natural_text_width + gap — varying
@@ -854,7 +908,11 @@ public partial class WordHandler
                         double defTabPt = 36.0;
                         if (dts?.Val?.HasValue == true && dts.Val.Value > 0)
                             defTabPt = dts.Val.Value / 20.0;
-                        sb.Append($"<span style=\"display:inline-block;width:{defTabPt:0.##}pt\"></span>");
+                        // Underlined tab gap → draw the rule as the spacer's own
+                        // border-bottom (empty inline-block has no glyph for the
+                        // run's text-decoration:underline to paint over).
+                        var defUlBorder = UnderlineBorderFromStyle(style);
+                        sb.Append($"<span style=\"display:inline-block;width:{defTabPt:0.##}pt;{defUlBorder}\"></span>");
                         OnHtmlRenderTab(defTabPt);
                     }
                     _ctx.CurrentParagraphTabIndex++;
