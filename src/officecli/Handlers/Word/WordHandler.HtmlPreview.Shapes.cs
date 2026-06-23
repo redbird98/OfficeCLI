@@ -502,19 +502,26 @@ public partial class WordHandler
                 parts.Add($"transform:{string.Join(" ", transforms)}");
         }
 
-        // Border from a:ln
+        // Border from a:ln. An <a:ln> with <a:noFill/> (or w="0") is an EXPLICIT
+        // declaration of "no outline" — Word renders no border, so we must NOT
+        // emit a default one. Only emit a border when the line actually paints.
         var ln = spPr.Elements().FirstOrDefault(e => e.LocalName == "ln");
         if (ln != null)
         {
+            var noFill = ln.Elements().Any(e => e.LocalName == "noFill");
             var wAttr = ln.GetAttributes().FirstOrDefault(a => a.LocalName == "w").Value;
-            double borderPx = 1;
-            if (long.TryParse(wAttr, out var wEmu) && wEmu > 0)
-                borderPx = Math.Max(1, wEmu / EmuConverter.EmuPerPxF); // EMU → px
-            var solidFill = ln.Elements().FirstOrDefault(e => e.LocalName == "solidFill");
-            var srgb = solidFill?.Elements().FirstOrDefault(e => e.LocalName == "srgbClr");
-            var colorHex = srgb?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
-            var borderColor = !string.IsNullOrEmpty(colorHex) ? $"#{colorHex}" : "#000";
-            parts.Add($"border:{borderPx:0.##}px solid {borderColor}");
+            var hasZeroWidth = long.TryParse(wAttr, out var wEmu0) && wEmu0 == 0;
+            if (!noFill && !hasZeroWidth)
+            {
+                double borderPx = 1;
+                if (long.TryParse(wAttr, out var wEmu) && wEmu > 0)
+                    borderPx = Math.Max(1, wEmu / EmuConverter.EmuPerPxF); // EMU → px
+                var solidFill = ln.Elements().FirstOrDefault(e => e.LocalName == "solidFill");
+                var srgb = solidFill?.Elements().FirstOrDefault(e => e.LocalName == "srgbClr");
+                var colorHex = srgb?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+                var borderColor = !string.IsNullOrEmpty(colorHex) ? $"#{colorHex}" : "#000";
+                parts.Add($"border:{borderPx:0.##}px solid {borderColor}");
+            }
         }
 
         // Outer shadow from a:effectLst/a:outerShdw — map to box-shadow
