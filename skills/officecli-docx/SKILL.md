@@ -71,7 +71,6 @@ Before declaring done, run `officecli view "$FILE" html` and Read the returned H
 
 - **No placeholder tokens rendered as data.** `$xxx$`, `{var}`, `{{name}}`, `<TODO>`, `lorem`, `xxxx` must never appear in a heading, body, cover, TOC, caption, header, or footer. A literal `{name}` meant for a human to fill belongs inside a visible instruction paragraph ("Replace `{name}` before sending"), never as finished content.
 - **No truncated titles or overflowing cells.** Widen the column or set `wrapText` rather than trimming content.
-- **Page numbers render as real fields.** `get /footer[N] --depth 3` shows `<w:fldChar>` children, not a run with literal text `"Page"`.
 - **TOC present when the document has 3+ headings** (`--type toc`).
 - **Cover page ≥ 60% filled, last page ≥ 40% filled.** Pad a thin cover with subtitle / author / date / scope / key highlights; pad a "Thank you" last page with conclusion / next steps / contact / legal.
 - **No `\$`, `\t`, `\n` literals in document text.** If `view text` shows these, a shell-escape layer leaked — delete the paragraph and re-enter it.
@@ -266,7 +265,7 @@ Page numbers render automatically (`--prop pageNumbers=true` toggles them explic
 **TOC delivery step (mandatory before handoff).** The live TOC field is a placeholder until recalculated. Some viewers populate it on first open; others show the literal `Update field to see table of contents` until the reader recalculates. Pick by recipient:
 
 - **Will recalculate (or press F9):** run `officecli set "$FILE" /settings --prop updateFields=true` so Word recomputes the TOC (and all fields) on open, and/or add a visible "Press F9 to refresh the TOC and page numbers" instruction. Done.
-- **Cannot / will not recalculate:** use the **static TOC fallback — recipe (f)**. No CLI-only pipeline populates `<w:sdtContent>` with cached heading rows the way Word does on save, and headless converters can't pre-render it safely — hand-write the static fallback.
+- **Cannot / will not recalculate:** use the **static TOC fallback — recipe (f)** (the live field renders a placeholder until recalculated; no headless pipeline can pre-populate it).
 
 Ship-check: `officecli query "$FILE" 'p:contains("Update field to see")'` must return empty whenever the reader won't recalculate. A match means switch to recipe (f).
 
