@@ -37,6 +37,31 @@ public static partial class WordBatchEmitter
         // so capturing it here (and applying it uniformly via AddField below)
         // restores the superscript on round-trip.
         "superscript", "subscript",
+        // BUG-DUMP-RPR-CONTAINER: the field result run can carry the full rPr
+        // vocabulary (a formatted REF / STYLEREF / citation result). The flatten
+        // path (single-run, non-rich) previously kept only the slots above and
+        // dropped the rest. Capture them here and apply them in AddField (loop
+        // through ApplyRunFormatting). These also feed ResultRunsAreRich so a
+        // result whose runs differ only in these props is recognised as rich.
+        "caps", "smallCaps", "dstrike", "outline", "shadow", "emboss", "imprint",
+        "vanish", "specVanish", "webHidden",
+        "charSpacing", "w", "kern", "position", "size.cs", "highlight",
+        "em", "lang", "lang.latin", "lang.ea", "lang.cs",
+        "direction", "rtl", "snapToGrid",
+    };
+
+    // BUG-DUMP-RPR-CONTAINER: the subset of FieldResultFormatKeys that AddField
+    // applies through ApplyRunFormatting in a generic loop (the slots NOT already
+    // handled by AddField's dedicated font/bold/italic/underline/strike/color/size/
+    // vertAlign blocks). Exposed so AddField (a different file) shares one source of
+    // truth instead of re-listing them.
+    internal static readonly string[] FieldResultExtraRPrKeys =
+    {
+        "caps", "smallCaps", "dstrike", "outline", "shadow", "emboss", "imprint",
+        "vanish", "specVanish", "webHidden",
+        "charSpacing", "w", "kern", "position", "size.cs", "highlight",
+        "em", "lang", "lang.latin", "lang.ea", "lang.cs",
+        "direction", "rtl", "snapToGrid",
     };
 
     // AddField's --prop vocabulary for field-run formatting. A captured result
@@ -58,6 +83,14 @@ public static partial class WordBatchEmitter
         // single-run italic/underlined/struck field result round-trips through
         // the typed path instead of silently shedding them.
         "italic", "underline", "strike",
+        // BUG-DUMP-RPR-CONTAINER: AddField applies these via the FieldResultExtraRPrKeys
+        // loop, so a single-run field result carrying the fuller rPr vocabulary
+        // round-trips through the typed path instead of being warned-and-dropped.
+        "caps", "smallCaps", "dstrike", "outline", "shadow", "emboss", "imprint",
+        "vanish", "specVanish", "webHidden",
+        "charSpacing", "w", "kern", "position", "size.cs", "highlight",
+        "em", "lang", "lang.latin", "lang.ea", "lang.cs",
+        "direction", "rtl", "snapToGrid",
     };
 
     private static bool FieldRunHasFormatting(DocumentNode run)

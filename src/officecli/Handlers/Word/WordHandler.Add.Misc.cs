@@ -1533,12 +1533,15 @@ public partial class WordHandler
             "font.hint",
         };
         bool hasFieldFontSlot = fieldFontSlotKeys.Any(k => properties.ContainsKey(k));
+        // BUG-DUMP-RPR-CONTAINER: the fuller rPr vocabulary a field result run can
+        // carry (caps/kern/em/highlight/rtl/…) — applied via ApplyRunFormatting below.
+        bool hasFieldExtraRpr = WordBatchEmitter.FieldResultExtraRPrKeys.Any(k => properties.ContainsKey(k));
         RunProperties? fieldRProps = null;
         if (properties.TryGetValue("font", out var fFont) || properties.TryGetValue("size", out _) ||
             properties.TryGetValue("bold", out _) || properties.TryGetValue("color", out _) ||
             properties.TryGetValue("italic", out _) || properties.TryGetValue("underline", out _) ||
             properties.TryGetValue("strike", out _) ||
-            hasFieldFontSlot || fieldVertAlign != null)
+            hasFieldFontSlot || fieldVertAlign != null || hasFieldExtraRpr)
         {
             fieldRProps = new RunProperties();
             // CT_RPr schema order: rFonts → b → ... → color → sz
@@ -1584,6 +1587,16 @@ public partial class WordHandler
             // append, so AppendChild keeps it in valid schema position.
             if (fieldVertAlign != null)
                 fieldRProps.AppendChild(new VerticalTextAlignment { Val = fieldVertAlign.Value });
+            // BUG-DUMP-RPR-CONTAINER: apply the fuller rPr vocabulary a field result
+            // run can carry (caps/dstrike/outline/shadow/emboss/vanish/spacing/w/kern/
+            // position/szCs/highlight/em/lang/rtl/snapToGrid) through the same applier
+            // the run/hyperlink paths use, so a single-run formatted field result
+            // round-trips losslessly via the typed path. InsertRunPropInSchemaOrder
+            // (inside ApplyRunFormatting) keeps CT_RPr order regardless of the
+            // AppendChild sequence above.
+            foreach (var extraKey in WordBatchEmitter.FieldResultExtraRPrKeys)
+                if (properties.TryGetValue(extraKey, out var extraVal))
+                    ApplyRunFormatting(fieldRProps, extraKey, extraVal);
         }
 
         // Final emitted-run ordering: begin → instr → [separate → result] → end
