@@ -275,10 +275,20 @@ Ship-check: `officecli query "$FILE" 'p:contains("Update field to see")'` must r
 Pictures go inside a run. Alt text is mandatory for accessibility — pass `alt` directly at create time:
 
 ```bash
-officecli add "$FILE" "/body/p[5]" --type picture --prop src=chart.png --prop width=4in --prop alt="Q4 revenue by region, bar chart"
+officecli add "$FILE" "/body/p[5]" --type picture --prop src=logo.png --prop width=1.5in --prop alt="Acme logo"
 ```
 
 Confirm `officecli query "$FILE" 'image:no-alt'` is empty before delivery.
+
+### Charts
+
+For data, add a **native chart** — editable, themeable, accessible, re-renders in Word — never a flat PNG screenshot of a chart. `data="Label:v1,v2,…"` per series; one `data=` per series (or `series1=`/`series2=`).
+
+```bash
+officecli add "$FILE" /body --type chart --prop chartType=bar --prop title="Revenue by Region" --prop categories="EMEA,APAC,Americas" --prop data="2026:120,150,180"
+```
+
+`chartType` ∈ bar / column / line / pie / area / scatter (`help docx chart` for axis/legend/series styling). A PNG via `--type picture` is only a fallback for an exotic chart officecli can't build.
 
 ### Hyperlinks and bookmarks
 
