@@ -80,6 +80,7 @@ public partial class PowerPointHandler
             Drawing.DefaultRunProperties? inheritedCapsRp = null;
             Drawing.DefaultRunProperties? inheritedUnderlineRp = null;
             Drawing.DefaultRunProperties? inheritedStrikeRp = null;
+            Drawing.DefaultRunProperties? inheritedSpacingRp = null;
             if (placeholderShape != null && placeholderPart != null)
             {
                 int level = para.ParagraphProperties?.Level?.Value ?? 0;
@@ -109,6 +110,12 @@ public partial class PowerPointHandler
                     dr => dr.Underline?.HasValue == true);
                 inheritedStrikeRp = ResolvePlaceholderDefRp(placeholderShape, placeholderPart, level,
                     dr => dr.Strike?.HasValue == true);
+                // Character spacing (spc) gets its own dedicated lookup too: a theme may
+                // set spc on a placeholder level's defRPr with no bold/italic, so the
+                // bold/italic predicate never matched and the inherited tracking was
+                // dropped (PowerPoint renders wide tracking; the preview rendered normal).
+                inheritedSpacingRp = ResolvePlaceholderDefRp(placeholderShape, placeholderPart, level,
+                    dr => dr.Spacing?.HasValue == true);
             }
             // R11-3: style-matrix fontRef schemeClr is the FINAL fallback run color
             // when no explicit run color and no inherited placeholder color is found.
@@ -562,6 +569,12 @@ public partial class PowerPointHandler
                     : inheritedUnderlineRp?.Underline?.HasValue == true ? inheritedUnderlineRp.Underline.Value : null;
                 Drawing.TextStrikeValues? inhStrike = paraDefRp?.Strike?.HasValue == true ? paraDefRp.Strike.Value
                     : inheritedStrikeRp?.Strike?.HasValue == true ? inheritedStrikeRp.Strike.Value : null;
+                // Inherited character spacing (spc): paragraph defRPr wins, else the
+                // master/layout placeholder defRPr (mirrors inhCap/inhU/inhStrike — the
+                // run-level rPr/spc consumer below had no inherited fallback, so a
+                // defRPr-only spc was dropped).
+                int? inhSpc = paraDefRp?.Spacing?.HasValue == true ? paraDefRp.Spacing.Value
+                    : inheritedSpacingRp?.Spacing?.HasValue == true ? inheritedSpacingRp.Spacing.Value : null;
                 // Paragraph defRPr font size / color override the placeholder defaults.
                 int? paraSize = paraDefRp?.FontSize?.HasValue == true ? paraDefRp.FontSize.Value : defaultFontSizeHundredths;
                 var paraColor = ResolveFillColor(paraDefRp?.GetFirstChild<Drawing.SolidFill>(), themeColors) ?? defaultRunColor;
@@ -576,7 +589,7 @@ public partial class PowerPointHandler
                 {
                     if (child is Drawing.Run run)
                     {
-                        RenderRun(sb, run, themeColors, paraSize, placeholderPart, themeFontFallback, fontScale, paraColor, inhBold, inhItalic, tabCtx, inhCap, inhU, inhStrike);
+                        RenderRun(sb, run, themeColors, paraSize, placeholderPart, themeFontFallback, fontScale, paraColor, inhBold, inhItalic, tabCtx, inhCap, inhU, inhStrike, inhSpc);
                     }
                     else if (child is Drawing.Break)
                     {
@@ -600,7 +613,7 @@ public partial class PowerPointHandler
                         if (fldRpr != null)
                             fldRun.RunProperties = (Drawing.RunProperties)fldRpr.CloneNode(true);
                         fldRun.Text = new Drawing.Text(fldText);
-                        RenderRun(sb, fldRun, themeColors, paraSize, placeholderPart, themeFontFallback, fontScale, paraColor, inhBold, inhItalic, tabCtx, inhCap, inhU, inhStrike);
+                        RenderRun(sb, fldRun, themeColors, paraSize, placeholderPart, themeFontFallback, fontScale, paraColor, inhBold, inhItalic, tabCtx, inhCap, inhU, inhStrike, inhSpc);
                     }
                 }
             }
@@ -743,7 +756,8 @@ public partial class PowerPointHandler
         int? defaultFontSizeHundredths = null, OpenXmlPart? part = null, string? themeFontFallback = null,
         double fontScale = 1.0, string? defaultRunColor = null,
         bool? inheritedBold = null, bool? inheritedItalic = null, TabContext? tabCtx = null, Drawing.TextCapsValues? inheritedCap = null,
-        Drawing.TextUnderlineValues? inheritedUnderline = null, Drawing.TextStrikeValues? inheritedStrike = null)
+        Drawing.TextUnderlineValues? inheritedUnderline = null, Drawing.TextStrikeValues? inheritedStrike = null,
+        int? inheritedSpacing = null)
     {
         var text = run.Text?.Text ?? "";
         if (string.IsNullOrEmpty(text)) return;
@@ -1094,8 +1108,9 @@ public partial class PowerPointHandler
             }
 
             // Character spacing
-            if (rp.Spacing?.HasValue == true)
-                styles.Add($"letter-spacing:{rp.Spacing.Value / 100.0:0.##}pt");
+            var effSpc = rp.Spacing?.HasValue == true ? rp.Spacing.Value : inheritedSpacing;
+            if (effSpc.HasValue)
+                styles.Add($"letter-spacing:{effSpc.Value / 100.0:0.##}pt");
 
             // Run-level text shadow (<a:rPr><a:effectLst><a:outerShdw>). The same
             // helper the shape renderer uses produces filter:drop-shadow(...), which
