@@ -112,6 +112,12 @@ internal partial class ChartSvgRenderer
     public int ValFontPx { get; set; } = 9;
     public int CatFontPx { get; set; } = 9;
     public int DataLabelFontPx { get; set; } = 8;
+    // Explicit data-label text color (<c:dLbls><c:txPr>…<a:solidFill>), '#'-prefixed
+    // CSS, or null to use the theme text color (ValueColor). PowerPoint honors it.
+    public string? DataLabelColor { get; set; }
+    // Data-label fill: explicit color when authored, else the theme text color.
+    // Pie/doughnut slice labels keep their own white-on-slice default separately.
+    private string DataLabelFill => DataLabelColor ?? ValueColor;
     // Value-axis display-units divisor (<c:dispUnits><c:builtInUnit>). Applied to
     // value-axis tick labels only (not data labels). 1.0 = no scaling. Synced from
     // ChartInfo. See FmtValAxis.
@@ -553,7 +559,7 @@ internal partial class ChartSvgRenderer
                         if (showDataLabels && !LabelDeleted(s, dataIdx) && segW > DataLabelFontPx * 1.6)
                         {
                             var vlabel = LabelText(s, dataIdx, rawVal, val);
-                            sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + segW / 2:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
+                            sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + segW / 2:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{DataLabelFill}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
                         }
                     }
                     else
@@ -602,7 +608,7 @@ internal partial class ChartSvgRenderer
                                     anchor = val >= 0 ? "start" : "end";
                                     break;
                             }
-                            sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{lx:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"{anchor}\" dominant-baseline=\"middle\">{vlabel}</text>");
+                            sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{lx:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{DataLabelFill}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"{anchor}\" dominant-baseline=\"middle\">{vlabel}</text>");
                         }
                     }
                 }
@@ -807,7 +813,7 @@ internal partial class ChartSvgRenderer
                                 if (showDataLabels && !LabelDeleted(s, c) && barH > DataLabelFontPx + 2)
                                 {
                                     var vlabel = LabelText(s, c, rawVal, rawVal);
-                                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
+                                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{DataLabelFill}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
                                 }
                             }
                             // Waterfall connector line — a short HORIZONTAL
@@ -849,7 +855,7 @@ internal partial class ChartSvgRenderer
                             if (showDataLabels && !LabelDeleted(s, c) && segH > DataLabelFontPx + 2)
                             {
                                 var vlabel = LabelText(s, c, rawVal, val);
-                                sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{by + segH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
+                                sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{by + segH / 2:0.#}\" fill=\"{DataLabelFill}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
                             }
                         }
                     }
@@ -897,7 +903,7 @@ internal partial class ChartSvgRenderer
                                     ly = labelAbove ? tipY - 3 : tipY + DataLabelFontPx;
                                     break;
                             }
-                            sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{ly:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
+                            sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{ly:0.#}\" fill=\"{DataLabelFill}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
                         }
                     }
                 }
@@ -1528,7 +1534,7 @@ internal partial class ChartSvgRenderer
                             default: break; // t / above (legacy)
                         }
                     }
-                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{lblX:0.#}\" y=\"{lblY:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"{lblAnchor}\">{vlabel}</text>");
+                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{lblX:0.#}\" y=\"{lblY:0.#}\" fill=\"{DataLabelFill}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"{lblAnchor}\">{vlabel}</text>");
                 }
             }
         }
@@ -2169,7 +2175,7 @@ internal partial class ChartSvgRenderer
                 if (showCatName && c < categories.Length) lparts.Add(categories[c]);
                 if (showVal) lparts.Add(valuePart);
                 var vlabel = string.Join(", ", lparts);
-                sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{px:0.#}\" y=\"{py - 6:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{HtmlEncode(vlabel)}</text>");
+                sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{px:0.#}\" y=\"{py - 6:0.#}\" fill=\"{DataLabelFill}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{HtmlEncode(vlabel)}</text>");
             }
 
         // Trendlines (parity with bar/line; area previously dropped them — it had
@@ -2274,7 +2280,7 @@ internal partial class ChartSvgRenderer
                     if (showCatName && c < categories.Length) lparts.Add(categories[c]);
                     if (showVal) lparts.Add(valuePart);
                     var vlabel = string.Join(", ", lparts);
-                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{lx:0.#}\" y=\"{ly:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{HtmlEncode(vlabel)}</text>");
+                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{lx:0.#}\" y=\"{ly:0.#}\" fill=\"{DataLabelFill}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{HtmlEncode(vlabel)}</text>");
                 }
             }
         }
@@ -2412,7 +2418,7 @@ internal partial class ChartSvgRenderer
                     if (showCatName && i < categories.Length) lparts.Add(categories[i]);
                     if (showVal) lparts.Add(valuePart);
                     var vlabel = string.Join(", ", lparts);
-                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + r + 4:0.#}\" y=\"{by:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"start\" dominant-baseline=\"middle\">{HtmlEncode(vlabel)}</text>");
+                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + r + 4:0.#}\" y=\"{by:0.#}\" fill=\"{DataLabelFill}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"start\" dominant-baseline=\"middle\">{HtmlEncode(vlabel)}</text>");
                 }
             }
         }
@@ -2593,7 +2599,7 @@ internal partial class ChartSvgRenderer
                     if (lparts.Count > 0)
                     {
                         var vlabel = string.Join(", ", lparts);
-                        sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{p.x:0.#}\" y=\"{p.y - 6:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{HtmlEncode(vlabel)}</text>");
+                        sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{p.x:0.#}\" y=\"{p.y - 6:0.#}\" fill=\"{DataLabelFill}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{HtmlEncode(vlabel)}</text>");
                     }
                 }
             }
@@ -2736,7 +2742,7 @@ internal partial class ChartSvgRenderer
                     var bx = ox + c * groupW + gap + bi * barW;
                     sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{oy + ph - barH:0.#}\" width=\"{barW:0.#}\" height=\"{barH:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"{FillOpacity(s)}\"/>");
                     if (showDataLabels)
-                        sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{oy + ph - barH - 3:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{HtmlEncode(FmtLabel(val))}</text>");
+                        sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{oy + ph - barH - 3:0.#}\" fill=\"{DataLabelFill}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{HtmlEncode(FmtLabel(val))}</text>");
                 }
             }
         }
@@ -2776,7 +2782,7 @@ internal partial class ChartSvgRenderer
                     var parts = points[pi].Split(',');
                     sb.AppendLine($"        <circle cx=\"{parts[0]}\" cy=\"{parts[1]}\" r=\"3\" fill=\"{colors[s % colors.Count]}\"/>");
                     if (showDataLabels && pi < seriesList[s].values.Length)
-                        sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{parts[0]}\" y=\"{double.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture) - 6:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{HtmlEncode(FmtLabel(seriesList[s].values[pi]))}</text>");
+                        sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{parts[0]}\" y=\"{double.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture) - 6:0.#}\" fill=\"{DataLabelFill}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{HtmlEncode(FmtLabel(seriesList[s].values[pi]))}</text>");
                 }
             }
         }
@@ -3153,6 +3159,9 @@ internal partial class ChartSvgRenderer
         public string? CatMajorTickMark { get; set; }
         public int CatTickLabelSkip { get; set; } = 1;
         public int DataLabelFontPx { get; set; } = 8;
+        /// <summary>Explicit data-label text color from &lt;c:dLbls&gt;&lt;c:txPr&gt;
+        /// (bare-hex resolved via theme), or null to use the theme text color.</summary>
+        public string? DataLabelFontColor { get; set; }
         /// <summary>Reference-line overlays (horizontal dashed lines at constant values).
         /// Filled by ExtractChartInfo from any ref-line-only LineChart in the plot area.</summary>
         public List<(string Name, double Value, string Color, double WidthPt, string Dash)> ReferenceLines { get; set; } = [];
@@ -3702,6 +3711,10 @@ internal partial class ChartSvgRenderer
             var dLblFontSize = dLblDefRPr?.FontSize ?? dLbls.Descendants<Drawing.RunProperties>().FirstOrDefault()?.FontSize;
             if (dLblFontSize?.HasValue == true)
                 info.DataLabelFontPx = (int)(dLblFontSize.Value / 100.0);
+            // Explicit data-label color (<c:txPr>…<a:solidFill>); resolves schemeClr
+            // through the theme. PowerPoint honors it; previously dropped → theme text.
+            var dLblColor = ExtractFontColor(dLblDefRPr, themeColors);
+            if (dLblColor != null) info.DataLabelFontColor = CssHexColor(dLblColor);
         }
 
         // Gap width
@@ -4463,6 +4476,7 @@ internal partial class ChartSvgRenderer
         PerPointDeletedLabels = info.PerPointDeletedLabels;
         if (info.AxisLineColor != null) AxisLineColor = CssHexColor(info.AxisLineColor);
         DataLabelFontPx = info.DataLabelFontPx;
+        if (info.DataLabelFontColor != null) DataLabelColor = CssHexColor(info.DataLabelFontColor);
         DataLabelPos = info.DataLabelPos;
         HasExplicitDataLabelPos = info.HasExplicitDataLabelPos;
         FirstSliceAngle = info.FirstSliceAngle;
@@ -5047,7 +5061,7 @@ internal partial class ChartSvgRenderer
                         if (showDataLabels)
                         {
                             var vlabel = FormatAxisValue(val, valNumFmt);
-                            sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2 + dx3d / 2:0.#}\" y=\"{by + dy3d - 3:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
+                            sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2 + dx3d / 2:0.#}\" y=\"{by + dy3d - 3:0.#}\" fill=\"{DataLabelFill}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
                         }
                     }
                 }
