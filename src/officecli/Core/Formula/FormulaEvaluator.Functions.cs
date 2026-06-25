@@ -229,6 +229,11 @@ internal partial class FormulaEvaluator
             "WRAPROWS" => EvalWrap(args, byRows: true),
             "WRAPCOLS" => EvalWrap(args, byRows: false),
             "TEXTSPLIT" => EvalTextSplit(args),
+            "MAP" => EvalMap(args),
+            "BYROW" => EvalByRow(args),
+            "BYCOL" => EvalByCol(args),
+            "SCAN" => EvalScan(args),
+            "MAKEARRAY" => EvalMakeArray(args),
 
             // ===== Date & Time =====
             "TODAY" => FR(DateTime.Today.ToOADate()), "NOW" => FR(DateTime.Now.ToOADate()),
