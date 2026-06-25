@@ -3064,14 +3064,19 @@ internal partial class ChartSvgRenderer
         public string? ValAxisTitle { get; set; }
         public int ValAxisTitleFontPx { get; set; } = 9;
         public bool ValAxisTitleBold { get; set; }
+        // Explicit axis-title run color ('#'-prefixed CSS, or null = use AxisColor).
+        // PowerPoint honors a solidFill on the axis-title run; previously dropped.
+        public string? ValAxisTitleColor { get; set; }
         public string? CatAxisTitle { get; set; }
         public int CatAxisTitleFontPx { get; set; } = 9;
         public bool CatAxisTitleBold { get; set; }
+        public string? CatAxisTitleColor { get; set; }
         // Secondary value axis title (combo right-side axis; also the bubble/scatter
         // Y axis, which is the 2nd valAx rather than a catAx).
         public string? SecondaryValAxisTitle { get; set; }
         public int SecondaryValAxisTitleFontPx { get; set; } = 9;
         public bool SecondaryValAxisTitleBold { get; set; }
+        public string? SecondaryValAxisTitleColor { get; set; }
         public string? PlotFillColor { get; set; }
         public string? ChartFillColor { get; set; }
         /// <summary>Plot-area &lt;c:spPr&gt;&lt;a:ln&gt; outline color (hex, no #). Null = no border.</summary>
@@ -3510,6 +3515,8 @@ internal partial class ChartSvgRenderer
                 info.SecondaryValAxisTitleFontPx = (int)(secTitleRPr.FontSize.Value / 100.0);
             if (secTitleRPr?.Bold?.Value == true)
                 info.SecondaryValAxisTitleBold = true;
+            var secTitleColor = ExtractFontColor(secTitleRPr, themeColors);
+            if (secTitleColor != null) info.SecondaryValAxisTitleColor = CssHexColor(secTitleColor);
         }
 
         if (valAxis != null)
@@ -3521,6 +3528,8 @@ internal partial class ChartSvgRenderer
                 info.ValAxisTitleFontPx = (int)(valTitleRPr.FontSize.Value / 100.0);
             if (valTitleRPr?.Bold?.Value == true)
                 info.ValAxisTitleBold = true;
+            var valTitleColor = ExtractFontColor(valTitleRPr, themeColors);
+            if (valTitleColor != null) info.ValAxisTitleColor = CssHexColor(valTitleColor);
             var scaling = valAxis.Elements().FirstOrDefault(e => e.LocalName == "scaling");
             if (scaling != null)
             {
@@ -3675,6 +3684,8 @@ internal partial class ChartSvgRenderer
                 info.CatAxisTitleFontPx = (int)(catTitleRPr.FontSize.Value / 100.0);
             if (catTitleRPr?.Bold?.Value == true)
                 info.CatAxisTitleBold = true;
+            var catTitleColor = ExtractFontColor(catTitleRPr, themeColors);
+            if (catTitleColor != null) info.CatAxisTitleColor = CssHexColor(catTitleColor);
             // Use txPr > defRPr for tick label font (not title's RunProperties)
             var catTxPr = catAxis.Elements().FirstOrDefault(e => e.LocalName == "txPr");
             var catDefRPr = catTxPr?.Descendants<Drawing.DefaultRunProperties>().FirstOrDefault();
@@ -4640,29 +4651,31 @@ internal partial class ChartSvgRenderer
         // Bubble/scatter have no category axis: the X axis is the primary value
         // axis and the Y axis is the secondary value axis.
         var isXY = chartType == "bubble" || chartType == "scatter";
-        string? bottomTitle; int bottomTitleFont; bool bottomTitleBold;
-        string? leftTitle; int leftTitleFont; bool leftTitleBold;
+        string? bottomTitle; int bottomTitleFont; bool bottomTitleBold; string? bottomTitleColor;
+        string? leftTitle; int leftTitleFont; bool leftTitleBold; string? leftTitleColor;
         if (isXY)
         {
-            bottomTitle = info.ValAxisTitle; bottomTitleFont = info.ValAxisTitleFontPx; bottomTitleBold = info.ValAxisTitleBold;
-            leftTitle = info.SecondaryValAxisTitle; leftTitleFont = info.SecondaryValAxisTitleFontPx; leftTitleBold = info.SecondaryValAxisTitleBold;
+            bottomTitle = info.ValAxisTitle; bottomTitleFont = info.ValAxisTitleFontPx; bottomTitleBold = info.ValAxisTitleBold; bottomTitleColor = info.ValAxisTitleColor;
+            leftTitle = info.SecondaryValAxisTitle; leftTitleFont = info.SecondaryValAxisTitleFontPx; leftTitleBold = info.SecondaryValAxisTitleBold; leftTitleColor = info.SecondaryValAxisTitleColor;
         }
         else
         {
             bottomTitle = isHorizBar ? info.ValAxisTitle : info.CatAxisTitle;
             bottomTitleFont = isHorizBar ? info.ValAxisTitleFontPx : info.CatAxisTitleFontPx;
             bottomTitleBold = isHorizBar ? info.ValAxisTitleBold : info.CatAxisTitleBold;
+            bottomTitleColor = isHorizBar ? info.ValAxisTitleColor : info.CatAxisTitleColor;
             leftTitle = isHorizBar ? info.CatAxisTitle : info.ValAxisTitle;
             leftTitleFont = isHorizBar ? info.CatAxisTitleFontPx : info.ValAxisTitleFontPx;
             leftTitleBold = isHorizBar ? info.CatAxisTitleBold : info.ValAxisTitleBold;
+            leftTitleColor = isHorizBar ? info.CatAxisTitleColor : info.ValAxisTitleColor;
         }
         if (!string.IsNullOrEmpty(leftTitle))
-            sb.AppendLine($"    <text x=\"10\" y=\"{svgH / 2}\" fill=\"{AxisColor}\" font-size=\"{leftTitleFont}\"{(leftTitleBold ? " font-weight=\"bold\"" : "")} text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"rotate(-90,10,{svgH / 2})\">{HtmlEncode(leftTitle)}</text>");
+            sb.AppendLine($"    <text x=\"10\" y=\"{svgH / 2}\" fill=\"{(leftTitleColor != null ? CssHexColor(leftTitleColor) : AxisColor)}\" font-size=\"{leftTitleFont}\"{(leftTitleBold ? " font-weight=\"bold\"" : "")} text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"rotate(-90,10,{svgH / 2})\">{HtmlEncode(leftTitle)}</text>");
         if (!string.IsNullOrEmpty(bottomTitle))
-            sb.AppendLine($"    <text x=\"{svgW / 2}\" y=\"{svgH - 2}\" fill=\"{AxisColor}\" font-size=\"{bottomTitleFont}\"{(bottomTitleBold ? " font-weight=\"bold\"" : "")} text-anchor=\"middle\">{HtmlEncode(bottomTitle)}</text>");
+            sb.AppendLine($"    <text x=\"{svgW / 2}\" y=\"{svgH - 2}\" fill=\"{(bottomTitleColor != null ? CssHexColor(bottomTitleColor) : AxisColor)}\" font-size=\"{bottomTitleFont}\"{(bottomTitleBold ? " font-weight=\"bold\"" : "")} text-anchor=\"middle\">{HtmlEncode(bottomTitle)}</text>");
         // Combo charts (non-XY): the secondary value axis title sits on the right.
         if (!isXY && !string.IsNullOrEmpty(info.SecondaryValAxisTitle))
-            sb.AppendLine($"    <text x=\"{svgW - 10}\" y=\"{svgH / 2}\" fill=\"{SecondaryAxisColor}\" font-size=\"{info.SecondaryValAxisTitleFontPx}\"{(info.SecondaryValAxisTitleBold ? " font-weight=\"bold\"" : "")} text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"rotate(90,{svgW - 10},{svgH / 2})\">{HtmlEncode(info.SecondaryValAxisTitle)}</text>");
+            sb.AppendLine($"    <text x=\"{svgW - 10}\" y=\"{svgH / 2}\" fill=\"{(info.SecondaryValAxisTitleColor != null ? CssHexColor(info.SecondaryValAxisTitleColor) : SecondaryAxisColor)}\" font-size=\"{info.SecondaryValAxisTitleFontPx}\"{(info.SecondaryValAxisTitleBold ? " font-weight=\"bold\"" : "")} text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"rotate(90,{svgW - 10},{svgH / 2})\">{HtmlEncode(info.SecondaryValAxisTitle)}</text>");
 
         // Display-units annotation (<c:dispUnits><c:dispUnitsLbl>, e.g. "Millions").
         // PowerPoint draws it beside the value axis. For a vertical value axis it
