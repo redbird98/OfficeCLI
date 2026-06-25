@@ -36,7 +36,7 @@ static partial class CommandBuilder
         importCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(importFileArg)!;
-            var parentPath = result.GetValue(importParentPathArg)!;
+            var parentPath = OfficeCli.Core.MsysPathHint.Restore(result.GetValue(importParentPathArg)!)!;
             var source = result.GetValue(importSourceOpt) ?? result.GetValue(importSourceArg);
             var useStdin = result.GetValue(importStdinOpt);
             var format = result.GetValue(importFormatOpt);

@@ -31,7 +31,7 @@ static partial class CommandBuilder
         rawCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(rawFileArg)!;
-            var partPath = result.GetValue(rawPathArg)!;
+            var partPath = OfficeCli.Core.MsysPathHint.Restore(result.GetValue(rawPathArg)!)!;
             var startRow = result.GetValue(rawStartOpt);
             var endRow = result.GetValue(rawEndOpt);
             var rawColsStr = result.GetValue(rawColsOpt);
@@ -76,7 +76,7 @@ static partial class CommandBuilder
         rawSetCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(rawSetFileArg)!;
-            var partPath = result.GetValue(rawSetPartArg)!;
+            var partPath = OfficeCli.Core.MsysPathHint.Restore(result.GetValue(rawSetPartArg)!)!;
             var xpath = result.GetValue(rawSetXpathOpt)!;
             var action = result.GetValue(rawSetActionOpt)!;
             var xml = result.GetValue(rawSetXmlOpt);
@@ -122,7 +122,7 @@ static partial class CommandBuilder
         addPartCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(addPartFileArg)!;
-            var parent = result.GetValue(addPartParentArg)!;
+            var parent = OfficeCli.Core.MsysPathHint.Restore(result.GetValue(addPartParentArg)!)!;
             var type = result.GetValue(addPartTypeOpt)!;
 
             if (TryResident(file, req =>

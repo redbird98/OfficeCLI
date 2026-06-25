@@ -28,7 +28,7 @@ static partial class CommandBuilder
         getCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(getFileArg)!;
-            var path = result.GetValue(pathArg)!;
+            var path = MsysPathHint.Restore(result.GetValue(pathArg)!)!;
             var depth = result.GetValue(depthOpt);
             // CONSISTENCY(dos-hardening): cap user-supplied depth so a huge
             // --depth on a deeply-nested doc can't drive the node-building
@@ -181,7 +181,7 @@ static partial class CommandBuilder
         queryCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(queryFileArg)!;
-            var selector = result.GetValue(selectorArg)!;
+            var selector = MsysPathHint.Restore(result.GetValue(selectorArg)!)!;
             var textFilter = result.GetValue(queryFindOpt);
 
             if (TryResident(file.FullName, req =>

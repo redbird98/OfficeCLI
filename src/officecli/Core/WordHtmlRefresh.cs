@@ -24,8 +24,15 @@ internal static class WordHtmlRefresh
                 doc.MainDocumentPart!.Document!.Save();
             }
 
-            using (var handler = (Handlers.WordHandler)Handlers.DocumentHandlerFactory.Open(docx, editable: false))
-                htmlSnapshot = handler.ViewAsHtml(null);
+            using (var handler = Handlers.DocumentHandlerFactory.Open(docx, editable: false))
+            {
+                Handlers.Rendering.RenderingBootstrap.EnsureRegistered();
+                var renderer = Rendering.RendererRegistry.Default.Resolve(
+                    "docx", Rendering.RenderOutputKind.Html, Rendering.RenderMode.Static);
+                htmlSnapshot = renderer!.Render(
+                    new Handlers.Rendering.HandlerRenderInput(handler, "docx"),
+                    new Rendering.RenderOptions()).Text!;
+            }
 
             var tmpHtml = Path.Combine(Path.GetTempPath(), $"officecli_refresh_{Guid.NewGuid():N}.html");
             HtmlScreenshot.PaginationResult? pagination;

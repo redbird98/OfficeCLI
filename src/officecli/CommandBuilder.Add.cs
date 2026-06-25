@@ -57,12 +57,12 @@ static partial class CommandBuilder
         addCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(addFileArg)!;
-            var parentPath = result.GetValue(addParentPathArg)!;
+            var parentPath = MsysPathHint.Restore(result.GetValue(addParentPathArg)!)!;
             var type = result.GetValue(addTypeOpt);
-            var from = result.GetValue(addFromOpt);
+            var from = MsysPathHint.Restore(result.GetValue(addFromOpt));
             var index = result.GetValue(addIndexOpt);
-            var after = result.GetValue(addAfterOpt);
-            var before = result.GetValue(addBeforeOpt);
+            var after = MsysPathHint.Restore(result.GetValue(addAfterOpt));
+            var before = MsysPathHint.Restore(result.GetValue(addBeforeOpt));
             var props = result.GetValue(addPropsOpt);
             var force = result.GetValue(forceOption);
 
@@ -317,7 +317,7 @@ static partial class CommandBuilder
         removeCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(removeFileArg)!;
-            var path = result.GetValue(removePathArg)!;
+            var path = MsysPathHint.Restore(result.GetValue(removePathArg)!)!;
             var shift = result.GetValue(shiftOption);
             var props = result.GetValue(removePropsOpt);
             var parsedProps = (props != null && props.Length > 0) ? ParsePropsArray(props) : null;
@@ -392,11 +392,11 @@ static partial class CommandBuilder
         moveCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(moveFileArg)!;
-            var path = result.GetValue(movePathArg)!;
-            var to = result.GetValue(moveToOpt);
+            var path = MsysPathHint.Restore(result.GetValue(movePathArg)!)!;
+            var to = MsysPathHint.Restore(result.GetValue(moveToOpt));
             var index = result.GetValue(moveIndexOpt);
-            var after = result.GetValue(moveAfterOpt);
-            var before = result.GetValue(moveBeforeOpt);
+            var after = MsysPathHint.Restore(result.GetValue(moveAfterOpt));
+            var before = MsysPathHint.Restore(result.GetValue(moveBeforeOpt));
             var props = result.GetValue(movePropsOpt);
 
             // Validate mutual exclusivity of --index, --after, --before
@@ -453,8 +453,8 @@ static partial class CommandBuilder
         swapCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(swapFileArg)!;
-            var path1 = result.GetValue(swapPath1Arg)!;
-            var path2 = result.GetValue(swapPath2Arg)!;
+            var path1 = MsysPathHint.Restore(result.GetValue(swapPath1Arg)!)!;
+            var path2 = MsysPathHint.Restore(result.GetValue(swapPath2Arg)!)!;
 
             if (TryResident(file.FullName, req =>
             {

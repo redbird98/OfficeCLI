@@ -9,9 +9,11 @@ using OfficeCli.Core;
 
 namespace OfficeCli.Handlers;
 
-public partial class ExcelHandler : IDocumentHandler
+public partial class ExcelHandler : IDocumentHandler, Rendering.IRenderModelHost
 {
     private readonly SpreadsheetDocument _doc;
+
+    object? Rendering.IRenderModelHost.RenderModel => _doc;
     private readonly string _filePath;
     private readonly HashSet<string> _initialSheetNames;
     private readonly HashSet<WorksheetPart> _dirtyWorksheets = new();

@@ -32,7 +32,7 @@ static partial class CommandBuilder
         setCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(setFileArg)!;
-            var path = result.GetValue(setPathArg)!;
+            var path = MsysPathHint.Restore(result.GetValue(setPathArg)!)!;
             var props = result.GetValue(propsOpt);
             var findFlag = result.GetValue(findOpt);
             var replaceFlag = result.GetValue(replaceOpt);

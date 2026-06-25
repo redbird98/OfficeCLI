@@ -9,9 +9,11 @@ using OfficeCli.Core;
 
 namespace OfficeCli.Handlers;
 
-public partial class PowerPointHandler : IDocumentHandler
+public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderModelHost
 {
     private readonly PresentationDocument _doc;
+
+    object? Rendering.IRenderModelHost.RenderModel => _doc;
     private readonly string _filePath;
     private HashSet<uint> _usedShapeIds = new();
     private uint _nextShapeId = 10000;

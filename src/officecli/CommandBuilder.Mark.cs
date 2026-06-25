@@ -38,7 +38,7 @@ static partial class CommandBuilder
         cmd.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(fileArg)!;
-            var path = result.GetValue(pathArg)!;
+            var path = OfficeCli.Core.MsysPathHint.Restore(result.GetValue(pathArg)!)!;
             var rawProps = result.GetValue(propsOpt) ?? Array.Empty<string>();
 
             var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -253,7 +253,7 @@ static partial class CommandBuilder
         cmd.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(fileArg)!;
-            var pathVal = result.GetValue(pathOpt);
+            var pathVal = OfficeCli.Core.MsysPathHint.Restore(result.GetValue(pathOpt));
             var allVal = result.GetValue(allOpt);
 
             // Require explicit choice — never silently default

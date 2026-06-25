@@ -509,14 +509,17 @@ public partial class ExcelHandler
             ValidateFormulaCellRefs(fTrim);
             var addCellFormula = new CellFormula(Core.PivotTableHelper.SanitizeXmlText(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(fTrim))));
             // Dynamic-array functions (SORT/FILTER/UNIQUE/SEQUENCE/XLOOKUP/LET/etc.)
-            // must carry t="array" ref="<cellRef>" on the cell-level CellFormula —
-            // without it Excel 365 rejects the file (0x800A03EC) on open. The
-            // anchor reference is the single cell being written; Excel spills
-            // adjacent cells at runtime.
+            // carry t="array" ref="<cellRef>" on the cell-level CellFormula PLUS a
+            // cm cell-metadata index into an XLDAPR record (EnsureDynamicArrayMetadata)
+            // — t="array" alone is a legacy CSE array locked to the anchor; the
+            // XLDAPR metadata is what makes Excel 365 spill. The anchor reference is
+            // the single cell being written; Excel recomputes the spill extent and
+            // fills adjacent cells at runtime.
             if (Core.ModernFunctionQualifier.IsDynamicArrayFormula(fTrim) && cell.CellReference?.Value != null)
             {
                 addCellFormula.FormulaType = CellFormulaValues.Array;
                 addCellFormula.Reference = cell.CellReference.Value;
+                EnsureDynamicArrayMetadata(cell);
             }
             // CONSISTENCY(value-child-uniqueness): clear any stale <is> so the
             // cell never carries both a formula and an inline string (invalid

@@ -146,12 +146,14 @@ static partial class CommandBuilder
                     // silently rendered all slides. Honor --page with strict
                     // range checking, matching SVG mode's CONSISTENCY(strict-page).
                     var (pStart, pEnd) = ParsePptHtmlPage(pageFilter, start, end, pptHandler);
-                    html = pptHandler.ViewAsHtml(pStart, pEnd);
+                    html = RenderViaRegistry(handler, "pptx",
+                        new OfficeCli.Core.Rendering.RenderOptions { StartPage = pStart, EndPage = pEnd });
                 }
-                else if (handler is OfficeCli.Handlers.ExcelHandler excelHandler)
-                    html = excelHandler.ViewAsHtml();
-                else if (handler is OfficeCli.Handlers.WordHandler wordHandler)
-                    html = wordHandler.ViewAsHtml(pageFilter);
+                else if (handler is OfficeCli.Handlers.ExcelHandler)
+                    html = RenderViaRegistry(handler, "xlsx", new OfficeCli.Core.Rendering.RenderOptions());
+                else if (handler is OfficeCli.Handlers.WordHandler)
+                    html = RenderViaRegistry(handler, "docx",
+                        new OfficeCli.Core.Rendering.RenderOptions { PageFilter = pageFilter });
                 else if (handler is OfficeCli.Core.Plugins.FormatHandlerProxy proxy)
                     html = proxy.ViewAsHtml(int.TryParse(pageFilter, out var p) ? p : (int?)null);
 
@@ -268,7 +270,8 @@ static partial class CommandBuilder
 
                     if (directPng == null)
                     {
-                        html = pptHandler.ViewAsHtml(pStart, pEnd, gridColsResolved, screenshotWidth);
+                        html = RenderViaRegistry(pptHandler, "pptx", new OfficeCli.Core.Rendering.RenderOptions
+                        { StartPage = pStart, EndPage = pEnd, GridColumns = gridColsResolved, ViewportPx = screenshotWidth })!;
 
                         // The generic 4:3 viewport (1600×1200) letterboxes a single slide with
                         // canvas padding. When capturing one slide (not a multi-slide range or
@@ -287,7 +290,7 @@ static partial class CommandBuilder
                     }
                 }
                 else if (handler is OfficeCli.Handlers.ExcelHandler excelHandler)
-                    html = excelHandler.ViewAsHtml();
+                    html = RenderViaRegistry(excelHandler, "xlsx", new OfficeCli.Core.Rendering.RenderOptions())!;
                 else if (handler is OfficeCli.Handlers.WordHandler wordHandlerGrid && gridCols != 0)
                 {
                     // Contact-sheet grid: tile every page into an N-column (or auto)
@@ -310,7 +313,7 @@ static partial class CommandBuilder
                     var tmpForCount = Path.Combine(Path.GetTempPath(), $"officecli_gridcount_{Path.GetFileNameWithoutExtension(file.Name)}_{Guid.NewGuid():N}.html");
                     try
                     {
-                        File.WriteAllText(tmpForCount, wordHandlerGrid.ViewAsHtml(null));
+                        File.WriteAllText(tmpForCount, RenderViaRegistry(wordHandlerGrid, "docx", new OfficeCli.Core.Rendering.RenderOptions())!);
                         pageCount = OfficeCli.Core.HtmlScreenshot.GetPageCountFromDom(tmpForCount) ?? 1;
                     }
                     catch { /* fall back to 1 row */ }
@@ -347,7 +350,8 @@ static partial class CommandBuilder
                     {
                         // HTML fallback: layoutGrid tiles in-browser; size the viewport
                         // to fit the rows so window-size backends don't crop.
-                        html = wordHandlerGrid.ViewAsHtml(null, docGridCols, (int)Math.Round(cellW));
+                        html = RenderViaRegistry(wordHandlerGrid, "docx", new OfficeCli.Core.Rendering.RenderOptions
+                        { GridColumns = docGridCols, GridCellWidthPx = (int)Math.Round(cellW) })!;
                         screenshotWidth = Math.Max(1, (int)Math.Round(vpW));
                         screenshotHeight = Math.Max(1, (int)Math.Ceiling(vpH));
                     }
@@ -365,7 +369,8 @@ static partial class CommandBuilder
                         { Code = "native_unavailable", Suggestion = "Use --render html or --render auto." };
                     if (directPng == null)
                     {
-                        html = wordHandler.ViewAsHtml(effectiveFilter);
+                        html = RenderViaRegistry(wordHandler, "docx",
+                            new OfficeCli.Core.Rendering.RenderOptions { PageFilter = effectiveFilter })!;
 
                         // HTML-path screenshot of a single page: size the viewport to the
                         // page's 96-DPI native pixels so the PNG is the page, padding-free
@@ -382,6 +387,30 @@ static partial class CommandBuilder
                                 screenshotHeight = Math.Max(1, (int)Math.Round(screenshotWidth * (double)nativeH / nativeW));
                         }
                     }
+                }
+
+                // A renderer that paints its own pixels supplies them directly, sitting
+                // between the native backend (which wins when it ran) and the HTML→headless
+                // fallback. An explicit --render html opts out. The default install has no
+                // PNG-capable renderer, so this is a no-op there.
+                if (directPng == null && renderMode != "html")
+                {
+                    var pngFmt = handler switch
+                    {
+                        OfficeCli.Handlers.PowerPointHandler => "pptx",
+                        OfficeCli.Handlers.ExcelHandler => "xlsx",
+                        OfficeCli.Handlers.WordHandler => "docx",
+                        _ => null
+                    };
+                    if (pngFmt != null)
+                        directPng = RenderPngBytesViaRegistry(handler, pngFmt,
+                            new OfficeCli.Core.Rendering.RenderOptions
+                            {
+                                Output = OfficeCli.Core.Rendering.RenderOutputKind.Png,
+                                PageFilter = pageFilter,
+                                RasterWidthPx = screenshotWidth,
+                                RasterHeightPx = screenshotHeight,
+                            });
                 }
 
                 if (html == null && directPng == null)
@@ -454,7 +483,9 @@ static partial class CommandBuilder
                     {
                         slideNum = start.Value;
                     }
-                    var svg = pptSvgHandler.ViewAsSvg(slideNum);
+                    var svg = RenderViaRegistry(handler, "pptx",
+                        new OfficeCli.Core.Rendering.RenderOptions
+                        { Output = OfficeCli.Core.Rendering.RenderOutputKind.Svg, StartPage = slideNum })!;
 
                     if (browser)
                     {
@@ -537,7 +568,7 @@ static partial class CommandBuilder
                     var tmpHtml = Path.Combine(Path.GetTempPath(), $"officecli_pc_{Path.GetFileNameWithoutExtension(file.Name)}_{Guid.NewGuid():N}.html");
                     try
                     {
-                        File.WriteAllText(tmpHtml, wordHandlerForCount.ViewAsHtml(null));
+                        File.WriteAllText(tmpHtml, RenderViaRegistry(wordHandlerForCount, "docx", new OfficeCli.Core.Rendering.RenderOptions())!);
                         withPagesValue = OfficeCli.Core.HtmlScreenshot.GetPageCountFromDom(tmpHtml);
                     }
                     finally { try { File.Delete(tmpHtml); } catch { } }
@@ -648,6 +679,39 @@ static partial class CommandBuilder
         if (int.TryParse(spec, out var n) && n >= 0) return n;
         throw new OfficeCli.Core.CliException($"Invalid --grid value: {spec}. Use a column count (e.g. 3) or 'auto'.")
         { Code = "invalid_value", ValidValues = ["auto", "1", "2", "3", "4"] };
+    }
+
+    // Render through the renderer registry rather than calling the handler directly.
+    // The built-in renderers forward to the handler's ViewAs* methods (output is
+    // byte-identical), so this is behavior-preserving; it also lets an alternative
+    // renderer registered for the format be selected instead. Returns null when no
+    // renderer covers the request, preserving the unsupported-type path.
+    internal static string? RenderViaRegistry(
+        OfficeCli.Core.IDocumentHandler handler, string formatId,
+        OfficeCli.Core.Rendering.RenderOptions options)
+    {
+        OfficeCli.Handlers.Rendering.RenderingBootstrap.EnsureRegistered();
+        var renderer = OfficeCli.Core.Rendering.RendererRegistry.Default
+            .Resolve(formatId, options.Output, options.Mode);
+        return renderer?.Render(
+            new OfficeCli.Handlers.Rendering.HandlerRenderInput(handler, formatId), options).Text;
+    }
+
+    // PNG bytes from a renderer that paints its own pixels, or null when none is
+    // registered for this format (the built-in renderers emit HTML only, so the
+    // default install returns null here and the HTML→headless path is used). The
+    // native (real Office) backend, when it ran, has already produced the pixels and
+    // this is not reached.
+    internal static byte[]? RenderPngBytesViaRegistry(
+        OfficeCli.Core.IDocumentHandler handler, string formatId,
+        OfficeCli.Core.Rendering.RenderOptions options)
+    {
+        OfficeCli.Handlers.Rendering.RenderingBootstrap.EnsureRegistered();
+        var renderer = OfficeCli.Core.Rendering.RendererRegistry.Default
+            .Resolve(formatId, OfficeCli.Core.Rendering.RenderOutputKind.Png, options.Mode);
+        if (renderer == null) return null;
+        return renderer.Render(
+            new OfficeCli.Handlers.Rendering.HandlerRenderInput(handler, formatId), options).Bytes;
     }
 
     private static (int? start, int? end) ParsePptHtmlPage(

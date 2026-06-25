@@ -1046,13 +1046,13 @@ public class ResidentServer : IDisposable
                 var idx = excel.GetSheetIndex(sheetName);
                 if (idx >= 0) scrollTo = $".sheet-content[data-sheet=\"{idx}\"]";
             }
-            WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "full", FullHtml = excel.ViewAsHtml(), ScrollTo = scrollTo });
+            WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "full", FullHtml = CommandBuilder.RenderViaRegistry(excel, "xlsx", new OfficeCli.Core.Rendering.RenderOptions()), ScrollTo = scrollTo });
             return;
         }
         if (_handler is OfficeCli.Handlers.WordHandler word)
         {
             var scrollTo = WatchMessage.ExtractWordScrollTarget(changedPath);
-            WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "full", FullHtml = word.ViewAsHtml(), ScrollTo = scrollTo });
+            WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "full", FullHtml = CommandBuilder.RenderViaRegistry(word, "docx", new OfficeCli.Core.Rendering.RenderOptions()), ScrollTo = scrollTo });
             return;
         }
         if (_handler is not OfficeCli.Handlers.PowerPointHandler ppt) return;
@@ -1075,7 +1075,7 @@ public class ResidentServer : IDisposable
 
         if (_handler is OfficeCli.Handlers.WordHandler word)
         {
-            var html = word.ViewAsHtml();
+            var html = CommandBuilder.RenderViaRegistry(word, "docx", new OfficeCli.Core.Rendering.RenderOptions())!;
             var pageCount = System.Text.RegularExpressions.Regex.Matches(html, @"data-page=""\d+""").Count;
             var scrollTo = pageCount > 0 ? $".page[data-page=\"{pageCount}\"]" : null;
             WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "full", FullHtml = html, ScrollTo = scrollTo });
@@ -1083,7 +1083,7 @@ public class ResidentServer : IDisposable
         }
         if (_handler is OfficeCli.Handlers.ExcelHandler excel)
         {
-            WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "full", FullHtml = excel.ViewAsHtml() });
+            WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "full", FullHtml = CommandBuilder.RenderViaRegistry(excel, "xlsx", new OfficeCli.Core.Rendering.RenderOptions()) });
             return;
         }
         if (_handler is not OfficeCli.Handlers.PowerPointHandler ppt) return;
@@ -1093,16 +1093,16 @@ public class ResidentServer : IDisposable
             var html = ppt.RenderSlideHtml(newCount);
             if (html != null)
             {
-                WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "add", Slide = newCount, Html = html, FullHtml = ppt.ViewAsHtml() });
+                WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "add", Slide = newCount, Html = html, FullHtml = CommandBuilder.RenderViaRegistry(ppt, "pptx", new OfficeCli.Core.Rendering.RenderOptions()) });
                 return;
             }
         }
         else if (newCount < oldSlideCount)
         {
-            WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "remove", Slide = oldSlideCount, FullHtml = ppt.ViewAsHtml() });
+            WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "remove", Slide = oldSlideCount, FullHtml = CommandBuilder.RenderViaRegistry(ppt, "pptx", new OfficeCli.Core.Rendering.RenderOptions()) });
             return;
         }
-        WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "full", FullHtml = ppt.ViewAsHtml() });
+        WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "full", FullHtml = CommandBuilder.RenderViaRegistry(ppt, "pptx", new OfficeCli.Core.Rendering.RenderOptions()) });
     }
 
     private void NotifyWatchFullRefresh()
@@ -1111,11 +1111,11 @@ public class ResidentServer : IDisposable
 
         string? fullHtml = null;
         if (_handler is OfficeCli.Handlers.PowerPointHandler ppt)
-            fullHtml = ppt.ViewAsHtml();
+            fullHtml = CommandBuilder.RenderViaRegistry(ppt, "pptx", new OfficeCli.Core.Rendering.RenderOptions());
         else if (_handler is OfficeCli.Handlers.ExcelHandler excel)
-            fullHtml = excel.ViewAsHtml();
+            fullHtml = CommandBuilder.RenderViaRegistry(excel, "xlsx", new OfficeCli.Core.Rendering.RenderOptions());
         else if (_handler is OfficeCli.Handlers.WordHandler word)
-            fullHtml = word.ViewAsHtml();
+            fullHtml = CommandBuilder.RenderViaRegistry(word, "docx", new OfficeCli.Core.Rendering.RenderOptions());
         if (fullHtml != null)
             WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "full", FullHtml = fullHtml });
     }
@@ -1142,12 +1142,14 @@ public class ResidentServer : IDisposable
             {
                 // BUG-R36-B7: honor --page on pptx html with strict bounds.
                 var (pStart, pEnd) = ResolvePptHtmlPage(pageFilter, start, end, pptHandler);
-                html = pptHandler.ViewAsHtml(pStart, pEnd);
+                html = CommandBuilder.RenderViaRegistry(_handler, "pptx",
+                    new OfficeCli.Core.Rendering.RenderOptions { StartPage = pStart, EndPage = pEnd });
             }
-            else if (_handler is OfficeCli.Handlers.ExcelHandler excelHandler)
-                html = excelHandler.ViewAsHtml();
-            else if (_handler is OfficeCli.Handlers.WordHandler wordHandler)
-                html = wordHandler.ViewAsHtml(pageFilter);
+            else if (_handler is OfficeCli.Handlers.ExcelHandler)
+                html = CommandBuilder.RenderViaRegistry(_handler, "xlsx", new OfficeCli.Core.Rendering.RenderOptions());
+            else if (_handler is OfficeCli.Handlers.WordHandler)
+                html = CommandBuilder.RenderViaRegistry(_handler, "docx",
+                    new OfficeCli.Core.Rendering.RenderOptions { PageFilter = pageFilter });
             else if (_handler is OfficeCli.Core.Plugins.FormatHandlerProxy proxy)
                 html = proxy.ViewAsHtml(int.TryParse(pageFilter, out var pp) ? pp : (int?)null);
 
@@ -1266,7 +1268,8 @@ public class ResidentServer : IDisposable
                 }
                 if (directPng == null)
                 {
-                    html = pptShotHandler.ViewAsHtml(pStart, pEnd, pptGridCols, sw);
+                    html = CommandBuilder.RenderViaRegistry(pptShotHandler, "pptx", new OfficeCli.Core.Rendering.RenderOptions
+                    { StartPage = pStart, EndPage = pEnd, GridColumns = pptGridCols, ViewportPx = sw })!;
                     // Single slide: size the viewport to the slide's 96-DPI native
                     // pixels so the PNG is the slide, padding-free.
                     if (pStart == pEnd && gridCols == 0)
@@ -1277,7 +1280,7 @@ public class ResidentServer : IDisposable
                 }
             }
             else if (_handler is OfficeCli.Handlers.ExcelHandler excelShotHandler)
-                html = excelShotHandler.ViewAsHtml();
+                html = CommandBuilder.RenderViaRegistry(excelShotHandler, "xlsx", new OfficeCli.Core.Rendering.RenderOptions())!;
             else if (_handler is OfficeCli.Handlers.WordHandler wordShotGrid && gridCols != 0)
             {
                 // Contact-sheet grid — mirrors CommandBuilder.View.cs's docx grid
@@ -1288,7 +1291,7 @@ public class ResidentServer : IDisposable
                 var gTmp = Path.Combine(Path.GetTempPath(), $"officecli_gridcount_{Path.GetFileNameWithoutExtension(_filePath)}_{Guid.NewGuid():N}.html");
                 try
                 {
-                    File.WriteAllText(gTmp, wordShotGrid.ViewAsHtml(null));
+                    File.WriteAllText(gTmp, CommandBuilder.RenderViaRegistry(wordShotGrid, "docx", new OfficeCli.Core.Rendering.RenderOptions())!);
                     gPageCount = OfficeCli.Core.HtmlScreenshot.GetPageCountFromDom(gTmp) ?? 1;
                 }
                 catch { /* fall back to 1 row */ }
@@ -1324,7 +1327,8 @@ public class ResidentServer : IDisposable
                 }
                 if (directPng == null)
                 {
-                    html = wordShotGrid.ViewAsHtml(null, gCols, (int)Math.Round(gCellW));
+                    html = CommandBuilder.RenderViaRegistry(wordShotGrid, "docx", new OfficeCli.Core.Rendering.RenderOptions
+                    { GridColumns = gCols, GridCellWidthPx = (int)Math.Round(gCellW) })!;
                     sw = Math.Max(1, (int)Math.Round(gVpW));
                     sh = Math.Max(1, (int)Math.Ceiling(gVpH));
                 }
@@ -1349,7 +1353,8 @@ public class ResidentServer : IDisposable
                     Console.Error.WriteLine("--render native requires Windows with Microsoft Word installed.");
                     return;
                 }
-                if (directPng == null) html = wordShotHandler.ViewAsHtml(effectiveFilter);
+                if (directPng == null) html = CommandBuilder.RenderViaRegistry(wordShotHandler, "docx",
+                    new OfficeCli.Core.Rendering.RenderOptions { PageFilter = effectiveFilter })!;
             }
             if (html == null && directPng == null)
             {
@@ -1413,7 +1418,9 @@ public class ResidentServer : IDisposable
                 {
                     slideNum = start.Value;
                 }
-                var svg = pptSvgHandler.ViewAsSvg(slideNum);
+                var svg = CommandBuilder.RenderViaRegistry(pptSvgHandler, "pptx",
+                    new OfficeCli.Core.Rendering.RenderOptions
+                    { Output = OfficeCli.Core.Rendering.RenderOutputKind.Svg, StartPage = slideNum })!;
                 Console.Write(svg);
             }
             else if (_handler is OfficeCli.Core.Plugins.FormatHandlerProxy svgProxy)
@@ -1450,7 +1457,7 @@ public class ResidentServer : IDisposable
                 var tmpHtml = Path.Combine(Path.GetTempPath(), $"officecli_pc_{Path.GetFileNameWithoutExtension(_filePath)}_{Guid.NewGuid():N}.html");
                 try
                 {
-                    File.WriteAllText(tmpHtml, whForCount.ViewAsHtml(null));
+                    File.WriteAllText(tmpHtml, CommandBuilder.RenderViaRegistry(whForCount, "docx", new OfficeCli.Core.Rendering.RenderOptions())!);
                     pageCountValue = OfficeCli.Core.HtmlScreenshot.GetPageCountFromDom(tmpHtml);
                 }
                 finally { try { File.Delete(tmpHtml); } catch { } }

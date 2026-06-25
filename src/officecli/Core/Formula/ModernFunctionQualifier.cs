@@ -25,18 +25,42 @@ public static class ModernFunctionQualifier
     {
         "SEQUENCE", "SORT", "SORTBY", "UNIQUE",
         "XLOOKUP", "XMATCH",
-        "LET", "LAMBDA",
+        "LET", "LAMBDA", "REDUCE", "ISOMITTED",
+        "MAP", "BYROW", "BYCOL", "SCAN", "MAKEARRAY",
         "IFS", "SWITCH",
         "MAXIFS", "MINIFS",
         "CONCAT", "TEXTJOIN",
         "STOCKHISTORY",
         "TEXTBEFORE", "TEXTAFTER", "TEXTSPLIT",
+        "REGEXTEST", "REGEXEXTRACT", "REGEXREPLACE",
+        "ISFORMULA", "SHEET", "SHEETS",
+        // Engineering functions added in Excel 2013 (2007 IM* / DELTA / GESTEP
+        // are bare).
+        "IMCOSH", "IMCOT", "IMCSC", "IMCSCH", "IMSEC", "IMSECH", "IMSINH", "IMTAN",
+        "BITAND", "BITOR", "BITXOR", "BITLSHIFT", "BITRSHIFT",
+        // Financial functions added in Excel 2013 (other financials are bare).
+        "PDURATION", "RRI",
+        // Statistical / engineering distribution functions added in Excel 2010+
+        // (legacy NORMDIST/GAMMADIST/CHIDIST/POISSON/ERF/… are bare).
+        "NORM.DIST", "NORM.S.DIST", "NORM.INV", "NORM.S.INV",
+        "GAMMA", "GAMMALN.PRECISE", "GAMMA.DIST", "GAMMA.INV",
+        "CHISQ.DIST", "CHISQ.DIST.RT", "CHISQ.INV", "CHISQ.INV.RT",
+        "POISSON.DIST", "EXPON.DIST", "CONFIDENCE.NORM",
+        "ERF.PRECISE", "ERFC.PRECISE", "GAUSS", "PHI",
+        "BETA.DIST", "BETA.INV", "T.DIST", "T.DIST.2T", "T.DIST.RT", "T.INV", "T.INV.2T",
+        "F.DIST", "F.DIST.RT", "F.INV", "F.INV.RT",
+        "BINOM.DIST", "BINOM.INV", "NEGBINOM.DIST",
+        "WEIBULL.DIST", "LOGNORM.DIST", "LOGNORM.INV", "HYPGEOM.DIST",
+        "T.TEST", "CHISQ.TEST", "F.TEST", "Z.TEST",
+        "SKEW.P", "COVARIANCE.P", "COVARIANCE.S", "QUARTILE.INC", "QUARTILE.EXC",
+        "PERCENTILE.EXC", "FORECAST.LINEAR", "PERMUTATIONA",
         "TAKE", "DROP",
         "CHOOSECOLS", "CHOOSEROWS",
         "ARRAYTOTEXT", "VALUETOTEXT",
         "TOCOL", "TOROW",
         "WRAPCOLS", "WRAPROWS",
         "EXPAND",
+        "HSTACK", "VSTACK",
         "ANCHORARRAY",
     };
 
@@ -58,8 +82,11 @@ public static class ModernFunctionQualifier
         "FILTER", "SORT", "SORTBY", "UNIQUE", "SEQUENCE", "RANDARRAY",
         "XLOOKUP", "XMATCH",
         "LET", "LAMBDA",
+        "MAP", "BYROW", "BYCOL", "SCAN", "MAKEARRAY",
         "TAKE", "DROP", "CHOOSECOLS", "CHOOSEROWS",
         "TOCOL", "TOROW", "WRAPCOLS", "WRAPROWS", "EXPAND",
+        "HSTACK", "VSTACK", "TRANSPOSE",
+        "LINEST", "LOGEST", "TREND", "GROWTH",
         "TEXTSPLIT",
         "ANCHORARRAY",
     };
@@ -118,6 +145,70 @@ public static class ModernFunctionQualifier
         @"(?<![A-Za-z0-9_\.])([A-Za-z_][A-Za-z0-9_]*)\s*\(",
         RegexOptions.Compiled);
 
+    // Collect every LET / LAMBDA parameter name in the formula. For LET the
+    // parameter is each odd-numbered argument except the last (name1, value1, …,
+    // calc); for LAMBDA it is every argument except the last (p1, …, pN, body).
+    private static HashSet<string> CollectLambdaParams(string formula)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int i = 0;
+        while (i < formula.Length)
+        {
+            char c = formula[i];
+            if (c == '"')   // skip string literals
+            {
+                i++;
+                while (i < formula.Length)
+                {
+                    if (formula[i] == '"') { if (i + 1 < formula.Length && formula[i + 1] == '"') { i += 2; continue; } i++; break; }
+                    i++;
+                }
+                continue;
+            }
+            if (IsIdentStart(c) && (i == 0 || !IsIdentPrev(formula[i - 1])))
+            {
+                int s = i;
+                while (i < formula.Length && IsIdentCont(formula[i])) i++;
+                string id = formula.Substring(s, i - s);
+                int j = i;
+                while (j < formula.Length && formula[j] == ' ') j++;
+                bool isLet = id.Equals("LET", StringComparison.OrdinalIgnoreCase);
+                bool isLambda = id.Equals("LAMBDA", StringComparison.OrdinalIgnoreCase);
+                if ((isLet || isLambda) && j < formula.Length && formula[j] == '(')
+                {
+                    var argSpans = TopLevelArgs(formula, j);
+                    for (int k = 0; k < argSpans.Count - 1; k++)
+                        if (isLambda || k % 2 == 0)
+                        {
+                            var nm = argSpans[k].Trim();
+                            if (nm.Length > 0 && IsIdentStart(nm[0]) && nm.All(ch => IsIdentCont(ch)))
+                                names.Add(nm);
+                        }
+                }
+                continue;
+            }
+            i++;
+        }
+        return names;
+    }
+
+    // Split the parenthesised argument list starting at <paren> ('(') into the
+    // top-level argument substrings (respecting nested parens and strings).
+    private static List<string> TopLevelArgs(string formula, int paren)
+    {
+        var args = new List<string>();
+        int depth = 0, i = paren, start = paren + 1;
+        for (; i < formula.Length; i++)
+        {
+            char c = formula[i];
+            if (c == '"') { i++; while (i < formula.Length && formula[i] != '"') i++; continue; }
+            if (c == '(') depth++;
+            else if (c == ')') { depth--; if (depth == 0) { args.Add(formula[start..i]); break; } }
+            else if (c == ',' && depth == 1) { args.Add(formula[start..i]); start = i + 1; }
+        }
+        return args;
+    }
+
     /// <summary>
     /// Returns the formula with Excel 2016+ modern function names qualified
     /// with <c>_xlfn.</c> / <c>_xlfn._xlws.</c> as required by OOXML. Leaves
@@ -127,6 +218,12 @@ public static class ModernFunctionQualifier
     public static string Qualify(string formula)
     {
         if (string.IsNullOrEmpty(formula)) return formula;
+
+        // LET / LAMBDA parameter names are stored in the _xlpm. namespace; without
+        // that prefix Excel reports the workbook as corrupt. Collect every such
+        // name up front so all of its occurrences (declaration and uses) get the
+        // prefix below.
+        var lambdaParams = CollectLambdaParams(formula);
 
         // Walk the string and only rewrite identifiers outside quoted strings.
         // Excel formula strings are bounded by '"' with '""' as an escape.
@@ -166,12 +263,19 @@ public static class ModernFunctionQualifier
             {
                 int start = i;
                 while (i < formula.Length && IsIdentCont(formula[i])) i++;
+                var name = formula.Substring(start, i - start);
+                // A LET/LAMBDA parameter (incl. when used to call a stored lambda,
+                // e.g. sq(7)) takes the _xlpm. prefix and shadows function names.
+                if (lambdaParams.Contains(name))
+                {
+                    sb.Append("_xlpm.").Append(name);
+                    continue;
+                }
                 // Skip whitespace then check for '('
                 int j = i;
                 while (j < formula.Length && formula[j] == ' ') j++;
                 if (j < formula.Length && formula[j] == '(')
                 {
-                    var name = formula.Substring(start, i - start);
                     if (XlwsFunctions.Contains(name))
                         sb.Append("_xlfn._xlws.").Append(name);
                     else if (XlfnFunctions.Contains(name))
@@ -181,7 +285,7 @@ public static class ModernFunctionQualifier
                 }
                 else
                 {
-                    sb.Append(formula, start, i - start);
+                    sb.Append(name);
                 }
                 continue;
             }
@@ -203,6 +307,9 @@ public static class ModernFunctionQualifier
         // Longer prefix first so we don't leave _xlws. stragglers.
         var s = formula.Replace("_xlfn._xlws.", "", StringComparison.Ordinal);
         s = s.Replace("_xlfn.", "", StringComparison.Ordinal);
+        // LET / LAMBDA parameter namespace — strip so the evaluator and the user
+        // see bare names (e.g. _xlpm.x → x).
+        s = s.Replace("_xlpm.", "", StringComparison.Ordinal);
         return s;
     }
 

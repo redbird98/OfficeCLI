@@ -20,7 +20,11 @@ internal record FormulaResult
     public string? ErrorValue { get; init; }
     public double[]? ArrayValue { get; init; }
     public RangeData? RangeValue { get; init; }
+    // A LAMBDA(...) value: captured parameter names + unevaluated body tokens.
+    // Carried as object to keep this record free of evaluator-internal types.
+    public object? LambdaValue { get; init; }
 
+    public bool IsLambda => LambdaValue != null;
     public bool IsNumeric => NumericValue.HasValue;
     public bool IsString => StringValue != null;
     public bool IsBool => BoolValue.HasValue;
@@ -182,6 +186,11 @@ internal partial class FormulaEvaluator
     private readonly WorkbookPart? _workbookPart;
     private readonly HashSet<string> _visiting;
     private readonly HashSet<string> _expandingNames = new(StringComparer.OrdinalIgnoreCase);
+    // LET / LAMBDA variable bindings (innermost scope). Names are case-insensitive.
+    private readonly Dictionary<string, FormulaResult> _bindings = new(StringComparer.OrdinalIgnoreCase);
+
+    // A LAMBDA value: parameter names + the body's token stream, re-evaluated per call.
+    private sealed record Lambda(List<string> Parameters, List<Token> Body);
     private readonly int _depth;
     private readonly string _sheetKey; // used to qualify cell refs for circular detection
 
@@ -291,7 +300,7 @@ internal partial class FormulaEvaluator
 
     // ==================== Tokenizer ====================
 
-    private enum TT { Number, String, CellRef, Range, Op, LParen, RParen, Comma, Func, Bool, Compare, SheetCellRef, SheetRange, ArrayLit, Error }
+    private enum TT { Number, String, CellRef, Range, Op, LParen, RParen, Comma, Func, Bool, Compare, SheetCellRef, SheetRange, ArrayLit, Error, Name }
     private record Token(TT Type, string Value);
 
     private Dictionary<string, string> GetDefinedNames()
@@ -515,7 +524,12 @@ internal partial class FormulaEvaluator
                     continue;
                 }
 
-                throw new NotSupportedException($"Unknown: {word}");
+                // Not a function, cell ref, or defined name: a bare identifier.
+                // Emit a Name token and defer resolution to evaluation time —
+                // LET / LAMBDA bind these in scope; anything still unbound
+                // surfaces #NAME? from ParseAtom, the same end result as before.
+                tokens.Add(new Token(TT.Name, stripped));
+                continue;
             }
             throw new NotSupportedException($"Unexpected: {ch}");
         }
@@ -778,6 +792,9 @@ internal partial class FormulaEvaluator
     private FormulaResult? ParsePostfix(List<Token> t, ref int p)
     {
         var v = ParseAtom(t, ref p); if (v == null) return null;
+        // Immediately-invoked LAMBDA: LAMBDA(x, x+1)(5).
+        while (v.IsLambda && p < t.Count && t[p].Type == TT.LParen)
+            v = InvokeLambda((Lambda)v.LambdaValue!, ParseCallArgs(t, ref p));
         while (p < t.Count && t[p].Type == TT.Op && t[p].Value == "%") { p++; v = FormulaResult.Number(v.AsNumber() / 100.0); }
         return v;
     }
@@ -801,6 +818,10 @@ internal partial class FormulaEvaluator
             case TT.SheetRange: p++; return FormulaResult.Area(Expand2DRange(tok.Value));
             case TT.ArrayLit: p++; return ParseArrayConstant(tok.Value);
             case TT.Error: p++; return FormulaResult.Error(tok.Value);
+            case TT.Name:
+                p++;
+                if (_bindings.TryGetValue(tok.Value, out var bound)) return bound;
+                throw new NameResolutionException(tok.Value);
             case TT.LParen: p++; var inner = ParseExpression(t, ref p); if (p < t.Count && t[p].Type == TT.RParen) p++; return inner;
             case TT.Func: return ParseFunction(t, ref p);
             default: return null;
@@ -811,6 +832,15 @@ internal partial class FormulaEvaluator
     {
         var name = t[p].Value; p++;
         if (p >= t.Count || t[p].Type != TT.LParen) return null; p++;
+
+        // LET / LAMBDA capture their arguments as token ranges (binding names and
+        // an unevaluated body) rather than eager evaluation.
+        if (name == "LET") return EvalLet(t, ref p);
+        if (name == "LAMBDA") return MakeLambda(t, ref p);
+        // A LET/LAMBDA-bound name invoked as f(args).
+        if (_bindings.TryGetValue(name, out var boundFn) && boundFn.IsLambda)
+            return InvokeLambda((Lambda)boundFn.LambdaValue!, ParseCallArgs(t, ref p));
+
         var args = new List<object>();
         var argIdx = 0;
         if (p < t.Count && t[p].Type != TT.RParen)
@@ -821,7 +851,9 @@ internal partial class FormulaEvaluator
                 // treats omitted args as 0 for numeric-arg functions like OFFSET.
                 if (p < t.Count && (t[p].Type == TT.Comma || t[p].Type == TT.RParen))
                 { args.Add(FormulaResult.Number(0)); }
-                else if (argIdx == 0 && name == "OFFSET" && TryParseRefArg(t, ref p) is { } refArg)
+                else if (((argIdx == 0 && name is "OFFSET" or "ISREF" or "ISFORMULA" or "SHEET")
+                          || (argIdx == 1 && name is "CELL"))
+                         && TryParseRefArg(t, ref p) is { } refArg)
                 { args.Add(refArg); }
                 else if (p < t.Count && t[p].Type is TT.Range or TT.SheetRange
                          && (p + 1 >= t.Count || t[p + 1].Type is TT.Comma or TT.RParen))
@@ -833,6 +865,124 @@ internal partial class FormulaEvaluator
         }
         if (p < t.Count && t[p].Type == TT.RParen) p++;
         return EvalFunction(name, args);
+    }
+
+    // Sentinel bound to a LAMBDA parameter that the caller did not supply, so
+    // ISOMITTED can detect it.
+    private static readonly FormulaResult OmittedArg = new() { StringValue = " __OCLI_OMITTED__" };
+    private static bool IsOmittedArg(object? o) => ReferenceEquals(o, OmittedArg);
+
+    // Consume `( a, b, … )` (p at the LParen already consumed by the caller) and
+    // return the evaluated argument values for a lambda call.
+    private List<FormulaResult> ParseCallArgs(List<Token> t, ref int p)
+    {
+        var argv = new List<FormulaResult>();
+        if (p < t.Count && t[p].Type != TT.RParen)
+            while (true)
+            {
+                // An explicit empty slot (f(10,)) is an omitted argument that
+                // ISOMITTED can detect; a genuinely missing trailing argument is
+                // caught by the parameter-count check in InvokeLambda.
+                if (p < t.Count && (t[p].Type == TT.Comma || t[p].Type == TT.RParen))
+                    argv.Add(OmittedArg);
+                else { var a = ParseExpression(t, ref p); argv.Add(a ?? FormulaResult.Error("#VALUE!")); }
+                if (p < t.Count && t[p].Type == TT.Comma) { p++; continue; }
+                break;
+            }
+        if (p < t.Count && t[p].Type == TT.RParen) p++;
+        return argv;
+    }
+
+    // Capture one top-level argument's tokens (balanced parens; stop at a
+    // top-level comma or the closing paren) without evaluating them.
+    private static List<Token> CaptureArg(List<Token> t, ref int p)
+    {
+        int depth = 0, start = p;
+        while (p < t.Count)
+        {
+            var tt = t[p].Type;
+            if (depth == 0 && (tt == TT.Comma || tt == TT.RParen)) break;
+            if (tt == TT.LParen) depth++;
+            else if (tt == TT.RParen) depth--;
+            p++;
+        }
+        return t.GetRange(start, p - start);
+    }
+
+    // Capture every top-level argument as a token range; consume the closing paren.
+    private static List<List<Token>> CaptureAllArgs(List<Token> t, ref int p)
+    {
+        var parts = new List<List<Token>>();
+        if (p < t.Count && t[p].Type != TT.RParen)
+            while (true)
+            {
+                parts.Add(CaptureArg(t, ref p));
+                if (p < t.Count && t[p].Type == TT.Comma) { p++; continue; }
+                break;
+            }
+        if (p < t.Count && t[p].Type == TT.RParen) p++;
+        return parts;
+    }
+
+    private FormulaResult? EvalTokens(List<Token> body) { int q = 0; return ParseExpression(body, ref q); }
+
+    // LET(name1, value1, …, calculation) — bind each name to its value (in order,
+    // so later values can reference earlier names) then evaluate the calculation.
+    private FormulaResult? EvalLet(List<Token> t, ref int p)
+    {
+        var parts = CaptureAllArgs(t, ref p);
+        if (parts.Count < 3 || parts.Count % 2 == 0) return FormulaResult.Error("#VALUE!");
+        var snapshot = new Dictionary<string, FormulaResult>(_bindings, StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            for (int i = 0; i < parts.Count - 1; i += 2)
+            {
+                if (parts[i].Count != 1 || parts[i][0].Type != TT.Name) return FormulaResult.Error("#VALUE!");
+                var val = EvalTokens(parts[i + 1]);
+                if (val == null) return FormulaResult.Error("#VALUE!");
+                _bindings[parts[i][0].Value] = val;
+            }
+            return EvalTokens(parts[^1]);
+        }
+        finally { RestoreBindings(snapshot); }
+    }
+
+    // LAMBDA(param1, …, paramN, body) — a value capturing the parameter names and
+    // the unevaluated body tokens.
+    private FormulaResult? MakeLambda(List<Token> t, ref int p)
+    {
+        var parts = CaptureAllArgs(t, ref p);
+        if (parts.Count < 1) return FormulaResult.Error("#VALUE!");
+        var pars = new List<string>();
+        for (int i = 0; i < parts.Count - 1; i++)
+        {
+            if (parts[i].Count != 1 || parts[i][0].Type != TT.Name) return FormulaResult.Error("#VALUE!");
+            pars.Add(parts[i][0].Value);
+        }
+        return new FormulaResult { LambdaValue = new Lambda(pars, parts[^1]) };
+    }
+
+    // Bind the lambda's parameters to the supplied (or omitted) arguments, evaluate
+    // the body, then restore the enclosing scope.
+    private FormulaResult InvokeLambda(Lambda lam, List<FormulaResult> argv)
+    {
+        // Excel requires every parameter to have a slot; an under-supplied call
+        // is #VALUE! (a supplied-but-empty slot binds OmittedArg for ISOMITTED).
+        if (argv.Count < lam.Parameters.Count) return FormulaResult.Error("#VALUE!");
+        var snapshot = new Dictionary<string, FormulaResult>(_bindings, StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            for (int i = 0; i < lam.Parameters.Count; i++)
+                _bindings[lam.Parameters[i]] = argv[i];
+            return EvalTokens(lam.Body) ?? FormulaResult.Error("#VALUE!");
+        }
+        finally { RestoreBindings(snapshot); }
+    }
+
+    private void RestoreBindings(Dictionary<string, FormulaResult> snapshot)
+    {
+        _bindings.Clear();
+        foreach (var kv in snapshot) _bindings[kv.Key] = kv.Value;
     }
 
     /// <summary>

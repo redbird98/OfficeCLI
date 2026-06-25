@@ -544,13 +544,15 @@ public partial class ExcelHandler
                     // ArgumentException("invalid character") from XmlUtf8RawTextWriter.
                     var setFormulaText = value.TrimStart('=');
                     var setCellFormula = new CellFormula(Core.PivotTableHelper.SanitizeXmlText(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(setFormulaText))));
-                    // Dynamic-array spill metadata — see Add.Cells.cs for rationale.
-                    // Without t="array" ref="<cellRef>" Excel 365 rejects the file
-                    // (0x800A03EC) when the formula calls SORT/FILTER/UNIQUE/etc.
+                    // Dynamic-array spill metadata — see ExcelHandler.DynamicArray.cs
+                    // for rationale. t="array" + the XLDAPR cm metadata make Excel 365
+                    // spill SORT/FILTER/UNIQUE/SEQUENCE/etc.; t="array" alone is a
+                    // legacy CSE array locked to the anchor cell.
                     if (Core.ModernFunctionQualifier.IsDynamicArrayFormula(setFormulaText) && cell.CellReference?.Value != null)
                     {
                         setCellFormula.FormulaType = CellFormulaValues.Array;
                         setCellFormula.Reference = cell.CellReference.Value;
+                        EnsureDynamicArrayMetadata(cell);
                     }
                     // CONSISTENCY(value-child-uniqueness): drop any stale <is>
                     // placeholder so the cell holds a single value child.

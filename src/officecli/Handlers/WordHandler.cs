@@ -8,9 +8,11 @@ using OfficeCli.Core;
 
 namespace OfficeCli.Handlers;
 
-public partial class WordHandler : IDocumentHandler
+public partial class WordHandler : IDocumentHandler, Rendering.IRenderModelHost
 {
     private readonly WordprocessingDocument _doc;
+
+    object? Rendering.IRenderModelHost.RenderModel => _doc;
     private readonly string _filePath;
     private HashSet<string> _usedParaIds = new(StringComparer.OrdinalIgnoreCase);
     private int _nextParaId = 0x100000;

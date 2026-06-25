@@ -38,7 +38,7 @@ static partial class CommandBuilder
         dumpCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(dumpFileArg)!;
-            var path = result.GetValue(dumpPathArg) ?? "/";
+            var path = OfficeCli.Core.MsysPathHint.Restore(result.GetValue(dumpPathArg)) ?? "/";
             var format = (result.GetValue(formatOpt) ?? "batch").ToLowerInvariant();
             var outPath = result.GetValue(outOpt);
 
