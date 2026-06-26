@@ -11,11 +11,11 @@ name: Publish SDK (npm)
 # publish when that version is already on npm, so only a version bump actually
 # publishes — pushes that don't change the version are no-ops.
 #
-# The same SDK is published under three names (one canonical + mirrors). The
-# version is shared (sdk/node/package.json); the name is swapped per matrix leg.
+# The same SDK is published under four names (one canonical + mirrors/aliases).
+# The version is shared (sdk/node/package.json); the name is swapped per leg.
 #
 # Auth: npm Trusted Publishing (OIDC), no token. Configure a trusted publisher
-# for EACH of the three packages on npmjs.com:
+# for EACH of the four packages on npmjs.com:
 #   org/user: iOfficeAI   repo: OfficeCLI   workflow: publish-sdk.yml   action: npm publish
 
 on:
@@ -39,6 +39,7 @@ jobs:
       matrix:
         package:
           - '@officecli/sdk'
+          - '@officecli/officecli-sdk'
           - '@aionui/officecli-sdk'
           - 'officecli-sdk'
     steps:
