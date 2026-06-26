@@ -215,7 +215,12 @@ public static class McpServer
                 Rpc(w, id);
                 w.WriteStartObject("result");
                 w.WriteStartArray("content");
-                w.WriteStartObject(); w.WriteString("type", "text"); w.WriteString("text", $"Error: {ex.Message}"); w.WriteEndObject();
+                // A CliException already carrying a {success,data} envelope (the
+                // batch judgment path) is emitted verbatim so the per-step
+                // results survive; everything else gets the "Error: " prefix.
+                var errText = ex is OfficeCli.Core.CliException { Code: "batch_step_failed" }
+                    ? ex.Message : $"Error: {ex.Message}";
+                w.WriteStartObject(); w.WriteString("type", "text"); w.WriteString("text", errText); w.WriteEndObject();
                 w.WriteEndArray();
                 w.WriteBoolean("isError", true);
                 w.WriteEndObject();
@@ -626,7 +631,17 @@ public static class McpServer
                 var results = CommandBuilder.RunNonResidentBatch(handler, items, stopOnError, json: true);
                 var sw = new System.IO.StringWriter();
                 CommandBuilder.PrintBatchResults(results, json: true, totalCount: items.Count, output: sw);
-                return sw.ToString().Trim();
+                // Wrap in the {success,data} envelope like the CLI/resident batch
+                // paths (batch is a Judgment command: any failed step → success
+                // false). Without this the MCP batch returned a bare
+                // {results,summary} with no verdict, so a fully-failed batch was
+                // indistinguishable from a clean one. On failure throw the
+                // enveloped JSON so isError mirrors the CLI's exit-code-1.
+                var batchSuccess = results.Count == 0 || !results.Any(r => !r.Success);
+                var envelope = OfficeCli.Core.OutputFormatter.WrapEnvelope(sw.ToString().TrimEnd('\n', '\r'), success: batchSuccess);
+                if (!batchSuccess)
+                    throw new CliException(envelope) { Code = "batch_step_failed" };
+                return envelope;
             }
             case "swap":
                 return ExecuteMutation(Arg("file"), new BatchItem
