@@ -86,11 +86,11 @@ internal static class SkillInstaller
         // the full guide") was empirically ignored even by capable models, which
         // jumped straight to create/add and guessed the schema. The imperative
         // FIRST … BEFORE … is what actually triggers a skill load + help-first.
-        return "IMPORTANT — before you create/add/set/remove on any Office file, FIRST call "
-            + "load_skill name=<X> for that file type (it loads the build guide and tells you to "
+        return "IMPORTANT — before you create/add/set/remove on any Office file, FIRST run the command "
+            + "`load_skill <X>` for that file type (it loads the build guide and tells you to "
             + "consult `help` for the schema). Pick X by need: "
             + string.Join(" · ", parts)
-            + ". (load_skill with no name lists all skills.)";
+            + ". (run `load_skill` with no name to list all skills.)";
     }
 
     // Bundled skill assets that cannot ride the MCP/CLI text channel intact
@@ -183,8 +183,8 @@ internal static class SkillInstaller
         var sb = new StringBuilder();
         sb.Append("# officecli skills\n\n");
         sb.Append("Workflow guides for building documents. Match the triggers below, then:\n");
-        sb.Append("- `load_skill name=<name>` — the skill's full SKILL.md + a manifest of its bundled reference files\n");
-        sb.Append("- `load_skill name=<name> path=<relpath>` — one bundled reference file\n\n");
+        sb.Append("- `load_skill <name>` — the skill's full SKILL.md + a manifest of its bundled reference files\n");
+        sb.Append("- `load_skill <name> --path <relpath>` — one bundled reference file\n\n");
         foreach (var (name, folder) in SkillMap)
         {
             var desc = GetFullSkillDescription(folder);
@@ -329,8 +329,7 @@ internal static class SkillInstaller
         sb.Append("\n\n## Reference files (bundled with this skill)\n\n");
         sb.Append("This skill defers detail to the files below. The body's `reference/…` ");
         sb.Append("pointers refer to these. Fetch one with:\n");
-        sb.Append($"- MCP:  `load_skill name={skillName} path=<relpath>`\n");
-        sb.Append($"- CLI:  `officecli load_skill {skillName} --path <relpath>`\n");
+        sb.Append($"- `load_skill {skillName} --path <relpath>`\n");
         sb.Append($"- or install the whole tree to disk: `officecli skills install {skillName}`\n\n");
         foreach (var f in shallow) sb.Append($"- `{f}`\n");
         foreach (var (g, n) in deepGroups)

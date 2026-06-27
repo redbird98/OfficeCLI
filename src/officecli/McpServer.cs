@@ -195,39 +195,9 @@ public static class McpServer
 
         try
         {
-            // Unified tool: route by "command" arg; legacy: route by tool name.
-            // When the unified tool is invoked with no (or empty) "command", the
-            // old code fell back to the tool name and the switch reported
-            // "Unknown tool: officecli" — which misleads, since the tool is fine
-            // and it is the command field that is missing. Detect that here and
-            // name the actual gap, listing the valid commands.
-            string toolName;
-            if (name == "officecli")
-            {
-                var commandVal = args.ValueKind == JsonValueKind.Object && args.TryGetProperty("command", out var cmd)
-                    ? cmd.GetString() : null;
-                if (string.IsNullOrWhiteSpace(commandVal))
-                {
-                    // Do NOT silently route: an inferred verb can be wrong, and
-                    // guessing a mutation (batch) from a stray field would hide a
-                    // real mistake. Instead, when the caller supplied a field
-                    // that belongs to exactly one command, name it as a strong
-                    // suggestion and let the caller re-send with an explicit
-                    // 'command'. Falls back to the plain list when there is no
-                    // unambiguous signal.
-                    var hint = SuggestCommandFromExclusiveField(args);
-                    throw new ArgumentException(hint is var (field, guess) && field != null
-                        ? $"Missing required 'command' field. You provided '{field}', which only '{guess}' uses — "
-                          + $"did you mean command=\"{guess}\"? Otherwise set command to one of: {string.Join(", ", CommandNames)}."
-                        : "Missing required 'command' field. Set command to one of: " + string.Join(", ", CommandNames) + ".");
-                }
-                toolName = commandVal;
-            }
-            else
-            {
-                toolName = name;
-            }
-            var contents = ExecuteToolMulti(toolName, args);
+            // Thin shell: the officecli tool takes a CLI command line in
+            // `command` and runs it through the shared System.CommandLine root.
+            var contents = ExecuteCommandLine(args);
             return WriteJson(w =>
             {
                 w.WriteStartObject();
@@ -280,6 +250,124 @@ public static class McpServer
     /// </summary>
     private sealed record McpContent(string Type, string? Text = null, string? Data = null, string? MimeType = null);
 
+    // ==================== Thin command-line exec ====================
+    // The MCP tool is a thin shell over the CLI: the caller passes the officecli
+    // command line (a string, or a pre-split argv array) and it runs through the
+    // SAME System.CommandLine root the CLI uses. No per-command marshalling here
+    // means no argument can be silently dropped (every CLI flag works for free),
+    // and the model writes exactly what the skills' CLI examples show.
+
+    private static IReadOnlyList<McpContent> ExecuteCommandLine(JsonElement args)
+    {
+        var argv = ExtractArgv(args);
+        if (argv.Length == 0)
+            throw new ArgumentException("Provide the officecli command line as `command`, e.g. "
+                + "command=\"help\" or command=\"add deck.pptx /slide[1] --type shape --prop text=Hi\".");
+        // load_skill / skills live in Program.cs early-dispatch, not in the
+        // System.CommandLine root, so RunCliRaw can't reach them. Serve them
+        // here from the same SkillInstaller the CLI uses.
+        if (argv[0] is "load_skill" or "skill" or "skills")
+            return new[] { new McpContent("text", Text: HandleSkillCommand(argv)) };
+        if (IsScreenshot(argv))
+            return RunScreenshotArgv(argv);
+        var r = RunCliRaw(argv);
+        if (r.Exit != 0)
+            throw new ArgumentException(StripErrPrefix(FirstNonEmpty(r.Stderr.Trim(), r.Stdout.Trim())));
+        var outText = r.Stdout.TrimEnd('\n', '\r');
+        return new[] { new McpContent("text", Text: outText.Length == 0 ? "(ok)" : outText) };
+    }
+
+    private static string[] ExtractArgv(JsonElement args)
+    {
+        if (args.ValueKind != JsonValueKind.Object || !args.TryGetProperty("command", out var c))
+            return Array.Empty<string>();
+        var argv = c.ValueKind == JsonValueKind.Array
+            ? c.EnumerateArray().Select(e => e.GetString() ?? "").Where(s => s.Length > 0).ToArray()
+            : Tokenize(c.GetString() ?? "");
+        // A model copying a skill example may include the leading binary name.
+        if (argv.Length > 0 && (argv[0] == "officecli" || argv[0] == "officecli.exe"
+            || argv[0].EndsWith("/officecli", StringComparison.Ordinal)))
+            argv = argv[1..];
+        return argv;
+    }
+
+    // Quote-aware tokenizer: splits on whitespace, honours single/double quotes
+    // and backslash escapes inside double quotes. Never invokes a shell, so there
+    // is no command-injection surface — tokens go straight to the in-process
+    // System.CommandLine parser.
+    private static string[] Tokenize(string s)
+    {
+        var tokens = new List<string>();
+        var sb = new StringBuilder();
+        bool inTok = false; char quote = '\0';
+        for (int i = 0; i < s.Length; i++)
+        {
+            char ch = s[i];
+            if (quote != '\0')
+            {
+                if (ch == quote) quote = '\0';
+                else if (ch == '\\' && quote == '"' && i + 1 < s.Length) sb.Append(s[++i]);
+                else sb.Append(ch);
+                inTok = true;
+            }
+            else if (ch == '"' || ch == '\'') { quote = ch; inTok = true; }
+            else if (char.IsWhiteSpace(ch)) { if (inTok) { tokens.Add(sb.ToString()); sb.Clear(); inTok = false; } }
+            else { sb.Append(ch); inTok = true; }
+        }
+        if (inTok) tokens.Add(sb.ToString());
+        return tokens.ToArray();
+    }
+
+    private static bool IsScreenshot(string[] argv)
+        => argv.Length >= 2 && argv[0] == "view" && Array.IndexOf(argv, "screenshot") >= 0;
+
+    // Mirror the CLI's load_skill early-dispatch (Program.cs): no name → catalog;
+    // a name → that skill's SKILL.md; name + --path <rel> → one reference file.
+    private static string HandleSkillCommand(string[] argv)
+    {
+        string? name = null, relPath = null;
+        for (int i = 1; i < argv.Length; i++)
+        {
+            var a = argv[i];
+            if (a == "--path" && i + 1 < argv.Length) { relPath = argv[++i]; continue; }
+            if (a == "list") continue;   // `skills list`
+            name ??= a;
+        }
+        if (string.IsNullOrEmpty(name))
+            return OfficeCli.Core.SkillInstaller.BuildSkillCatalog();
+        return string.IsNullOrEmpty(relPath)
+            ? OfficeCli.Core.SkillInstaller.LoadSkillContent(name)
+            : OfficeCli.Core.SkillInstaller.LoadSkillFile(name, relPath);
+    }
+
+    // screenshot delegates to the CLI (view <file> screenshot ... -o <tmp>) and
+    // returns the rendered PNG inline as an image content block. Injects an -o
+    // path when the caller didn't give one so we know which file to read back.
+    private static IReadOnlyList<McpContent> RunScreenshotArgv(string[] argv)
+    {
+        var list = argv.ToList();
+        int oi = list.FindIndex(a => a == "-o" || a == "--out");
+        string outPath;
+        if (oi >= 0 && oi + 1 < list.Count) outPath = list[oi + 1];
+        else { outPath = Path.Combine(Path.GetTempPath(), $"officecli_mcp_shot_{Guid.NewGuid():N}.png"); list.Add("-o"); list.Add(outPath); }
+        var r = RunCliRaw(list.ToArray());
+        if (r.Exit != 0)
+            throw new ArgumentException(StripErrPrefix(FirstNonEmpty(r.Stderr.Trim(), r.Stdout.Trim())));
+        if (!File.Exists(outPath))
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(r.Stdout, @"(\S+\.png)");
+            if (m.Success && File.Exists(m.Groups[1].Value)) outPath = m.Groups[1].Value;
+        }
+        if (!File.Exists(outPath))
+            return new[] { new McpContent("text", Text: r.Stdout.Trim().Length > 0 ? r.Stdout.Trim() : "Screenshot produced no image file.") };
+        var b64 = Convert.ToBase64String(File.ReadAllBytes(outPath));
+        return new[]
+        {
+            new McpContent("text", Text: $"Screenshot saved to {outPath}"),
+            new McpContent("image", Data: b64, MimeType: "image/png"),
+        };
+    }
+
     /// <summary>
     /// Multi-modal wrapper around <see cref="ExecuteTool"/>. Special-cases
     /// view+screenshot (returns text caption + base64 PNG); everything else
@@ -315,6 +403,22 @@ public static class McpServer
         if (string.IsNullOrEmpty(file)) throw new ArgumentException("file= required for screenshot");
         var start = ArgIntOpt("start");
         var end = ArgIntOpt("end");
+        // The documented per-page selector is `page` (single "N" or range
+        // "A-B"), matching the CLI's --page. The inline path only consumed
+        // start/end, so `page` was silently ignored — page=2 still rendered
+        // slide 1. Map page onto start/end when those were not given.
+        if (start is null && end is null)
+        {
+            var page = Arg("page");
+            if (!string.IsNullOrEmpty(page))
+            {
+                var dash = page.IndexOf('-');
+                if (dash > 0 && int.TryParse(page[..dash].Trim(), out var a) && int.TryParse(page[(dash + 1)..].Trim(), out var b))
+                { start = a; end = b; }
+                else if (int.TryParse(page.Split(',')[0].Trim(), out var n))
+                { start = n; end = n; }
+            }
+        }
         var width = ArgInt("screenshot_width", 1600);
         var height = ArgInt("screenshot_height", 1200);
         var grid = ArgInt("grid", 0);
@@ -945,7 +1049,7 @@ public static class McpServer
     private const string McpHelpStrategy = @"## Strategy
 Use view (outline/stats/issues/annotated) to understand the document first, then get/query to inspect details, then set/add/remove to modify.
 View modes: text, annotated, outline, stats, issues, html, svg (pptx only), screenshot, forms (docx only).
-Before delivering, pass the delivery gate (see the tool description): validate clean, view issues clean, then a visual audit via view mode=screenshot when layout matters (slide decks most of all). Whether the visual audit is mandatory is format-specific — load_skill name=<pptx|word|excel> carries the authoritative per-format gate.
+Before delivering, pass the delivery gate (see the tool description): validate clean, view issues clean, then a visual audit via view mode=screenshot when layout matters (slide decks most of all). Whether the visual audit is mandatory is format-specific — run `load_skill <pptx|word|excel>` for the authoritative per-format gate.
 For 3+ mutations on the same file, use batch (one open/save cycle) instead of separate calls.
 Get output keys can be used directly as Set input keys (round-trip safe).
 Colors: FF0000, red, rgb(255,0,0), accent1. Sizes: 24pt. Positions: 2cm, 1in, 72pt, or raw EMU.
@@ -953,16 +1057,16 @@ Paths are 1-based: /slide[1]/shape[2], /body/p[3], /Sheet1/A1.
 
 ";
 
-    private const string ToolDescription = @"Create, read, and modify Office documents (.docx, .xlsx, .pptx).
+    private const string ToolDescription = @"Create, read, and modify Office documents (.docx, .xlsx, .pptx) by running officecli command lines.
 
-Commands: create (file), view (file, mode: text|annotated|outline|stats|issues|html|svg|screenshot|forms), get (file, path, depth), query (file, selector), set (file, path, props[]), add (file, parent, type, props[], index/after/before), remove (file, path), move (file, path, to, index/after/before), swap (file, path, path2), validate (file), batch (file, commands), raw (file, part), help (format: docx|xlsx|pptx, optional type=<element> for full schema), load_skill (no name: lists all skills with the triggers that say when to use each; name=<pptx|word|excel|word-form|morph-ppt|morph-ppt-3d|pitch-deck|academic-paper|data-dashboard|financial-model>: returns that skill's SKILL.md + a manifest of its reference files; add path=<relpath> to fetch one reference file, e.g. path=reference/decision-rules.md).
+Pass an officecli command line in `command` (string or pre-split argv array); it runs through the same CLI you'd use in a terminal. Verbs: create, view (modes: text|annotated|outline|stats|issues|html|svg|screenshot|forms), get, query, set, add, remove, move, swap, validate, batch, raw, help, load_skill. Add --json to get/query/validate/view-issues for structured output. Examples (CLI syntax): create deck.pptx · add deck.pptx /slide[1] --type shape --prop ""text=Hi"" · set report.docx /body/p[1] --prop bold=true · view deck.pptx screenshot --page 2 · query book.xlsx ""cell[bold=true]"". Discover verbs/flags with `help`, and an element's schema with `help <format> <element>` (e.g. help pptx shape).
 
-Paths are 1-based: /slide[1]/shape[2], /body/p[3], /Sheet1/A1. Props are key=value strings. Call help with format= to list elements, then help with format= and type= to drill into a specific element's schema (properties, aliases, examples).
+Paths are 1-based: /slide[1]/shape[2], /body/p[3], /Sheet1/A1. Props are key=value strings.
 
 Delivery gate (before reporting a document finished — any failure = fix and re-check, do NOT deliver; validate passing is NOT delivery, 'looks like a real document' is):
-1. Schema: validate -> clean, no errors.
-2. Content: view mode=issues -> no overflow/format/structure issues; and scan view mode=text for leftover placeholders (xxxx, lorem/ipsum, <TODO>, {{...}}, $VAR$, empty ()/[]).
-3. Visual audit via view mode=screenshot — renders the page/slide and returns it as an image shown to you (--page N per slide/page, or --grid auto for a contact sheet). Judge it adversarially (assume problems exist) for overlap, text overflow, off-slide shapes, dark-on-dark, misalignment; fix positions/sizes (set x/y/width/height) and re-screenshot until right; with no headless browser, say 'not visually verified'. Whether this audit is mandatory is format-specific (slide decks need it most — absolute-positioned shapes overlap invisibly to text modes), so load the format's skill for the authoritative gate: load_skill name=pptx (or word / excel). The per-format SKILL.md, not this blurb, is the source of truth for what 'done' requires.";
+1. Schema: `validate <file>` -> clean, no errors.
+2. Content: `view <file> issues` -> no overflow/format/structure issues; and scan `view <file> text` for leftover placeholders (xxxx, lorem/ipsum, <TODO>, {{...}}, $VAR$, empty ()/[]).
+3. Visual audit: `view <file> screenshot --page N` renders the page/slide and returns it as an image shown to you (or --grid auto for a whole-doc contact sheet). Judge it adversarially (assume problems exist) for overlap, text overflow, off-slide shapes, dark-on-dark, misalignment; fix positions/sizes (`set <file> <path> --prop x=.. --prop y=..`) and re-screenshot until right; with no headless browser, say 'not visually verified'. Whether this audit is mandatory is format-specific (slide decks need it most — absolute-positioned shapes overlap invisibly to text modes), so run `load_skill pptx` (or word / excel) for the authoritative gate. The per-format SKILL.md, not this blurb, is the source of truth for what 'done' requires.";
 
     private static void WriteToolDefinitions(Utf8JsonWriter w)
     {
@@ -971,77 +1075,24 @@ Delivery gate (before reporting a document finished — any failure = fix and re
         // Append a compact always-on skill-trigger summary so the agent is
         // prompted to load the right skill without the full ~1.2k of routing
         // descriptions resident in context. Detail stays lazy behind load_skill.
-        w.WriteString("description", ToolDescription + "\n\n" + OfficeCli.Core.SkillInstaller.BuildSkillTriggerSummary());
+        w.WriteString("description", ToolDescription + "\n\n" + McpHelpStrategy + "\n"
+            + OfficeCli.Core.SkillInstaller.BuildSkillTriggerSummary());
         w.WriteStartObject("inputSchema");
         w.WriteString("type", "object");
         w.WriteStartObject("properties");
-        // command
-        w.WriteStartObject("command"); w.WriteString("type", "string");
-        w.WriteStartArray("enum");
-        foreach (var c in CommandNames)
-            w.WriteStringValue(c);
-        w.WriteEndArray();
-        w.WriteString("description", "Command to execute");
-        w.WriteEndObject();
-        // file
-        w.WriteStartObject("file"); w.WriteString("type", "string"); w.WriteString("description", "Document file path"); w.WriteEndObject();
-        // path
-        w.WriteStartObject("path"); w.WriteString("type", "string"); w.WriteString("description", "DOM path (e.g. /slide[1]/shape[1], /Sheet1/A1, /body/p[1])"); w.WriteEndObject();
-        // parent
-        w.WriteStartObject("parent"); w.WriteString("type", "string"); w.WriteString("description", "Parent DOM path for add"); w.WriteEndObject();
-        // type
-        w.WriteStartObject("type"); w.WriteString("type", "string"); w.WriteString("description", "Element type for add (slide, shape, paragraph, run, table, picture, chart, etc.)"); w.WriteEndObject();
-        // from (add: copy an existing element instead of creating a new one)
-        w.WriteStartObject("from"); w.WriteString("type", "string"); w.WriteString("description", "Source DOM path for add: copy an existing element to the parent instead of creating a new one (mutually exclusive with type)"); w.WriteEndObject();
-        // selector
-        w.WriteStartObject("selector"); w.WriteString("type", "string"); w.WriteString("description", "CSS-like selector for query. Valid element types per handler: PPT — shape, textbox, title, picture, table, chart, placeholder, connector, group, zoom, ole, equation (NOT 'slide' — use 'slide[N]>shape' to scope); Excel — cell, sheet, row, column, table, chart, image; Word — paragraph, run, table, image, hyperlink, heading, list. Supports attribute filters ('shape[text=Hello]', 'paragraph[style=Normal] > run[font!=Arial]'), pseudo-selectors (:contains(...), :empty), and Excel cell aliases (bold, size → font.bold, font.size). Path-style selectors starting with '/' are rejected except '/slide[N]/...' scoping in PPT."); w.WriteEndObject();
-        // text (query post-filter)
-        w.WriteStartObject("text"); w.WriteString("type", "string"); w.WriteString("description", "Filter query results to elements whose text contains this substring (case-insensitive)"); w.WriteEndObject();
-        // props
-        w.WriteStartObject("props"); w.WriteString("type", "array");
+        // Single param: the officecli command line, as a string or a pre-split
+        // argv array. Everything else (verbs, flags, schemas) is discovered via
+        // `help` and the loaded skills — no per-command schema to drift.
+        w.WriteStartObject("command");
+        w.WriteStartArray("type"); w.WriteStringValue("string"); w.WriteStringValue("array"); w.WriteEndArray();
         w.WriteStartObject("items"); w.WriteString("type", "string"); w.WriteEndObject();
-        w.WriteString("description", "key=value pairs (e.g. bold=true, color=FF0000, text=Hello)"); w.WriteEndObject();
-        // mode
-        w.WriteStartObject("mode"); w.WriteString("type", "string"); w.WriteString("description", "View mode: text, annotated, outline, stats, issues, html, svg (pptx), screenshot, forms (docx). screenshot renders the page/slide to a PNG and returns it as an image you can look at — use it to VISUALLY verify layout (overlap, overflow, off-slide shapes, styling) that text modes cannot show. Needs a headless browser (playwright/chrome/firefox); takes seconds."); w.WriteEndObject();
-        // screenshot_width / screenshot_height / grid (screenshot mode)
-        w.WriteStartObject("screenshot_width"); w.WriteString("type", "number"); w.WriteString("description", "Viewport width for screenshot mode (default 1600)"); w.WriteEndObject();
-        w.WriteStartObject("screenshot_height"); w.WriteString("type", "number"); w.WriteString("description", "Viewport height for screenshot mode (default 1200)"); w.WriteEndObject();
-        w.WriteStartObject("grid"); w.WriteString("type", "number"); w.WriteString("description", "Tile pages/slides into a thumbnail contact sheet (screenshot mode, pptx + docx). N = column count; -1 = auto (pick columns to keep the sheet roughly square); 0 = off."); w.WriteEndObject();
-        // depth
-        w.WriteStartObject("depth"); w.WriteString("type", "number"); w.WriteString("description", "Child depth for get (default 1)"); w.WriteEndObject();
-        // save (get: extract a node's binary payload to a file)
-        w.WriteStartObject("save"); w.WriteString("type", "string"); w.WriteString("description", "For get: destination path to extract the node's binary payload (ole/picture/media/embedded only); response Format gets savedTo/savedBytes/savedContentType"); w.WriteEndObject();
-        // index
-        w.WriteStartObject("index"); w.WriteString("type", "number"); w.WriteString("description", "Insert position (0-based) for add/move"); w.WriteEndObject();
-        // to
-        w.WriteStartObject("to"); w.WriteString("type", "string"); w.WriteString("description", "Target parent path for move"); w.WriteEndObject();
-        // after, before, path2
-        w.WriteStartObject("after"); w.WriteString("type", "string"); w.WriteString("description", "Insert after this sibling path (for add/move)"); w.WriteEndObject();
-        w.WriteStartObject("before"); w.WriteString("type", "string"); w.WriteString("description", "Insert before this sibling path (for add/move)"); w.WriteEndObject();
-        w.WriteStartObject("path2"); w.WriteString("type", "string"); w.WriteString("description", "Second path for swap"); w.WriteEndObject();
-        // start, end, max_lines
-        w.WriteStartObject("start"); w.WriteString("type", "number"); w.WriteString("description", "Start line for view"); w.WriteEndObject();
-        w.WriteStartObject("end"); w.WriteString("type", "number"); w.WriteString("description", "End line for view"); w.WriteEndObject();
-        w.WriteStartObject("max_lines"); w.WriteString("type", "number"); w.WriteString("description", "Max lines for view"); w.WriteEndObject();
-        // commands
-        w.WriteStartObject("commands"); w.WriteString("type", "string"); w.WriteString("description", "JSON array of batch commands"); w.WriteEndObject();
-        // force
-        w.WriteStartObject("force"); w.WriteString("type", "string"); w.WriteString("description", "Set to 'true' to continue batch on error (default: stop on first error)"); w.WriteEndObject();
-        // part
-        w.WriteStartObject("part"); w.WriteString("type", "string"); w.WriteString("description", "Part path for raw (e.g. /document, /styles, /slide[1])"); w.WriteEndObject();
-        // cols (raw: Excel column filter)
-        w.WriteStartObject("cols"); w.WriteString("type", "string"); w.WriteString("description", "Column filter for raw on Excel sheets, comma-separated (e.g. A,B,C). Pair with start/end to window a large sheet instead of dumping the whole part."); w.WriteEndObject();
-        // locale / minimal (create)
-        w.WriteStartObject("locale"); w.WriteString("type", "string"); w.WriteString("description", "For create (.docx): locale tag (e.g. zh-CN, ja, ar) setting per-script default fonts and RTL for Arabic/Hebrew. Pass en-US to force a deterministic LTR baseline."); w.WriteEndObject();
-        w.WriteStartObject("minimal"); w.WriteString("type", "string"); w.WriteString("description", "For create (.docx): set 'true' to skip Word's Normal baseline and emit a raw OOXML-spec docx (compact / edge-case testing)."); w.WriteEndObject();
-        // page / limit / page_count (view)
-        w.WriteStartObject("page"); w.WriteString("type", "string"); w.WriteString("description", "Page/slide filter for view html mode (e.g. 1, 2-5, 1,3,5)."); w.WriteEndObject();
-        w.WriteStartObject("limit"); w.WriteString("type", "number"); w.WriteString("description", "For view issues mode: cap the number of issues returned."); w.WriteEndObject();
-        w.WriteStartObject("page_count"); w.WriteString("type", "string"); w.WriteString("description", "For view stats mode (.docx): set 'true' to also report total page count via Word repagination (Windows + Word required; slow)."); w.WriteEndObject();
-        // format
-        w.WriteStartObject("format"); w.WriteString("type", "string"); w.WriteString("description", "Document format for help: xlsx, pptx, docx"); w.WriteEndObject();
-        // name (for load_skill)
-        w.WriteStartObject("name"); w.WriteString("type", "string"); w.WriteString("description", "Skill name for load_skill: pptx, word, excel, word-form, morph-ppt, morph-ppt-3d, pitch-deck, academic-paper, data-dashboard, financial-model. Omit to list all skills with their when-to-use triggers. Pair with path= to fetch a bundled reference file listed in the skill's manifest (e.g. path=reference/decision-rules.md)."); w.WriteEndObject();
+        w.WriteString("description",
+            "The officecli command line — either a single string (e.g. \"add deck.pptx /slide[1] --type shape --prop text=Hi\") "
+            + "or a pre-split argv array of strings (use the array form when an argument contains spaces or quotes). A leading "
+            + "'officecli' is optional. Examples: \"help\" lists commands; \"help pptx shape\" shows an element's schema; "
+            + "\"view deck.pptx text\" reads it; \"view deck.pptx screenshot --page 2\" returns a rendered image; add --json to "
+            + "get/query/validate for structured output. Run help first to learn the verbs and flags.");
+        w.WriteEndObject();
         w.WriteEndObject(); // end properties
         w.WriteStartArray("required"); w.WriteStringValue("command"); w.WriteEndArray();
         w.WriteEndObject(); // end inputSchema
