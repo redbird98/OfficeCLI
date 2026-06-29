@@ -107,6 +107,21 @@ public partial class WordHandler
         var commentId = (commentsPart.Comments.Elements<Comment>()
             .Select(c => int.TryParse(c.Id?.Value, out var id) ? id : 0)
             .DefaultIfEmpty(0).Max() + 1).ToString();
+        // BUG-DUMP-H103: honor an explicit source comment id when it is free.
+        // The dump emitter passes the source id on a definition-only comment whose
+        // <w:commentRangeStart/End/Reference> markers are carried verbatim by a
+        // raw-passed paragraph (a cross-paragraph TOC field span) — reusing that id
+        // lets the verbatim markers resolve to this definition. Falls back to the
+        // fresh max+1 when the id is absent or already taken (mirrors the bookmark
+        // R47-5 raw-set id-reuse). `id` is consumed here so it is not flagged
+        // unsupported below.
+        if ((properties.TryGetValue("id", out var provId)
+                || properties.TryGetValue("commentId", out provId))
+            && int.TryParse(provId, out var provIdN) && provIdN >= 0
+            && !commentsPart.Comments.Elements<Comment>().Any(c => c.Id?.Value == provId))
+            commentId = provId;
+        properties.Remove("id");
+        properties.Remove("commentId");
 
         // BUG-R6B(BUG1): empty text -> empty paragraph (no run); non-empty ->
         // a run carrying the text. Both are valid OOXML comment bodies.
@@ -228,6 +243,17 @@ public partial class WordHandler
                     break;
             }
         }
+
+        // BUG-DUMP-H103: definition-only emit (`range=none`). The comment's range
+        // start/end + reference run already exist in the document body, carried
+        // verbatim by a raw-passed paragraph (a cross-paragraph TOC field span)
+        // with this same (source) comment id. Placing typed markers here would
+        // duplicate the start under a fresh id and orphan the verbatim markers, so
+        // we create the definition only and leave anchoring to the verbatim markers.
+        if ((properties.TryGetValue("range", out var rangeNoneRaw)
+                || properties.TryGetValue("Range", out rangeNoneRaw))
+            && string.Equals(rangeNoneRaw, "none", StringComparison.OrdinalIgnoreCase))
+            return $"/comments/comment[@id={commentId}]";
 
         var rangeStart = new CommentRangeStart { Id = commentId };
         var rangeEnd = new CommentRangeEnd { Id = commentId };

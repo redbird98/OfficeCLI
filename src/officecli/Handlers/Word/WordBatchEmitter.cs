@@ -154,6 +154,7 @@ public static partial class WordBatchEmitter
             CurrentCellXPathBox: new string?[1],
             CurrentCellPartBox: new string?[1],
             MovePairIds: word.BuildMovePairIdMap(),
+            RawPassedParaIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
             Warnings: warnings);
 
         if (node.Type == "table")
@@ -223,9 +224,10 @@ public static partial class WordBatchEmitter
         // etc.) resolve their cross-refs at render time, not at batch-
         // apply time.
         var paraIdToTargetIdx = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        EmitBody(word, items, warnings, paraIdToTargetIdx);
+        var rawPassedParaIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        EmitBody(word, items, warnings, paraIdToTargetIdx, rawPassedParaIds);
         EmitHeadersFooters(word, items, warnings);
-        EmitComments(word, items, paraIdToTargetIdx);
+        EmitComments(word, items, paraIdToTargetIdx, rawPassedParaIds);
         // CONSISTENCY(markRPr-inherit-opt-out): dump emits each run's props
         // verbatim from the source; we never want AddRun's UX-convenience
         // markRPr→rPr type-fill to add a w:rFonts (or any other) child the
@@ -565,6 +567,14 @@ public static partial class WordBatchEmitter
         // halves emit one shared id — AddRun then re-brackets each half with
         // Move_{id} range markers and the moveFrom pairs with its moveTo.
         Dictionary<string, string> MovePairIds,
+        // BUG-DUMP-H103: paraIds of body paragraphs emitted VERBATIM via
+        // EmitCrossParagraphFieldMember (a cross-paragraph TOC/field span). Such a
+        // paragraph carries its <w:commentRangeStart/End/Reference> markers
+        // verbatim WITH their source comment ids; EmitComments consults this set so
+        // it does NOT also emit typed range markers for a comment anchored there
+        // (which would duplicate the start with a fresh id and orphan the verbatim
+        // markers). Populated during the body walk; read by EmitComments.
+        HashSet<string> RawPassedParaIds,
         // R10-bug1: collected during the body walk whenever an emit helper
         // identifies content it cannot round-trip through the existing
         // handler vocabulary (OLE runs without a carrier for the embedded
@@ -608,7 +618,8 @@ public static partial class WordBatchEmitter
 
     private static void EmitBody(WordHandler word, List<BatchItem> items,
                                  List<DocxUnsupportedWarning> warnings,
-                                 Dictionary<string, int>? paraIdToTargetIdx = null)
+                                 Dictionary<string, int>? paraIdToTargetIdx = null,
+                                 HashSet<string>? rawPassedParaIds = null)
     {
         // BUG-DUMP-X6-02: word.Get("/body") raises "Path not found: /body" on
         // a zip lacking word/document.xml. Surface a CliException pointing at
@@ -672,6 +683,7 @@ public static partial class WordBatchEmitter
             CurrentCellXPathBox: new string?[1],
             CurrentCellPartBox: new string?[1],
             MovePairIds: word.BuildMovePairIdMap(),
+            RawPassedParaIds: rawPassedParaIds ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase),
             Warnings: warnings);
 
         // Cross-paragraph fields (a real cached TOC, an IF/REF whose result
@@ -992,7 +1004,14 @@ public static partial class WordBatchEmitter
         // paragraph's position to resolve on replay.
         if (ctx.ParaIdToTargetIdx != null
             && child.Format.TryGetValue("paraId", out var pid) && pid != null)
+        {
             ctx.ParaIdToTargetIdx[pid.ToString()!] = pIndex;
+            // BUG-DUMP-H103: this paragraph is raw-passed verbatim, so any comment
+            // range markers it holds keep their source ids. Record the paraId so
+            // EmitComments emits the anchored comment definition-only (no typed
+            // range markers that would duplicate/orphan the verbatim ones).
+            ctx.RawPassedParaIds.Add(pid.ToString()!);
+        }
 
         var rawP = word.GetElementXml(child.Path);
         if (string.IsNullOrEmpty(rawP))

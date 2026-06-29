@@ -1470,6 +1470,7 @@ public static partial class WordBatchEmitter
             CurrentCellXPathBox: new string?[1],
             CurrentCellPartBox: new string?[1],
             MovePairIds: word.BuildMovePairIdMap(),
+            RawPassedParaIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
             Warnings: warnings ?? new List<DocxUnsupportedWarning>());
         int pIdx = 0, tblIdx = 0;
         bool sawFirstPara = false;
@@ -1557,8 +1558,10 @@ public static partial class WordBatchEmitter
     }
 
     private static void EmitComments(WordHandler word, List<BatchItem> items,
-                                     Dictionary<string, int> paraIdToTargetIdx)
+                                     Dictionary<string, int> paraIdToTargetIdx,
+                                     HashSet<string>? rawPassedParaIds = null)
     {
+        rawPassedParaIds ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var comments = word.Query("comment");
         int targetCommentIdx = 0;  // 1-based index of the comment as it will be rebuilt
         int sourceCommentIdx = 0;  // 1-based positional index in the source comments part
@@ -1691,6 +1694,14 @@ public static partial class WordBatchEmitter
             // anchoredTo looks like "/body/p[@paraId=00100000]"; parse and
             // resolve via the paraId map we built during EmitBody.
             string parentTarget = "/body/p[1]";  // safe fallback to first body para
+            // BUG-DUMP-H103: true when this comment's range markers live in a
+            // paragraph emitted VERBATIM by EmitCrossParagraphFieldMember (a TOC /
+            // cross-paragraph field span). Such a paragraph already carries the
+            // <w:commentRangeStart/End/Reference> markers with their SOURCE id, so
+            // the typed `add comment` must place NO range markers (it would
+            // duplicate the start under a fresh id) and must REUSE the source id
+            // so the verbatim markers resolve to this definition.
+            bool anchorIsRawPassed = false;
             if (props.TryGetValue("anchoredTo", out var anchor))
             {
                 // BUG-R4 (DBF-R4-01): a comment anchored inside a table cell
@@ -1708,6 +1719,8 @@ public static partial class WordBatchEmitter
                     var pid = ExtractParaId(anchor);
                     if (pid != null && paraIdToTargetIdx.TryGetValue(pid, out var idx))
                         parentTarget = $"/body/p[{idx}]";
+                    if (pid != null && rawPassedParaIds.Contains(pid))
+                        anchorIsRawPassed = true;
                 }
                 props.Remove("anchoredTo");
             }
@@ -1731,7 +1744,18 @@ public static partial class WordBatchEmitter
             // `add comment` op is appended (replay order: start then end).
             string? rangeEndParent = null;
             int rangeEndRunIdx = 0;
-            if (c.Format.TryGetValue("id", out var cid) && cid != null)
+            if (anchorIsRawPassed && c.Format.TryGetValue("id", out var rawCid) && rawCid != null)
+            {
+                // BUG-DUMP-H103: definition-only emit. The range start/end and the
+                // reference run are ALREADY present in the verbatim raw-passed
+                // paragraph(s) with the source id; reuse that source id on the
+                // definition so they resolve, and place NO body markers here. `id`
+                // is preserved (not removed below); `range=none` tells AddComment to
+                // create the comment + body but skip all anchor placement.
+                props["id"] = rawCid.ToString()!;
+                props["range"] = "none";
+            }
+            else if (c.Format.TryGetValue("id", out var cid) && cid != null)
             {
                 var runStart = word.FindCommentAnchorRunIndex(cid.ToString()!);
                 // 0 = before all runs (paragraph start); always emit so
@@ -1780,7 +1804,11 @@ public static partial class WordBatchEmitter
             }
             // The comment id is allocated by AddComment on the target side;
             // do not propagate the source id (would conflict on replay).
-            props.Remove("id");
+            // EXCEPTION (BUG-DUMP-H103): a definition-only comment whose verbatim
+            // raw-passed paragraph already holds source-id range markers MUST keep
+            // that source id so the markers resolve — `range=none` set it above.
+            if (!anchorIsRawPassed)
+                props.Remove("id");
             // BUG-X7-04 (T-4): previously dropped `date` so dump→replay always
             // re-stamped the comment with the SDK's "now". That breaks
             // archival / audit-trail use cases where the source timestamp is
