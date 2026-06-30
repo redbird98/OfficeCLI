@@ -88,7 +88,7 @@ public static partial class WordBatchEmitter
             case "/settings": EmitSettingsRaw(word, items); return (items, warnings);
             case "/numbering": EmitNumberingRaw(word, items, warnings); return (items, warnings);
             case "/fonttable": EmitFontTableRaw(word, items, warnings); return (items, warnings);
-            case "/styles": EmitStyles(word, items); return (items, warnings);
+            case "/styles": EmitStyles(word, items, RecursiveStyleDecomp); return (items, warnings);
             case "/body":
                 EmitBody(word, items, warnings, new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
                 return (items, warnings);
@@ -174,7 +174,13 @@ public static partial class WordBatchEmitter
         => EmitWordWithWarnings(word).Items;
 
     /// <summary>Emit a batch sequence for a Word document (full document, equivalent to path "/").</summary>
-    public static (List<BatchItem> Items, List<DocxUnsupportedWarning> Warnings) EmitWordWithWarnings(WordHandler word)
+    /// <param name="recursiveStyleDecomp">Override for the per-style recursive
+    /// decomposition toggle; null uses the env-derived default. Threaded as a
+    /// parameter (rather than read from the static field inside EmitStyles) so
+    /// tests can exercise the path without mutating shared static state under
+    /// xUnit's parallel test execution.</param>
+    public static (List<BatchItem> Items, List<DocxUnsupportedWarning> Warnings) EmitWordWithWarnings(
+        WordHandler word, bool? recursiveStyleDecomp = null)
     {
         var items = new List<BatchItem>();
         var warnings = new List<DocxUnsupportedWarning>();
@@ -185,7 +191,7 @@ public static partial class WordBatchEmitter
         // (Heading paragraphs with numPr) reference numId values, so style
         // adds that carry `numId=N` need /numbering to already hold N.
         EmitNumberingRaw(word, items, warnings);
-        EmitStyles(word, items);
+        EmitStyles(word, items, recursiveStyleDecomp ?? RecursiveStyleDecomp);
         // docDefaults (inside styles.xml) round-trips verbatim via raw-set —
         // must follow EmitStyles so it overwrites the blank's stamped block
         // rather than being clobbered by it. See EmitDocDefaultsRaw.

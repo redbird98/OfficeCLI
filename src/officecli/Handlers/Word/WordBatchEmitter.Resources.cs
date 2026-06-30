@@ -3351,7 +3351,7 @@ public static partial class WordBatchEmitter
         return string.Join(",", segs);
     }
 
-    private static void EmitStyles(WordHandler word, List<BatchItem> items)
+    private static void EmitStyles(WordHandler word, List<BatchItem> items, bool recursiveStyleDecomp)
     {
         // Use query() rather than walking Get("/styles").Children — the
         // positional /styles/style[N] children Get returns are not
@@ -3480,7 +3480,7 @@ public static partial class WordBatchEmitter
             // lossless. Relies on the generic add appending repeatable same-name
             // children (e.g. multiple tblStylePr) rather than collapsing them.
             List<BatchItem>? recursiveOps = null;
-            if (s_recursiveStyleDecomp && rawStyleReplace != null && !string.IsNullOrEmpty(emitId))
+            if (recursiveStyleDecomp && rawStyleReplace != null && !string.IsNullOrEmpty(emitId))
                 recursiveOps = TryDecomposeStyleChildren(rawStyleReplace, $"/styles/{emitId}");
 
             if (recursiveOps != null)
@@ -3534,7 +3534,10 @@ public static partial class WordBatchEmitter
     private static readonly string[] s_styleShellProps =
         ["id", "styleId", "type", "name", "default", "customStyle"];
 
-    private static readonly bool s_recursiveStyleDecomp =
+    // Opt-in toggle for recursive style decomposition. Defaults from the env
+    // var; settable (internal) so tests can exercise the path deterministically
+    // without depending on process-env / static-init timing.
+    internal static bool RecursiveStyleDecomp =
         Environment.GetEnvironmentVariable("OFFICECLI_RECURSIVE_STYLE_DECOMP") == "1";
 
     // Well-known OOXML namespace → canonical prefix, the inverse of the add
