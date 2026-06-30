@@ -53,7 +53,7 @@ public static partial class WordBatchEmitter
     {
         var pNode = word.Get(sourcePath);
 
-        if (TryEmitDisplayEquation(pNode, parentPath, autoPresent, items)) return;
+        if (TryEmitDisplayEquation(word, pNode, parentPath, autoPresent, items)) return;
 
         // Track source paraId -> target index BEFORE any early-return path
         // (section break, TOC, …). Comments anchored on a section-break or
@@ -511,7 +511,7 @@ public static partial class WordBatchEmitter
             if (TryEmitPictureRun(word, run, paraTargetPath, parentPath, targetIndex, items, ctx, sharedAttachPara)) continue;
             if (TryEmitNoteRefRun(word, run, paraTargetPath, items, ctx)) continue;
             if (TryEmitMixedBreakRun(word, run, parentPath, paraTargetPath, items, ctx)) continue;
-            EmitPlainOrHyperlinkRun(run, paraTargetPath, items, ctx, hlBaseline);
+            EmitPlainOrHyperlinkRun(word, run, paraTargetPath, items, ctx, hlBaseline);
         }
         // Flush any SDTs that sit after the last run (or whose rank could not be
         // recovered from the XML — int.MaxValue lands here).
@@ -595,7 +595,24 @@ public static partial class WordBatchEmitter
                 };
                 int idx = perNameIdx.TryGetValue(seg, out var c) ? c : 0;
                 perNameIdx[seg] = idx + 1;
-                map[$"{seg}[{idx + 1}]"] = rank++;
+                int thisRank = rank++;
+                map[$"{seg}[{idx + 1}]"] = thisRank;
+                // BUG-DUMP-INLINESDT-BMEND-RANK: Navigation builds a bookmarkEnd
+                // child's path as bookmarkEnd[@id=N] (id-keyed, not positional —
+                // BUG-DUMP-BMEND-IDPATH), so the positional map key alone misses in
+                // ChildDocRank → the run loop reads rank=int.MaxValue for the
+                // bookmarkEnd child and prematurely flushes a still-pending inline
+                // SDT before the run that precedes it. That silently reorders the
+                // run across the content control ("with [SDT]" -> "[SDT]with"),
+                // garbling text with no validate flag and no visible render change.
+                // Register an id-keyed alias at the SAME rank so the lookup hits and
+                // run<->inline-SDT document order round-trips.
+                if (seg == "bookmarkEnd")
+                {
+                    var idm = System.Text.RegularExpressions.Regex.Match(m.Value, "w:id=\"(\\d+)\"");
+                    if (idm.Success)
+                        map[$"bookmarkEnd[@id={idm.Groups[1].Value}]"] = thisRank;
+                }
             }
             if (!selfClose)
             {
@@ -624,7 +641,7 @@ public static partial class WordBatchEmitter
 
     // ── Extracted helpers (behavior unchanged from inline original) ──
 
-    private static bool TryEmitDisplayEquation(DocumentNode pNode, string parentPath, bool autoPresent, List<BatchItem> items)
+    private static bool TryEmitDisplayEquation(WordHandler word, DocumentNode pNode, string parentPath, bool autoPresent, List<BatchItem> items)
     {
         // Display-mode equations (<m:oMathPara>) surface in EmitBody's
         // bodyNode.Children as type=paragraph, but a direct Get on the
@@ -647,6 +664,9 @@ public static partial class WordBatchEmitter
             && eqXml != null && eqXml.ToString() is { Length: > 0 } eqXmlS
             && eqXmlS.Contains("oMath", StringComparison.Ordinal))
             eqProps["xml"] = eqXmlS;
+        // Carry any OLE/preview-image parts referenced inside the verbatim math
+        // (MathType/Equation objects) so they don't dangle on replay.
+        AddMathInlinedPartProps(word, pNode.Path, eqProps);
         // BUG-DUMP19-02: forward block-equation alignment.
         if (pNode.Format.TryGetValue("align", out var eqAlign)
             && eqAlign != null && !string.IsNullOrEmpty(eqAlign.ToString()))
@@ -845,7 +865,7 @@ public static partial class WordBatchEmitter
                     if ((run.Type == "run" || run.Type == "r")
                         && (run.Format.ContainsKey("url") || run.Format.ContainsKey("anchor")))
                     {
-                        EmitPlainOrHyperlinkRun(run, carrierPath, items, ctx, carrierHlBaseline);
+                        EmitPlainOrHyperlinkRun(word, run, carrierPath, items, ctx, carrierHlBaseline);
                         continue;
                     }
                     // BUG-R12C: tab / positional-tab runs round-trip through the
@@ -2016,6 +2036,9 @@ public static partial class WordBatchEmitter
         var eqXml = run.Format.TryGetValue("_omathXml", out var exv) ? exv?.ToString() : null;
         if (!string.IsNullOrEmpty(eqXml) && eqXml.Contains("oMath", StringComparison.Ordinal))
             eqProps["xml"] = eqXml;
+        // Carry any OLE/preview-image parts referenced inside the verbatim math
+        // (MathType/Equation objects) so they don't dangle on replay.
+        AddMathInlinedPartProps(word, run.Path, eqProps);
         var eqParent = paraTargetPath;
         if (!string.IsNullOrEmpty(run.Path))
         {
@@ -4106,6 +4129,29 @@ public static partial class WordBatchEmitter
     // Shared prop packing for the inlined-parts carriers (`add activex`,
     // `add diagram`): verbatim run XML + one part{N}.relId/part{N}.data pair
     // per referenced package part, with part{N}.child{M}.* for nested parts.
+    // BUG-DUMP-OLE-IN-OMATH: a MathType / Equation OLE object embedded inside the
+    // verbatim <m:oMath> carrier references its binary (<o:OLEObject r:id>) and
+    // preview image (<v:imagedata r:id>) by relationship id. The `xml` carrier
+    // ships those refs but not the parts, so they dangle on replay (a silent
+    // embedding loss plus a validator NullReferenceException). Base64-inline the
+    // referenced parts as part{N}.* (the same carrier shape as activex/vmlshape)
+    // so AddEquation rematerializes them and rewrites the r:ids. No-op when the
+    // math carries no verbatim xml or references no parts (the common case), so
+    // the interactive `add equation formula=` path is untouched.
+    private static void AddMathInlinedPartProps(WordHandler word, string? mathPath, Dictionary<string, string> eqProps)
+    {
+        if (string.IsNullOrEmpty(mathPath)
+            || !eqProps.TryGetValue("xml", out var xml)
+            || string.IsNullOrEmpty(xml)
+            || !xml.Contains(":id=\"", StringComparison.Ordinal))
+            return;
+        var inlined = word.GetMathInlinedPartsEmitData(mathPath);
+        if (inlined == null) return;
+        foreach (var kv in PackInlinedPartsProps(inlined))
+            if (!string.Equals(kv.Key, "runXml", StringComparison.Ordinal))
+                eqProps[kv.Key] = kv.Value;
+    }
+
     private static Dictionary<string, string> PackInlinedPartsProps(WordHandler.ActiveXEmitData data)
     {
         var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -4267,7 +4313,7 @@ public static partial class WordBatchEmitter
         return Uri.TryCreate(url, UriKind.Relative, out _);
     }
 
-    private static void EmitPlainOrHyperlinkRun(DocumentNode run, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx = null, int hlBaseline = 0)
+    private static void EmitPlainOrHyperlinkRun(WordHandler word, DocumentNode run, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx = null, int hlBaseline = 0)
     {
         // BUG-R12A(BUG1): a hyperlink wrapper with >1 run or any per-run rPr was
         // stashed by CoalesceHyperlinkRuns with its original runs in Children.
@@ -4281,7 +4327,7 @@ public static partial class WordBatchEmitter
         if (run.Format.TryGetValue("_hlStructured", out var hlsObj) && hlsObj is bool hlsB && hlsB
             && run.Children is { Count: > 0 } hlRuns)
         {
-            EmitStructuredHyperlink(hlRuns, paraTargetPath, items, ctx, hlBaseline);
+            EmitStructuredHyperlink(word, hlRuns, paraTargetPath, items, ctx, hlBaseline);
             return;
         }
         var rProps = FilterEmittableProps(run.Format);
@@ -4427,7 +4473,7 @@ public static partial class WordBatchEmitter
     // the current paragraph's hyperlinks re-index from 1. Subtracting the
     // baseline yields the wrapper's LIVE 1-based index inside this paragraph,
     // which is what the trailing `add r` rows must target.
-    private static void EmitStructuredHyperlink(List<DocumentNode> hlRuns, string paraTargetPath,
+    private static void EmitStructuredHyperlink(WordHandler word, List<DocumentNode> hlRuns, string paraTargetPath,
                                                 List<BatchItem> items, BodyEmitContext? ctx, int hlBaseline = 0)
     {
         // Build the wrapper add from the first run's props (url/anchor/tooltip/…
@@ -4449,7 +4495,7 @@ public static partial class WordBatchEmitter
         firstClone.Format.Remove("_hlStructured");
         int hlBefore = items.Count(it => it.Type == "hyperlink"
             && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
-        EmitPlainOrHyperlinkRun(firstClone, paraTargetPath, items, ctx);
+        EmitPlainOrHyperlinkRun(word, firstClone, paraTargetPath, items, ctx);
         int hlAfter = items.Count(it => it.Type == "hyperlink"
             && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
         // If the first run did not materialize a hyperlink row (bare wrapper with
@@ -4470,7 +4516,7 @@ public static partial class WordBatchEmitter
                 clone.Format.Remove("_hlStructured");
                 clone.Format.Remove("url");
                 clone.Format.Remove("anchor");
-                EmitPlainOrHyperlinkRun(clone, paraTargetPath, items, ctx);
+                EmitPlainOrHyperlinkRun(word, clone, paraTargetPath, items, ctx);
             }
             return;
         }
@@ -4479,6 +4525,39 @@ public static partial class WordBatchEmitter
         var hlPath = $"{paraTargetPath}/hyperlink[{hlAfter - hlBaseline}]";
         for (int k = 1; k < hlRuns.Count; k++)
         {
+            // BUG-DUMP-FOOTNOTE-IN-HYPERLINK: a footnote/endnote REFERENCE run
+            // nested INSIDE a hyperlink (e.g. a linked phrase that also carries a
+            // footnote) reaches here as a wrapped child. Emitting it as a bare
+            // `add r` drops the <w:footnoteReference> element AND fails to advance
+            // the per-reference note cursor — so a LATER note body (the highest id)
+            // silently disappears (the visible symptom is "the last footnote went
+            // missing"). Classify it and route through the note-reference emit
+            // (targeting the hyperlink path so the mark stays inside the link),
+            // advancing the cursor exactly like a top-level note ref.
+            if (ctx != null)
+            {
+                var khStyle = hlRuns[k].Format.TryGetValue("rStyle", out var khrs) ? khrs?.ToString() : null;
+                var khNote = ClassifyNoteRefRun(word, hlRuns[k], khStyle);
+                // AddFootnote/AddEndnote require a PARAGRAPH parent (they reject a
+                // hyperlink path), so anchor the note ref on paraTargetPath rather
+                // than hlPath. The reference lands in the host paragraph adjacent to
+                // the link instead of strictly inside it — the same "good enough"
+                // boundary trade-off the comment-in-SDT/oMath strips accept — but the
+                // note body + continuous numbering are preserved (cursor advances in
+                // document order), which is what was silently lost before.
+                if (khNote == NoteRefKind.Footnote)
+                {
+                    int fidx = ++ctx.FootnoteCursor.Index;
+                    EmitNoteReference(word, "footnote", fidx, fidx, paraTargetPath, items, hlRuns[k]);
+                    continue;
+                }
+                if (khNote == NoteRefKind.Endnote)
+                {
+                    int eidx = ++ctx.EndnoteCursor.Index;
+                    EmitNoteReference(word, "endnote", eidx, eidx, paraTargetPath, items, hlRuns[k]);
+                    continue;
+                }
+            }
             var rProps = FilterEmittableProps(hlRuns[k].Format);
             // The hyperlink-wrapper keys belong to the <w:hyperlink>, not its
             // child runs — strip them so `add r` doesn't choke / re-wrap.

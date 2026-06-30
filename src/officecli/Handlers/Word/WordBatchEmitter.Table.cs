@@ -851,7 +851,7 @@ public static partial class WordBatchEmitter
                             var eqTargetPath = eqIsTrailingAutoP
                                 ? $"{cellTargetPath}/p[last()]"
                                 : $"{cellTargetPath}/p[{cellParaIdx}]";
-                            EmitCellDisplayEquation(cellEq, eqTargetPath, items);
+                            EmitCellDisplayEquation(word, cellEq, eqTargetPath, items);
                             firstParaSeen = true;
                             cellHasAnyContent = true;
                             continue;
@@ -1245,7 +1245,7 @@ public static partial class WordBatchEmitter
     // but for an arbitrary cell-paragraph parent (TryEmitDisplayEquation is hard-
     // coded to parent "/body"). `add equation` on an existing cell paragraph
     // appends the m:oMathPara into it, reproducing the source wrapper shape.
-    private static void EmitCellDisplayEquation(DocumentNode eqNode, string parentPath, List<BatchItem> items)
+    private static void EmitCellDisplayEquation(WordHandler word, DocumentNode eqNode, string parentPath, List<BatchItem> items)
     {
         var mode = eqNode.Format.TryGetValue("mode", out var m) ? m?.ToString() : "display";
         var eqProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -1265,6 +1265,9 @@ public static partial class WordBatchEmitter
             && eqXml != null && eqXml.ToString() is { Length: > 0 } eqXmlS
             && eqXmlS.Contains("oMath", StringComparison.Ordinal))
             eqProps["xml"] = eqXmlS;
+        // Carry any OLE/preview-image parts referenced inside the verbatim math
+        // (MathType/Equation objects) so they don't dangle on replay.
+        AddMathInlinedPartProps(word, eqNode.Path, eqProps);
         if (eqNode.Format.TryGetValue("align", out var eqAlign)
             && eqAlign != null && !string.IsNullOrEmpty(eqAlign.ToString()))
             eqProps["align"] = eqAlign.ToString()!;

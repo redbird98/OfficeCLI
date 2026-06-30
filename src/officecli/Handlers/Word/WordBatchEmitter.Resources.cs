@@ -885,16 +885,25 @@ public static partial class WordBatchEmitter
     }
 
     private static void EmitNumberingRaw(WordHandler word, List<BatchItem> items)
-        => EmitNumberingRaw(word, items, null);
+        => EmitNumberingRaw(word, items, null, RecursiveNumberingDecomp);
 
     private static void EmitNumberingRaw(WordHandler word, List<BatchItem> items, List<DocxUnsupportedWarning>? warnings)
+        => EmitNumberingRaw(word, items, warnings, RecursiveNumberingDecomp);
+
+    private static void EmitNumberingRaw(WordHandler word, List<BatchItem> items, List<DocxUnsupportedWarning>? warnings, bool recursiveDecomp)
     {
         // Numbering models list templates (abstractNum + num pairs, each
         // abstractNum holds 9 levels with their own pPr / numFmt / lvlText).
-        // Reconstructing this through typed Add would mean another emitter
-        // in itself; for v0.5 we ship the entire <w:numbering> XML wholesale
-        // via raw-set. The blank document creates an empty numbering part,
-        // so a single replace on the part root is sufficient.
+        // RECURSIVE-NUMBERING-DECOMP (default ON): decompose the whole
+        // <w:numbering> subtree into typed `add` ops — one `add w:abstractNum` /
+        // `add w:num` per definition, recursing into every child (multiLevelType,
+        // lvl, start, numFmt, lvlText, pPr, rPr, abstractNumId, lvlOverride, …)
+        // via the generic prefixed-add path (the same machinery that decomposes
+        // styles). Falls back to the verbatim raw-set replace below on ANY
+        // residue (picture bullets carry a VML r:id; external rels / unknown
+        // namespaces) — that path already round-trips the pic-bullet binaries.
+        // The blank document creates an empty numbering part, so a single
+        // replace on the part root is sufficient for the fallback.
         string xml;
         try { xml = word.Raw("/numbering"); }
         catch { return; }
@@ -903,6 +912,16 @@ public static partial class WordBatchEmitter
         // Skip when numbering is empty (just `<w:numbering/>` with no children).
         if (!xml.Contains("<w:abstractNum") && !xml.Contains("<w:num "))
             return;
+
+        if (recursiveDecomp)
+        {
+            var typedOps = TryDecomposeNumbering(xml);
+            if (typedOps != null)
+            {
+                items.AddRange(typedOps);
+                return;
+            }
+        }
         // BUG-DUMP-R45-2: round-trip the picture-bullet image binaries (word/media/*)
         // so the <w:numPicBullet> definition + its <v:imagedata r:id> + each level's
         // <w:lvlPicBulletId> opt-in can STAY. Read the NumberingDefinitionsPart's
@@ -1470,6 +1489,7 @@ public static partial class WordBatchEmitter
             CurrentCellXPathBox: new string?[1],
             CurrentCellPartBox: new string?[1],
             MovePairIds: word.BuildMovePairIdMap(),
+            RawPassedParaIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
             Warnings: warnings ?? new List<DocxUnsupportedWarning>());
         int pIdx = 0, tblIdx = 0;
         bool sawFirstPara = false;
@@ -1557,8 +1577,10 @@ public static partial class WordBatchEmitter
     }
 
     private static void EmitComments(WordHandler word, List<BatchItem> items,
-                                     Dictionary<string, int> paraIdToTargetIdx)
+                                     Dictionary<string, int> paraIdToTargetIdx,
+                                     HashSet<string>? rawPassedParaIds = null)
     {
+        rawPassedParaIds ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var comments = word.Query("comment");
         int targetCommentIdx = 0;  // 1-based index of the comment as it will be rebuilt
         int sourceCommentIdx = 0;  // 1-based positional index in the source comments part
@@ -1691,6 +1713,14 @@ public static partial class WordBatchEmitter
             // anchoredTo looks like "/body/p[@paraId=00100000]"; parse and
             // resolve via the paraId map we built during EmitBody.
             string parentTarget = "/body/p[1]";  // safe fallback to first body para
+            // BUG-DUMP-H103: true when this comment's range markers live in a
+            // paragraph emitted VERBATIM by EmitCrossParagraphFieldMember (a TOC /
+            // cross-paragraph field span). Such a paragraph already carries the
+            // <w:commentRangeStart/End/Reference> markers with their SOURCE id, so
+            // the typed `add comment` must place NO range markers (it would
+            // duplicate the start under a fresh id) and must REUSE the source id
+            // so the verbatim markers resolve to this definition.
+            bool anchorIsRawPassed = false;
             if (props.TryGetValue("anchoredTo", out var anchor))
             {
                 // BUG-R4 (DBF-R4-01): a comment anchored inside a table cell
@@ -1708,6 +1738,8 @@ public static partial class WordBatchEmitter
                     var pid = ExtractParaId(anchor);
                     if (pid != null && paraIdToTargetIdx.TryGetValue(pid, out var idx))
                         parentTarget = $"/body/p[{idx}]";
+                    if (pid != null && rawPassedParaIds.Contains(pid))
+                        anchorIsRawPassed = true;
                 }
                 props.Remove("anchoredTo");
             }
@@ -1731,7 +1763,18 @@ public static partial class WordBatchEmitter
             // `add comment` op is appended (replay order: start then end).
             string? rangeEndParent = null;
             int rangeEndRunIdx = 0;
-            if (c.Format.TryGetValue("id", out var cid) && cid != null)
+            if (anchorIsRawPassed && c.Format.TryGetValue("id", out var rawCid) && rawCid != null)
+            {
+                // BUG-DUMP-H103: definition-only emit. The range start/end and the
+                // reference run are ALREADY present in the verbatim raw-passed
+                // paragraph(s) with the source id; reuse that source id on the
+                // definition so they resolve, and place NO body markers here. `id`
+                // is preserved (not removed below); `range=none` tells AddComment to
+                // create the comment + body but skip all anchor placement.
+                props["id"] = rawCid.ToString()!;
+                props["range"] = "none";
+            }
+            else if (c.Format.TryGetValue("id", out var cid) && cid != null)
             {
                 var runStart = word.FindCommentAnchorRunIndex(cid.ToString()!);
                 // 0 = before all runs (paragraph start); always emit so
@@ -1780,7 +1823,11 @@ public static partial class WordBatchEmitter
             }
             // The comment id is allocated by AddComment on the target side;
             // do not propagate the source id (would conflict on replay).
-            props.Remove("id");
+            // EXCEPTION (BUG-DUMP-H103): a definition-only comment whose verbatim
+            // raw-passed paragraph already holds source-id range markers MUST keep
+            // that source id so the markers resolve — `range=none` set it above.
+            if (!anchorIsRawPassed)
+                props.Remove("id");
             // BUG-X7-04 (T-4): previously dropped `date` so dump→replay always
             // re-stamped the comment with the SDK's "now". That breaks
             // archival / audit-trail use cases where the source timestamp is
@@ -1826,7 +1873,7 @@ public static partial class WordBatchEmitter
             // BUG-R13A: coalesce hyperlink runs so a hyperlink in the comment
             // body round-trips as a typed `add hyperlink` (was dropped as a
             // flat `add r` with unsupported url/isHyperlink props).
-            EmitContainerBodyRuns(firstParaRuns.Skip(commentSeedSkip).ToList(),
+            EmitContainerBodyRuns(word, firstParaRuns.Skip(commentSeedSkip).ToList(),
                 $"{targetCommentPath}/p[1]", items);
 
             // Additional paragraphs (paragraph [1] is the `add comment` body).
@@ -1846,7 +1893,7 @@ public static partial class WordBatchEmitter
                 // AddParagraph with no `text` produces an empty paragraph; emit
                 // each run so per-run formatting survives. The new paragraph is
                 // the (pi+1)-th paragraph of the comment.
-                EmitContainerBodyRuns(runs, $"{targetCommentPath}/p[{pi + 1}]", items);
+                EmitContainerBodyRuns(word, runs, $"{targetCommentPath}/p[{pi + 1}]", items);
             }
         }
 
@@ -1881,7 +1928,7 @@ public static partial class WordBatchEmitter
     // and rPr (italic/bold/color/size/font/…). Mirrors EmitPlainOrHyperlinkRun
     // for /body runs, minus the hyperlink/revision special-casing (comment
     // bodies don't carry those in the supported round-trip).
-    private static void EmitCommentRun(DocumentNode run, string paraTargetPath, List<BatchItem> items, int hlBaseline = 0)
+    private static void EmitCommentRun(WordHandler word, DocumentNode run, string paraTargetPath, List<BatchItem> items, int hlBaseline = 0)
     {
         // BUG-R13A: a run flattened out of a <w:hyperlink> wrapper carries
         // url/anchor/isHyperlink (and _hyperlinkParent) Format keys that
@@ -1896,7 +1943,7 @@ public static partial class WordBatchEmitter
         if (run.Format.ContainsKey("url") || run.Format.ContainsKey("anchor")
             || run.Format.ContainsKey("isHyperlink"))
         {
-            EmitPlainOrHyperlinkRun(run, paraTargetPath, items, null, hlBaseline);
+            EmitPlainOrHyperlinkRun(word, run, paraTargetPath, items, null, hlBaseline);
             return;
         }
         // Tab-only run (<w:r><w:tab/></w:r>, Type=="tab", empty Text): the
@@ -1960,7 +2007,7 @@ public static partial class WordBatchEmitter
     // rPr intact. Reuses the body-paragraph walker's CoalesceHyperlinkRuns /
     // EmitPlainOrHyperlinkRun machinery (single source of truth for hyperlink
     // emit). Non-hyperlink runs pass through EmitCommentRun unchanged.
-    private static void EmitContainerBodyRuns(List<DocumentNode> runs, string paraTargetPath, List<BatchItem> items)
+    private static void EmitContainerBodyRuns(WordHandler word, List<DocumentNode> runs, string paraTargetPath, List<BatchItem> items)
     {
         // BUG-R14B: capture the hyperlink baseline ONCE for this container body
         // so multi-run hyperlinks re-index from 1 within it (mirrors the body
@@ -1968,7 +2015,7 @@ public static partial class WordBatchEmitter
         int hlBaseline = items.Count(it => it.Type == "hyperlink"
             && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
         foreach (var run in CoalesceHyperlinkRuns(runs))
-            EmitCommentRun(run, paraTargetPath, items, hlBaseline);
+            EmitCommentRun(word, run, paraTargetPath, items, hlBaseline);
     }
 
     // BUG-R9A(BUG1): fold a run's rPr format keys into the `add comment` prop
@@ -2364,7 +2411,7 @@ public static partial class WordBatchEmitter
         // BUG-R13A: coalesce hyperlink runs so a hyperlink inside a footnote/
         // endnote body round-trips as a typed `add hyperlink` (was dropped as a
         // flat `add r` carrying unsupported url/isHyperlink props).
-        EmitContainerBodyRuns(firstParaRuns.Skip(noteSeedSkip).ToList(),
+        EmitContainerBodyRuns(word, firstParaRuns.Skip(noteSeedSkip).ToList(),
             $"{targetNotePath}/p[1]", items);
 
         // BUG-DUMP-R27-5: walk the remaining DIRECT block children in document
@@ -2396,7 +2443,7 @@ public static partial class WordBatchEmitter
                 if (paraNode.Format.TryGetValue("tabs", out var subParaTabs))
                     EmitTabStops($"{targetNotePath}/p[{targetParaOrdinal}]", subParaTabs, items);
                 var runs = paraNode.Children.Where(c => IsRoundTrippableNoteRun(word, c)).ToList();
-                EmitContainerBodyRuns(runs, $"{targetNotePath}/p[{targetParaOrdinal}]", items);
+                EmitContainerBodyRuns(word, runs, $"{targetNotePath}/p[{targetParaOrdinal}]", items);
             }
             else // "tbl" — reuse the body table emitter against the note host.
             {
@@ -2557,6 +2604,13 @@ public static partial class WordBatchEmitter
     private static void EmitSdt(WordHandler word, string sourcePath, List<BatchItem> items, BodyEmitContext ctx)
     {
         var rawXml = word.RawElementXml(sourcePath);
+        // BUG-DUMP-COMMENT-IN-SDT: strip in-sdtContent comment-range markers from the
+        // verbatim slice — they keep their SOURCE id while the comment is renumbered
+        // dense + re-anchored via EmitComments/AddComment, leaving a dangling stale-id
+        // marker pair that makes the rebuilt doc fail to open in Word (validate
+        // dangling-reference). Mirrors the COMMENT-IN-MATH strip; the comment survives
+        // through its typed re-anchor.
+        if (rawXml != null) rawXml = WordHandler.StripVerbatimCommentMarkers(rawXml);
         if (!string.IsNullOrEmpty(rawXml) && IsRichBlockSdt(rawXml!))
         {
             // External relationship references (hyperlink r:id, image r:embed/
@@ -2572,7 +2626,9 @@ public static partial class WordBatchEmitter
                 if (sdtData != null)
                 {
                     var carrierProps = PackInlinedPartsProps(sdtData);
-                    carrierProps["sdtXml"] = carrierProps["runXml"];
+                    // BUG-DUMP-COMMENT-IN-SDT: same strip as the verbatim raw-set path
+                    // — the inlined-parts carrier ships sdtContent verbatim too.
+                    carrierProps["sdtXml"] = WordHandler.StripVerbatimCommentMarkers(carrierProps["runXml"]);
                     carrierProps.Remove("runXml");
                     items.Add(new BatchItem
                     {
@@ -2743,6 +2799,13 @@ public static partial class WordBatchEmitter
                                     List<BatchItem> items, BodyEmitContext ctx)
     {
         var rawXml = word.RawElementXml(sourcePath);
+        // BUG-DUMP-COMMENT-IN-SDT: strip in-sdtContent comment-range markers from the
+        // verbatim slice — they keep their SOURCE id while the comment is renumbered
+        // dense + re-anchored via EmitComments/AddComment, leaving a dangling stale-id
+        // marker pair that makes the rebuilt doc fail to open in Word (validate
+        // dangling-reference). Mirrors the COMMENT-IN-MATH strip; the comment survives
+        // through its typed re-anchor.
+        if (rawXml != null) rawXml = WordHandler.StripVerbatimCommentMarkers(rawXml);
         if (!string.IsNullOrEmpty(rawXml) && IsRichBlockSdt(rawXml!))
         {
             if (HasExternalRelRef(rawXml!))
@@ -2761,7 +2824,9 @@ public static partial class WordBatchEmitter
                 if (sdtData != null)
                 {
                     var carrierProps = PackInlinedPartsProps(sdtData);
-                    carrierProps["sdtXml"] = carrierProps["runXml"];
+                    // BUG-DUMP-COMMENT-IN-SDT: same strip as the verbatim raw-set path
+                    // — the inlined-parts carrier ships sdtContent verbatim too.
+                    carrierProps["sdtXml"] = WordHandler.StripVerbatimCommentMarkers(carrierProps["runXml"]);
                     carrierProps.Remove("runXml");
                     items.Add(new BatchItem
                     {
@@ -3088,18 +3153,21 @@ public static partial class WordBatchEmitter
     private static void EmitSection(WordHandler word, List<BatchItem> items)
     {
         var root = word.Get("/");
-        // protectionEnforced has no Set case in WordHandler — `set / protectionEnforced=...`
-        // emits a WARNING on every replay regardless of protection state.
-        // Enforcement is implicit in any non-"none" protection value (the
-        // `protection` Set handler stamps w:enforcement=1 itself), so the
-        // separate flag is dump-only metadata with no replay path. Drop it
-        // unconditionally; for protection="none" also drop the noisy
-        // protection key so round-trips stay clean.
-        root.Format.Remove("protectionEnforced");
+        // BUG-DUMP-PROTECTION-ENFORCE: a document can DEFINE a protection mode
+        // (w:edit="forms") without ENFORCING it (w:enforcement="0") — Word then
+        // renders the doc normally. The `protection` Set handler used to always
+        // stamp w:enforcement=1, and this emitter dropped protectionEnforced as
+        // "dump-only metadata", so an unenforced-forms source round-tripped to
+        // ENFORCED forms → Word switched to form-fill mode and pushed every line
+        // down a constant ~12px (a pervasive visual drift with no content change).
+        // Keep protectionEnforced so the `protection`/`protectionEnforced` Set
+        // cases can restore the source enforcement state. For protection="none"
+        // there is nothing to enforce: drop both keys so round-trips stay clean.
         if (root.Format.TryGetValue("protection", out var protVal)
             && string.Equals(protVal?.ToString(), "none", StringComparison.OrdinalIgnoreCase))
         {
             root.Format.Remove("protection");
+            root.Format.Remove("protectionEnforced");
         }
         var blankBaseline = _blankRootBaseline.Value;
         var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -3139,6 +3207,21 @@ public static partial class WordBatchEmitter
                 continue;
             }
             props[k] = s;
+        }
+        // BUG-DUMP-PROTECTION-ENFORCE: protectionEnforced must be emitted even when
+        // it matches the blank baseline (false). The `protection` Set writer defaults
+        // enforcement to TRUE, and the typed `set / protection=...` op replays AFTER
+        // the verbatim settings raw-set — so an unenforced-forms source (enforcement
+        // ="0") needs an explicit protectionEnforced=false to stop the writer from
+        // re-enforcing it (which flips Word into form-fill mode, shifting every line).
+        // The baseline-skip above drops a false value (blank default is also false),
+        // so force it into props here whenever a protection mode is present.
+        if (root.Format.TryGetValue("protection", out var protForce)
+            && !string.Equals(protForce?.ToString(), "none", StringComparison.OrdinalIgnoreCase)
+            && root.Format.TryGetValue("protectionEnforced", out var enfForce) && enfForce != null)
+        {
+            props["protectionEnforced"] = enfForce is bool eb ? (eb ? "true" : "false")
+                : enfForce.ToString() ?? "true";
         }
         // NOTE: docDefaults (fonts, size, lang, spacing, …) is no longer
         // emitted property-by-property here — EmitDocDefaultsRaw round-trips
@@ -3323,7 +3406,7 @@ public static partial class WordBatchEmitter
         return string.Join(",", segs);
     }
 
-    private static void EmitStyles(WordHandler word, List<BatchItem> items)
+    private static void EmitStyles(WordHandler word, List<BatchItem> items, bool recursiveStyleDecomp)
     {
         // Use query() rather than walking Get("/styles").Children — the
         // positional /styles/style[N] children Get returns are not
@@ -3425,24 +3508,10 @@ public static partial class WordBatchEmitter
             // built-in ids the strict "already exists" check still
             // applies. Emit `add` uniformly so the wire format stays a
             // simple `add`-only stream regardless of style provenance.
-            items.Add(new BatchItem
-            {
-                Command = "add",
-                Parent = "/styles",
-                Type = "style",
-                Props = props
-            });
-            // BUG-X4-T1 / BUG-DUMP-STYLE-TABS: style tab stops are folded into the
-            // `tabs=` prop above (see comment at the seenStyleIds guard) — the old
-            // per-stop `add tab parent=/styles/<id>` emit failed to resolve and is
-            // retired for styles. (Paragraphs still use EmitTabStops via their own
-            // navigable /body/p[N] parent.)
-            // STYLE-RAW-FALLBACK: if this style is a table style whose verbatim
-            // XML we captured, replace the just-added <w:style> wholesale so
-            // its tblPr / tblStylePr / shd / trPr / tcPr survive. Keyed by the
-            // id the `add` actually used (emitId) so an id collision/suffix on
-            // the target still lands on the right element. The raw XML's
-            // w:styleId is normalized to emitId by BuildRawTableStyleMap.
+            // STYLE-RAW-FALLBACK: the verbatim <w:style> XML that the raw-set
+            // path replaces with — table styles' tblPr/tblStylePr/shd/trPr/tcPr
+            // and any rPr/pPr child the scalar emit drops. Keyed by emitId so an
+            // id collision/suffix still lands on the right element.
             // BUG-R18C: a duplicate styleId resolves (in Word) to its LAST
             // occurrence; prefer that verbatim definition over the table-style
             // map (first) and over the scalar emit (which read the first).
@@ -3453,18 +3522,251 @@ public static partial class WordBatchEmitter
             else if (!string.IsNullOrEmpty(emitId)
                 && rawStyleByMatchAttr.TryGetValue(emitId, out var rawStyleXml))
                 rawStyleReplace = rawStyleXml;
-            if (rawStyleReplace != null)
+
+            // RECURSIVE-STYLE-DECOMP (opt-in via OFFICECLI_RECURSIVE_STYLE_DECOMP):
+            // instead of a verbatim raw-set replace, decompose the <w:style>
+            // subtree into typed `add` ops — a shell `add style` (identity attrs
+            // + name child) plus one `add <child>` per descendant element. Falls
+            // back to the raw-set replace when the subtree carries content the
+            // typed path can't round-trip losslessly (external rel, unknown
+            // namespace, mixed text, pathological depth) — see
+            // TryDecomposeStyleChildren. The whole-element raw-set stays the
+            // safety net; this only shrinks it where decomposition is provably
+            // lossless. Relies on the generic add appending repeatable same-name
+            // children (e.g. multiple tblStylePr) rather than collapsing them.
+            List<BatchItem>? recursiveOps = null;
+            if (recursiveStyleDecomp && rawStyleReplace != null && !string.IsNullOrEmpty(emitId))
+                recursiveOps = TryDecomposeStyleChildren(rawStyleReplace, $"/styles/{emitId}");
+
+            if (recursiveOps != null)
+            {
+                // Shell add: only the style's identity + own attributes + name.
+                // Every other child (basedOn, uiPriority, pPr, rPr, tblPr,
+                // tblStylePr, …) is rebuilt by the recursive ops below, so the
+                // scalar formatting props are intentionally dropped here.
+                var shellProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var k in s_styleShellProps)
+                    if (props.TryGetValue(k, out var pv))
+                    {
+                        // BUG-DUMP-STYLE-EMPTY-NAME: a <w:style> with no <w:name>
+                        // child surfaces as name="" in props. Emitting it makes the
+                        // shell `add style` materialize a spurious <w:name w:val=""/>
+                        // the source never had — breaking the recursive path's
+                        // exact-element-multiset guarantee. (The legacy raw-set path
+                        // hides this because its verbatim whole-style replace
+                        // overwrites the shell's empty name; the recursive path has no
+                        // such replace.) Skip the empty name so nameless styles —
+                        // typically auto table sub-styles — round-trip unchanged.
+                        if (k == "name" && string.IsNullOrEmpty(pv)) continue;
+                        shellProps[k] = pv;
+                    }
+                items.Add(new BatchItem
+                {
+                    Command = "add",
+                    Parent = "/styles",
+                    Type = "style",
+                    Props = shellProps
+                });
+                items.AddRange(recursiveOps);
+            }
+            else
             {
                 items.Add(new BatchItem
                 {
-                    Command = "raw-set",
-                    Part = "/styles",
-                    Xpath = $"/w:styles/w:style[@w:styleId='{emitId}']",
-                    Action = "replace",
-                    Xml = rawStyleReplace
+                    Command = "add",
+                    Parent = "/styles",
+                    Type = "style",
+                    Props = props
                 });
+                // BUG-X4-T1 / BUG-DUMP-STYLE-TABS: style tab stops are folded into
+                // the `tabs=` prop above — the old per-stop `add tab` emit failed
+                // to resolve and is retired for styles.
+                if (rawStyleReplace != null)
+                {
+                    items.Add(new BatchItem
+                    {
+                        Command = "raw-set",
+                        Part = "/styles",
+                        Xpath = $"/w:styles/w:style[@w:styleId='{emitId}']",
+                        Action = "replace",
+                        Xml = rawStyleReplace
+                    });
+                }
             }
         }
+    }
+
+    // Props copied onto the shell `add style` in RECURSIVE-STYLE-DECOMP mode:
+    // the style's identity + its own <w:style> attributes + the name child.
+    // All formatting children are rebuilt by the recursive child ops.
+    private static readonly string[] s_styleShellProps =
+        ["id", "styleId", "type", "name", "default", "customStyle"];
+
+    // Recursive style decomposition: emit each <w:style> as typed `add` ops
+    // rather than a verbatim raw-set replace (residue falls back to raw-set).
+    // ON by default; set OFFICECLI_RECURSIVE_STYLE_DECOMP=0 to fall back to the
+    // legacy whole-style raw-set path. Settable (internal) so tests can select
+    // the path deterministically without depending on process-env / static-init
+    // timing under parallel test execution.
+    internal static bool RecursiveStyleDecomp =
+        Environment.GetEnvironmentVariable("OFFICECLI_RECURSIVE_STYLE_DECOMP") != "0";
+
+    // RECURSIVE-NUMBERING-DECOMP: emit the <w:numbering> part as typed `add`
+    // ops (one `add w:abstractNum`/`add w:num` per definition + recursive
+    // children) instead of a verbatim raw-set replace. ON by default; set
+    // OFFICECLI_RECURSIVE_NUMBERING_DECOMP=0 to fall back to the legacy
+    // whole-part raw-set path. Settable (internal) so tests can pin the path
+    // deterministically without depending on process-env / static-init timing.
+    internal static bool RecursiveNumberingDecomp =
+        Environment.GetEnvironmentVariable("OFFICECLI_RECURSIVE_NUMBERING_DECOMP") != "0";
+
+    // Well-known OOXML namespace → canonical prefix, the inverse of the add
+    // path's CommonNamespaces. A namespace absent here is treated as residue
+    // (the generic add can't resolve an unknown prefix), so the caller raw-sets.
+    private static readonly Dictionary<string, string> s_nsToPrefix = new(StringComparer.Ordinal)
+    {
+        ["http://schemas.openxmlformats.org/wordprocessingml/2006/main"] = "w",
+        ["http://schemas.openxmlformats.org/officeDocument/2006/relationships"] = "r",
+        ["http://schemas.openxmlformats.org/drawingml/2006/main"] = "a",
+        ["http://schemas.openxmlformats.org/markup-compatibility/2006"] = "mc",
+        ["http://schemas.openxmlformats.org/officeDocument/2006/math"] = "m",
+        // NOTE: Office Word extension wordml namespaces (w14/w15/w16cid/…) are
+        // deliberately NOT listed here. They appear in real numbering/styles as
+        // attributes (w15:restartNumberingAfterBreak on w:abstractNum, w14:paraId,
+        // …) — but the strict OOXML validator REQUIRES those extension attributes
+        // to be covered by the part-root's mc:Ignorable, which the typed
+        // child-add path does not reproduce (it only attaches children to the
+        // blank's root). Emitting them as typed props therefore yields a
+        // schema-INVALID part. Until part-root mc:Ignorable round-trips, an
+        // element carrying an extension attribute is treated as residue, so the
+        // whole part falls back to the verbatim raw-set (which keeps mc:Ignorable
+        // and validates). See TryDecomposeNumbering.
+    };
+
+    private const int StyleDecompMaxDepth = 40;
+
+    // Decompose a verbatim <w:style> element into typed `add` child ops under
+    // stylePath (the shell `add style` creates the element + its <w:name>).
+    // Returns null on any residue the typed path can't round-trip — the caller
+    // then emits the verbatim raw-set replace instead. The source tree is
+    // finite and acyclic; the depth cap guards pathological nesting / overflow.
+    private static List<BatchItem>? TryDecomposeStyleChildren(string styleXml, string stylePath)
+    {
+        if (string.IsNullOrEmpty(styleXml) || !styleXml.StartsWith("<")) return null;
+        System.Xml.Linq.XElement styleEl;
+        try { styleEl = System.Xml.Linq.XElement.Parse(styleXml); }
+        catch { return null; }
+        var wNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        var ops = new List<BatchItem>();
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var child in styleEl.Elements())
+        {
+            // <w:name> is created by the shell `add style` (from the name prop);
+            // skip it so it isn't added twice. Its localName is unique, so the
+            // ordinals of the other children are unaffected.
+            if (child.Name.LocalName == "name" && child.Name.NamespaceName == wNs)
+                continue;
+            counts.TryGetValue(child.Name.LocalName, out var c);
+            counts[child.Name.LocalName] = c + 1;
+            var childPath = $"{stylePath}/{child.Name.LocalName}[{c + 1}]";
+            if (!TryEmitElementAdd(child, stylePath, childPath, ops, 0))
+                return null;
+        }
+        return ops;
+    }
+
+    // Decompose a verbatim <w:numbering> element into typed `add` ops: one
+    // `add w:abstractNum` / `add w:num` (/ `add w:numIdMacAtCleanup`) per direct
+    // child, each recursing into its full subtree via TryEmitElementAdd. No
+    // shell step is needed — unlike <w:style> (whose <w:name> identity child is
+    // created by the curated `add style`), an abstractNum/num is fully described
+    // by its attributes + children, so the generic prefixed-add path rebuilds it
+    // verbatim. Children replay in source order; the cardinality-aware generic
+    // add keeps abstractNum* before num* (first num has no num sibling → AddChild
+    // places it in CT_Numbering schema order). Returns null on any residue (a
+    // picture-bullet numPicBullet carries a VML r:id; unknown namespaces) — the
+    // caller then ships the whole part verbatim via raw-set.
+    //
+    // Root attributes (mc:Ignorable, extra xmlns) on <w:numbering> are NOT
+    // reproduced — the children attach to the blank's existing root. This is
+    // vestigial-safe by construction: a prefix listed in mc:Ignorable that is
+    // actually USED (a w14:/wp14: element or attribute) would make
+    // TryEmitElementAdd return false → whole-part raw-set fallback (which keeps
+    // mc:Ignorable). So whenever this typed path SUCCEEDS, mc:Ignorable lists
+    // only unused prefixes and its loss changes nothing — same class as the
+    // SDK's w:left→w:start / xmlns canonicalization the dump already accepts.
+    private static List<BatchItem>? TryDecomposeNumbering(string numberingXml)
+    {
+        if (string.IsNullOrEmpty(numberingXml) || !numberingXml.StartsWith("<")) return null;
+        System.Xml.Linq.XElement numEl;
+        try { numEl = System.Xml.Linq.XElement.Parse(numberingXml); }
+        catch { return null; }
+        var ops = new List<BatchItem>();
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var child in numEl.Elements())
+        {
+            counts.TryGetValue(child.Name.LocalName, out var c);
+            counts[child.Name.LocalName] = c + 1;
+            var childPath = $"/numbering/{child.Name.LocalName}[{c + 1}]";
+            if (!TryEmitElementAdd(child, "/numbering", childPath, ops, 0))
+                return null;
+        }
+        return ops.Count > 0 ? ops : null;
+    }
+
+    // Emit `add <localName> parent=<parentPath>` for el (attributes as
+    // namespace-prefixed props), then recurse into its children. childPath is
+    // el's own resolved path (for addressing its children). Returns false on
+    // residue.
+    private static bool TryEmitElementAdd(
+        System.Xml.Linq.XElement el, string parentPath, string elPath,
+        List<BatchItem> ops, int depth)
+    {
+        if (depth > StyleDecompMaxDepth) return false;
+        if (!s_nsToPrefix.TryGetValue(el.Name.NamespaceName, out var prefix))
+            return false; // unknown element namespace → residue
+        // Direct (non-whitespace) text content has no typed `add` representation.
+        foreach (var node in el.Nodes())
+            if (node is System.Xml.Linq.XText t && !string.IsNullOrWhiteSpace(t.Value))
+                return false;
+        var props = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var a in el.Attributes())
+        {
+            if (a.IsNamespaceDeclaration) continue;
+            var ans = a.Name.NamespaceName;
+            string key;
+            if (string.IsNullOrEmpty(ans))
+            {
+                key = a.Name.LocalName; // unqualified attribute → bare key
+            }
+            else if (s_nsToPrefix.TryGetValue(ans, out var ap))
+            {
+                if (ap == "r") return false; // external relationship → would dangle
+                key = $"{ap}:{a.Name.LocalName}";
+            }
+            else
+            {
+                return false; // unknown attribute namespace → residue
+            }
+            props[key] = a.Value;
+        }
+        ops.Add(new BatchItem
+        {
+            Command = "add",
+            Parent = parentPath,
+            Type = $"{prefix}:{el.Name.LocalName}",
+            Props = props
+        });
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var child in el.Elements())
+        {
+            counts.TryGetValue(child.Name.LocalName, out var c);
+            counts[child.Name.LocalName] = c + 1;
+            var childPath = $"{elPath}/{child.Name.LocalName}[{c + 1}]";
+            if (!TryEmitElementAdd(child, elPath, childPath, ops, depth + 1))
+                return false;
+        }
+        return true;
     }
 
     // STYLE-RAW-FALLBACK helper: parse the source styles.xml once and return a

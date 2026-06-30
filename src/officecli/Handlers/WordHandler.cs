@@ -711,28 +711,21 @@ public partial class WordHandler : IDocumentHandler, Rendering.IRenderModelHost
             int tcIdx = 0;
             foreach (var rc in row.ChildElements)
             {
-                if (rc is TableCell cellEl)
+                if (rc is TableCell)
                 {
                     tcIdx++;
-                    // BUG-DUMP-BLOCK-PERM: a <w:permStart>/<w:permEnd> that is a DIRECT
-                    // child of <w:tc> (between the cell's paragraphs, not inside one)
-                    // is also missed by the paragraph walk. Position it by the cell's
-                    // paragraph index.
-                    int cellParas = cellEl.Elements<Paragraph>().Count();
-                    int cpIdx = 0;
-                    foreach (var cc in cellEl.ChildElements)
-                    {
-                        if (cc is Paragraph) { cpIdx++; continue; }
-                        if (cc is PermStart || cc is PermEnd)
-                        {
-                            string crel, caction;
-                            if (cellParas == 0) { crel = $"w:tr[{trIdx}]/w:tc[{tcIdx}]"; caction = "append"; }
-                            else if (cpIdx == 0) { crel = $"w:tr[{trIdx}]/w:tc[{tcIdx}]/w:p[1]"; caction = "before"; }
-                            else if (cpIdx < cellParas) { crel = $"w:tr[{trIdx}]/w:tc[{tcIdx}]/w:p[{cpIdx + 1}]"; caction = "before"; }
-                            else { crel = $"w:tr[{trIdx}]/w:tc[{tcIdx}]/w:p[{cpIdx}]"; caction = "after"; }
-                            result.Add((cc.OuterXml, crel, caction));
-                        }
-                    }
+                    // BUG-DUMP-PERM-DUP: a cell-DIRECT <w:permStart>/<w:permEnd> (the
+                    // displacedByCustomXml="next" markers Word places at <w:tc> level
+                    // right before an inline <w:sdt>) is ALSO enumerated by
+                    // GetCellStructuralBookmarks, which EmitTable invokes per cell and
+                    // which emits each marker as its own faithful 1:1 raw-set op.
+                    // Scanning cell-direct perms here too double-emitted every such
+                    // permStart (22 vs 18 → duplicate ids → validate regression /
+                    // corrupted protection ranges) while the matching permEnd was
+                    // emitted once. Leave cell-direct markers to the per-cell helper;
+                    // only count the cell so tr-level positioning below stays correct.
+                    // The tbl-direct / tr-direct perms below are NOT inside a <w:tc>,
+                    // so the per-cell helper does not see them and they stay here.
                     continue;
                 }
                 if (rc is BookmarkStart || rc is BookmarkEnd || rc is PermStart || rc is PermEnd)
@@ -911,6 +904,54 @@ public partial class WordHandler : IDocumentHandler, Rendering.IRenderModelHost
         if (obj == null) return null;
         if (!obj.Descendants().Any(e => e.LocalName == "control")) return null;
         return CollectInlinedPartsEmitData(run, obj);
+    }
+
+    /// <summary>
+    /// dump→batch: collect the OLE / preview-image parts referenced by r:id
+    /// INSIDE an &lt;m:oMath&gt; (a MathType / Equation.DSMT4 object embeds an
+    /// &lt;o:OLEObject r:id&gt; binary payload plus a &lt;v:imagedata r:id&gt;
+    /// preview). These ride along in the verbatim math XML the equation emit
+    /// ships, but their embedding relationship + binary part are not otherwise
+    /// recreated — leaving a dangling r:id (a silent embedding loss and a
+    /// validator NullReferenceException) on replay. Returns the carrier parts so
+    /// the equation op can base64-inline them (part{N}.*) and AddEquation can
+    /// rematerialize + rewrite the ids; null when the math references no parts.
+    /// </summary>
+    internal ActiveXEmitData? GetMathInlinedPartsEmitData(string mathPath)
+    {
+        OpenXmlElement? element = NavigateMathElement(mathPath);
+        if (element == null) return null;
+        // The math element (m:oMath / m:oMathPara) is both the carrier body and
+        // the subtree to scan for r:id references. scanRawXml: the OLE object's
+        // relationship ids live in schema-invalid <w:object>-in-<m:r> nesting the
+        // typed walk can't see, so recover them from the raw OuterXml.
+        return CollectInlinedPartsEmitData(
+            ResolveImageHostPart(element), element, element, scanRawXml: true);
+    }
+
+    // The emit-side equation node Path uses the `/equation[N]` segment (mirroring
+    // the `add equation` command vocabulary), but the path navigator addresses
+    // the underlying element as `/oMath[N]` (or `/oMathPara[N]` for display). Try
+    // the path verbatim, then with that final-segment normalization, so the
+    // equation emit can resolve its own math element regardless of which form it
+    // carries.
+    private OpenXmlElement? NavigateMathElement(string mathPath)
+    {
+        foreach (var candidate in new[]
+                 {
+                     mathPath,
+                     mathPath.Replace("/equation[", "/oMath[", StringComparison.Ordinal),
+                     mathPath.Replace("/equation[", "/oMathPara[", StringComparison.Ordinal),
+                 })
+        {
+            try
+            {
+                var el = NavigateToElement(ParsePath(candidate));
+                if (el != null) return el;
+            }
+            catch { /* try the next normalization */ }
+        }
+        return null;
     }
 
     /// <summary>
@@ -1178,9 +1219,30 @@ public partial class WordHandler : IDocumentHandler, Rendering.IRenderModelHost
     // r:embed/r:id references resolve against. <paramref name="runXmlElement"/>
     // is the element whose OuterXml is shipped verbatim (the carrier body).
     private ActiveXEmitData? CollectInlinedPartsEmitData(
-        OpenXmlPart hostPart, OpenXmlElement runXmlElement, OpenXmlElement subtree)
+        OpenXmlPart hostPart, OpenXmlElement runXmlElement, OpenXmlElement subtree,
+        bool scanRawXml = false)
     {
         var relIds = new List<string>();
+        // BUG-DUMP-OLE-IN-OMATH: schema-invalid nesting (a <w:object> hosting an
+        // <o:OLEObject r:id> inside an <m:r> math run) is loaded by the SDK as raw
+        // content the typed object model does not expose as navigable children, so
+        // subtree.Descendants() finds none of its relationship ids. Scan the raw
+        // OuterXml via XLinq (namespace-aware, prefix-independent) to recover them.
+        // Opt-in (math only) so the activex/diagram callers keep their exact
+        // behaviour. Deduped against the typed walk below.
+        if (scanRawXml)
+        {
+            try
+            {
+                var raw = System.Xml.Linq.XElement.Parse(subtree.OuterXml);
+                foreach (var el in raw.DescendantsAndSelf())
+                    foreach (var a in el.Attributes())
+                        if (a.Name.NamespaceName == RelNs
+                            && !string.IsNullOrEmpty(a.Value) && !relIds.Contains(a.Value))
+                            relIds.Add(a.Value);
+            }
+            catch { /* malformed fragment — fall back to the typed walk */ }
+        }
         foreach (var el in subtree.Descendants())
         {
             foreach (var a in el.GetAttributes())

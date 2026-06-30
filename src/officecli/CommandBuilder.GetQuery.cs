@@ -230,14 +230,23 @@ static partial class CommandBuilder
                         catch { /* path may not be Get-resolvable; leave as-is */ }
                     }
                 }
-                var cliWarnings = warnings.Select(w => new OfficeCli.Core.CliWarning { Message = w, Code = "filter_warning" }).ToList();
+                var cliWarnings = warnings.Select(w => new OfficeCli.Core.CliWarning
+                {
+                    Message = w.Message,
+                    Code = w.Code,
+                    Kind = w.Kind,
+                    Key = w.Key,
+                    Value = w.Value,
+                    Available = w.Available,
+                    Suggestion = w.Suggestion,
+                }).ToList();
                 Console.WriteLine(OutputFormatter.WrapEnvelope(
                     OutputFormatter.FormatNodes(results, OutputFormat.Json),
                     cliWarnings.Count > 0 ? cliWarnings : null));
             }
             else
             {
-                foreach (var w in warnings) Console.Error.WriteLine(w);
+                foreach (var w in warnings) Console.Error.WriteLine(w.Message);
                 var output = OutputFormatter.FormatNodes(results, OutputFormat.Text);
                 if (!string.IsNullOrEmpty(output))
                     Console.WriteLine(output);

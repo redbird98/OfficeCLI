@@ -1828,7 +1828,7 @@ public class ResidentServer : IDisposable
                 }
             }
         }
-        foreach (var w in warnings) Console.Error.WriteLine(w);
+        foreach (var w in warnings) Console.Error.WriteLine(w.Message);
         Console.WriteLine(OutputFormatter.FormatNodes(results, format));
     }
 

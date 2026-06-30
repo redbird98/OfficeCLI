@@ -60,6 +60,17 @@ internal class CliWarning
     public string? Code { get; set; }
     [JsonPropertyName("suggestion")]
     public string? Suggestion { get; set; }
+    // Machine-readable correction fields for the query self-correction contract.
+    // Null on warnings without structured data and omitted from JSON
+    // (WhenWritingNull), so these are purely additive for existing consumers.
+    [JsonPropertyName("kind")]
+    public string? Kind { get; set; }
+    [JsonPropertyName("key")]
+    public string? Key { get; set; }
+    [JsonPropertyName("value")]
+    public string? Value { get; set; }
+    [JsonPropertyName("available")]
+    public string[]? Available { get; set; }
 }
 
 /// <summary>

@@ -622,7 +622,7 @@ static partial class CommandBuilder
                     // MatchesTextFilter (not plain Contains) so a batch query
                     // text filter honours r"regex" like the CLI and resident do.
                     results = results.Where(n => n.Text != null && OfficeCli.Core.AttributeFilter.MatchesTextFilter(n.Text, textFilter)).ToList();
-                foreach (var w in warnings) Console.Error.WriteLine(w);
+                foreach (var w in warnings) Console.Error.WriteLine(w.Message);
                 return OfficeCli.Core.OutputFormatter.FormatNodes(results, format);
             }
             case "set":

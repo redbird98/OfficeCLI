@@ -271,6 +271,13 @@ public static partial class WordBatchEmitter
             // vanished. Collect every drawing result child so the field can be
             // decomposed into raw fldChar/instrText markers + a real picture emit.
             var resultPictureNodes = new List<DocumentNode>();
+            // BUG-DUMP-FIELD-OMATH: the cached result of a field (e.g. QUOTE) can be
+            // an <m:oMath> OMML equation, surfaced as an `equation` node. The walk
+            // below has no equation branch, so it fell through uncaptured and the
+            // field collapsed to a result-less `add field` — silently dropping the
+            // formula. Capture equation results the same way as picture results and
+            // decompose them (marker-raw fldChar/instrText + a real `add equation`).
+            var resultEquationNodes = new List<DocumentNode>();
             // BUG-DUMP-FIELDVALIGN: field-wide vertical alignment (superscript /
             // subscript) is uniform across EVERY run of the field — a citation
             // mark whose begin/instr/separate/result/end runs all carry the same
@@ -427,6 +434,14 @@ public static partial class WordBatchEmitter
                     // flattening the field-code wrapper while keeping every image.
                     resultPictureNodes.Add(k);
                 }
+                else if (k.Type == "equation" && depth >= 1)
+                {
+                    // BUG-DUMP-FIELD-OMATH: cached OMML result of a QUOTE/field.
+                    // Capture at any depth (mirrors the picture branch) so a nested
+                    // field carrying an equation result is decomposed below instead
+                    // of dropped. The equation IS the field's displayed content.
+                    resultEquationNodes.Add(k);
+                }
                 else if ((k.Type == "bookmark" || k.Type == "bookmarkEnd") && depth == 1)
                 {
                     // BUG-DUMP-R72-SETFIELD-BOOKMARK: bookmark wrapping the field
@@ -459,7 +474,7 @@ public static partial class WordBatchEmitter
                 result.Add(malformedSynth);
                 continue;
             }
-            if (sawNestedField && resultPictureNodes.Count == 0)
+            if (sawNestedField && resultPictureNodes.Count == 0 && resultEquationNodes.Count == 0)
             {
                 // BUG-DUMP-NESTEDQUOTE-IMG: a nested field whose cached result is a
                 // DRAWING (nested QUOTE/INCLUDEPICTURE: begin QUOTE begin QUOTE
@@ -564,7 +579,7 @@ public static partial class WordBatchEmitter
             // paragraph in sequence, so the live INCLUDEPICTURE field structure
             // (begin/instr/separate/<drawing>/end) AND the rendered logo both
             // survive. Markers carry no relationships, so the raw-set is safe.
-            if (resultPictureNodes.Count > 0)
+            if (resultPictureNodes.Count > 0 || resultEquationNodes.Count > 0)
             {
                 var pendingMarkers = new List<string>();
                 void FlushMarkers()
@@ -585,7 +600,11 @@ public static partial class WordBatchEmitter
                 for (int s = i; s <= end; s++)
                 {
                     var sc = children[s];
-                    if (sc.Type == "picture")
+                    // A cached picture OR equation result is re-emitted as a real
+                    // node (add picture / add equation); the surrounding fldChar +
+                    // instrText markers ride along as raw slices so the field
+                    // wrapper round-trips around the restored content.
+                    if (sc.Type == "picture" || sc.Type == "equation")
                     {
                         FlushMarkers();
                         result.Add(sc);

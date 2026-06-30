@@ -1730,7 +1730,14 @@ public partial class WordHandler
     // longer exist after comments.xml is renumbered; the owning comment is
     // re-anchored separately via AddComment. Leaving an empty run wrapper behind is
     // schema-legal (it renders nothing).
-    private static string StripVerbatimCommentMarkers(string omml)
+    // Strip self-closing comment-range markers (commentRangeStart/End/Reference)
+    // from a verbatim XML slice. Used by both the equation (oMath) carrier and the
+    // SDT carrier: a comment marker that rides along verbatim keeps its SOURCE id,
+    // but comments are renumbered dense + re-anchored separately via EmitComments/
+    // AddComment, so the verbatim marker becomes a dangling stale-id reference
+    // (schema-invalid; the rebuilt doc fails to open in Word). The regex is
+    // namespace-agnostic (\w+:) so it covers w:/any prefix.
+    internal static string StripVerbatimCommentMarkers(string omml)
     {
         if (omml.IndexOf("comment", StringComparison.OrdinalIgnoreCase) < 0) return omml;
         return System.Text.RegularExpressions.Regex.Replace(
@@ -1769,6 +1776,21 @@ public partial class WordHandler
                 // verbatim math; the comment survives through its AddComment anchor
                 // (its end lands at the run boundary adjacent to the equation).
                 omml = StripVerbatimCommentMarkers(omml);
+                // BUG-DUMP-OLE-IN-OMATH: a MathType / Equation.DSMT4 OLE object
+                // embedded inside the verbatim math references its binary payload
+                // (<o:OLEObject r:id>) and preview image (<v:imagedata r:id>) by
+                // relationship id. The equation emit base64-inlines those parts as
+                // part{N}.* (mirroring the activex / vmlshape carriers); without
+                // recreating them here the r:ids dangle on replay — a silent
+                // embedding loss plus a validator NullReferenceException. Recreate
+                // the parts on the host part and rewrite the math's r:ids to the
+                // freshly assigned ones. Only the verbatim-xml path carries these.
+                if (properties.ContainsKey("part1.relId"))
+                {
+                    var oleHostPart = ResolveImageHostPart(parent);
+                    var rewriteOleIds = MaterializeInlinedParts(oleHostPart, properties, "equation");
+                    omml = rewriteOleIds(omml);
+                }
                 try
                 {
                     // Root is <m:oMath> → construct directly; root is <m:oMathPara>

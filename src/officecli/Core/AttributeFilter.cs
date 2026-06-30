@@ -17,6 +17,23 @@ internal static class AttributeFilter
 
     public record Condition(string Key, FilterOp Op, string Value);
 
+    /// <summary>
+    /// A query diagnostic carrying both a human-readable <see cref="Message"/> (the
+    /// only field surfaced on the text/stderr path, unchanged) and machine-readable
+    /// correction fields for the `query --json` contract: <see cref="Kind"/> routes
+    /// the failure (unknown_key / value_no_match / non_numeric), and
+    /// <see cref="Available"/> + <see cref="Suggestion"/> let an agent self-correct
+    /// without parsing the prose. Non-empty-path warnings carry Message only.
+    /// </summary>
+    public record FilterDiagnostic(
+        string Message,
+        string Code = "filter_warning",
+        string? Kind = null,
+        string? Key = null,
+        string? Value = null,
+        string[]? Available = null,
+        string? Suggestion = null);
+
     // Regex: [key op value] where op is ~=, >=, <=, !=, =, >, or <.
     // The leading '@' is an optional XPath-style attribute prefix accepted
     // for round-trip parity with Get/Add output (e.g. `/slide[1]/shape[@id=10000]`
@@ -177,10 +194,10 @@ internal static class AttributeFilter
         return conditions.Select(c => new Condition(keyResolver(c.Key), c.Op, c.Value)).ToList();
     }
 
-    public static (List<DocumentNode> Results, List<string> Warnings) ApplyWithWarnings(
+    public static (List<DocumentNode> Results, List<FilterDiagnostic> Warnings) ApplyWithWarnings(
         List<DocumentNode> nodes, List<Condition> conditions, bool applyAll = true)
     {
-        var warnings = new List<string>();
+        var warnings = new List<FilterDiagnostic>();
         if (conditions.Count == 0) return (nodes, warnings);
 
         var toApply = applyAll
@@ -196,8 +213,10 @@ internal static class AttributeFilter
             bool anyHasKey = nodes.Any(n => ResolveValue(n, cond.Key).HasKey);
             if (!anyHasKey && nodes.Count > 0)
             {
-                warnings.Add($"Warning: filter key '{cond.Key}' not found in any result's Format. " +
-                    $"Available keys: {string.Join(", ", GetAllFormatKeys(nodes))}");
+                var keys = GetAllFormatKeys(nodes).ToArray();
+                warnings.Add(new FilterDiagnostic(
+                    $"Warning: unknown key '{cond.Key}'. Available: {string.Join(", ", keys)}",
+                    Kind: "unknown_key", Key: cond.Key, Available: keys));
             }
         }
 
@@ -206,8 +225,9 @@ internal static class AttributeFilter
         {
             if (ExtractNumber(cond.Value) == null && !EmuConverter.TryParseEmu(cond.Value, out _))
             {
-                warnings.Add($"Warning: '{cond.Value}' in [{cond.Key}{OpToString(cond.Op)}{cond.Value}] " +
-                    $"is not numeric — comparison may produce unexpected results");
+                warnings.Add(new FilterDiagnostic(
+                    $"Warning: non-numeric '{cond.Value}' in [{cond.Key}{OpToString(cond.Op)}{cond.Value}]",
+                    Kind: "non_numeric", Key: cond.Key, Value: cond.Value));
             }
             // Also check actual values in nodes
             foreach (var node in nodes)
@@ -215,8 +235,9 @@ internal static class AttributeFilter
                 var (hasKey, actual) = ResolveValue(node, cond.Key);
                 if (hasKey && ExtractNumber(actual) == null && !EmuConverter.TryParseEmu(actual, out _))
                 {
-                    warnings.Add($"Warning: value '{actual}' for key '{cond.Key}' at {node.Path} " +
-                        $"is not numeric — {OpToString(cond.Op)} comparison may be unreliable");
+                    warnings.Add(new FilterDiagnostic(
+                        $"Warning: non-numeric '{actual}' for '{cond.Key}' at {node.Path}",
+                        Kind: "non_numeric", Key: cond.Key, Value: actual));
                     break; // one warning per condition is enough
                 }
             }
@@ -250,6 +271,134 @@ internal static class AttributeFilter
             if (!string.IsNullOrEmpty(node.Type)) keys.Add("type");
         }
         return keys;
+    }
+
+    /// <summary>
+    /// Build self-correction diagnostics for a query that returned no rows,
+    /// evaluated against the full (unfiltered) candidate set so the report is
+    /// operator-independent. For each leaf condition: a missing key lists the
+    /// available keys (with a Levenshtein "did you mean"); an existing key whose
+    /// value matched nothing lists the distinct values actually present (also with
+    /// a near-miss suggestion); a non-numeric operand on a comparison operator is
+    /// flagged. Mirrors the per-leaf warnings of ApplyWithWarnings but never goes
+    /// silent just because an `=` / `!=` pre-filter emptied the candidate set.
+    /// </summary>
+    private static List<FilterDiagnostic> DiagnoseEmptyResult(List<DocumentNode> candidates, List<Condition> conditions)
+    {
+        var diags = new List<FilterDiagnostic>();
+        foreach (var cond in conditions)
+        {
+            if (cond.Op == FilterOp.Exists) continue;
+
+            bool anyHasKey = candidates.Any(n => ResolveValue(n, cond.Key).HasKey);
+            if (!anyHasKey)
+            {
+                if (cond.Op == FilterOp.NotEqual) continue; // an absent key satisfies !=
+                var keys = GetAllFormatKeys(candidates).OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList();
+                var near = NearestMatch(cond.Key, keys, matchKeySegment: true);
+                var msg = $"Warning: unknown key '{cond.Key}'. Available: {string.Join(", ", keys)}";
+                if (near != null) msg += $" (did you mean '{near}'?)";
+                diags.Add(new FilterDiagnostic(msg, Kind: "unknown_key", Key: cond.Key,
+                    Available: keys.ToArray(), Suggestion: near));
+                continue;
+            }
+
+            // Non-numeric operand on a numeric comparison (same text ApplyWithWarnings emits).
+            if (cond.Op is FilterOp.GreaterOrEqual or FilterOp.LessOrEqual or FilterOp.GreaterThan or FilterOp.LessThan
+                && ExtractNumber(cond.Value) == null && !EmuConverter.TryParseEmu(cond.Value, out _))
+            {
+                diags.Add(new FilterDiagnostic(
+                    $"Warning: non-numeric '{cond.Value}' in [{cond.Key}{OpToString(cond.Op)}{cond.Value}]",
+                    Kind: "non_numeric", Key: cond.Key, Value: cond.Value));
+                continue;
+            }
+
+            // Key exists but the value matched no element: surface the values that
+            // do exist so the caller can pick a real one. Restricted to = / ~=,
+            // where "no match" means a wrong literal (for != / numeric ops an empty
+            // result is an ordinary, non-correctable outcome).
+            if (cond.Op is FilterOp.Equal or FilterOp.Contains
+                && !candidates.Any(n => MatchOne(n, cond)))
+            {
+                var values = candidates
+                    .Select(n => ResolveValue(n, cond.Key))
+                    .Where(r => r.HasKey && !string.IsNullOrEmpty(r.Value))
+                    .Select(r => r.Value)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (values.Count > 0)
+                {
+                    var near = NearestMatch(cond.Value, values);
+                    const int cap = 20;
+                    var shown = string.Join(", ", values.Take(cap));
+                    if (values.Count > cap) shown += $", … (+{values.Count - cap} more)";
+                    var msg = $"Warning: no match for {cond.Key}='{cond.Value}'. Available: {shown}";
+                    if (near != null) msg += $" (did you mean '{near}'?)";
+                    // Available is capped independently of the message: bound the JSON
+                    // payload while still giving an agent a usable enumeration.
+                    diags.Add(new FilterDiagnostic(msg, Kind: "value_no_match", Key: cond.Key, Value: cond.Value,
+                        Available: values.Take(50).ToArray(), Suggestion: near));
+                }
+            }
+        }
+        return diags;
+    }
+
+    /// <summary>
+    /// Closest candidate to <paramref name="input"/> by Levenshtein distance,
+    /// within a length-scaled threshold (max(2, len/3), mirroring CommandBuilder's
+    /// property suggester). Returns null when nothing is close or the best is a
+    /// tie, so a "did you mean" is only offered when it is unambiguous.
+    /// When <paramref name="matchKeySegment"/> is set, a dotted candidate also
+    /// scores against its last segment so a typo of the bare leaf (blod → bold)
+    /// still resolves to the canonical dotted key (font.bold) — keeping the
+    /// suggestion cross-format consistent where one handler exposes `bold` and
+    /// another exposes `font.bold`. Off for values, whose dots are literal.
+    /// </summary>
+    private static string? NearestMatch(string input, IEnumerable<string> candidates, bool matchKeySegment = false)
+    {
+        if (string.IsNullOrEmpty(input)) return null;
+        var lower = input.ToLowerInvariant();
+        int threshold = Math.Max(2, input.Length / 3);
+        string? best = null;
+        int bestDist = int.MaxValue, tie = 0;
+        foreach (var c in candidates)
+        {
+            var lc = c.ToLowerInvariant();
+            if (lc == lower) continue; // identical — nothing to suggest
+            var d = LevenshteinDistance(lower, lc);
+            if (matchKeySegment)
+            {
+                int dot = lc.LastIndexOf('.');
+                if (dot >= 0 && dot < lc.Length - 1)
+                    d = Math.Min(d, LevenshteinDistance(lower, lc[(dot + 1)..]));
+            }
+            if (d > threshold) continue;
+            if (d < bestDist) { bestDist = d; best = c; tie = 1; }
+            else if (d == bestDist) tie++;
+        }
+        return tie == 1 ? best : null;
+    }
+
+    private static int LevenshteinDistance(string s, string t)
+    {
+        if (s.Length == 0) return t.Length;
+        if (t.Length == 0) return s.Length;
+        var prev = new int[t.Length + 1];
+        var cur = new int[t.Length + 1];
+        for (int j = 0; j <= t.Length; j++) prev[j] = j;
+        for (int i = 1; i <= s.Length; i++)
+        {
+            cur[0] = i;
+            for (int j = 1; j <= t.Length; j++)
+            {
+                int cost = s[i - 1] == t[j - 1] ? 0 : 1;
+                cur[j] = Math.Min(Math.Min(prev[j] + 1, cur[j - 1] + 1), prev[j - 1] + cost);
+            }
+            (prev, cur) = (cur, prev);
+        }
+        return prev[t.Length];
     }
 
     /// <summary>
@@ -643,10 +792,10 @@ internal static class AttributeFilter
     /// ApplyWithWarnings emits (missing key, non-numeric comparison value) by
     /// walking the predicate leaves.
     /// </summary>
-    public static (List<DocumentNode> Results, List<string> Warnings) ApplyExprWithWarnings(
+    public static (List<DocumentNode> Results, List<FilterDiagnostic> Warnings) ApplyExprWithWarnings(
         List<DocumentNode> nodes, FilterExpr? expr)
     {
-        var warnings = new List<string>();
+        var warnings = new List<FilterDiagnostic>();
         if (expr == null) return (nodes, warnings);
 
         foreach (var cond in LeafConditions(expr))
@@ -655,13 +804,18 @@ internal static class AttributeFilter
             {
                 bool anyHasKey = nodes.Any(n => ResolveValue(n, cond.Key).HasKey);
                 if (!anyHasKey && nodes.Count > 0)
-                    warnings.Add($"Warning: filter key '{cond.Key}' not found in any result's Format. " +
-                        $"Available keys: {string.Join(", ", GetAllFormatKeys(nodes))}");
+                {
+                    var keys = GetAllFormatKeys(nodes).ToArray();
+                    warnings.Add(new FilterDiagnostic(
+                        $"Warning: unknown key '{cond.Key}'. Available: {string.Join(", ", keys)}",
+                        Kind: "unknown_key", Key: cond.Key, Available: keys));
+                }
             }
             if (cond.Op is FilterOp.GreaterOrEqual or FilterOp.LessOrEqual or FilterOp.GreaterThan or FilterOp.LessThan
                 && ExtractNumber(cond.Value) == null && !EmuConverter.TryParseEmu(cond.Value, out _))
-                warnings.Add($"Warning: '{cond.Value}' in [{cond.Key}{OpToString(cond.Op)}{cond.Value}] " +
-                    $"is not numeric — comparison may produce unexpected results");
+                warnings.Add(new FilterDiagnostic(
+                    $"Warning: non-numeric '{cond.Value}' in [{cond.Key}{OpToString(cond.Op)}{cond.Value}]",
+                    Kind: "non_numeric", Key: cond.Key, Value: cond.Value));
         }
 
         var results = nodes.Where(n => MatchesExpr(n, expr)).ToList();
@@ -694,7 +848,7 @@ internal static class AttributeFilter
     /// always applies all conditions: stripping the bracket means the handler did
     /// not pre-filter, so the tree must evaluate every predicate itself.
     /// </param>
-    public static (List<DocumentNode> Results, List<string> Warnings) FilterSelector(
+    public static (List<DocumentNode> Results, List<FilterDiagnostic> Warnings) FilterSelector(
         string selector, Func<string, List<DocumentNode>> query, Func<string, string>? keyResolver = null,
         bool applyAll = true)
     {
@@ -702,17 +856,55 @@ internal static class AttributeFilter
         if (expr != null && keyResolver != null)
             expr = NormalizeKeysExpr(expr, keyResolver);
 
-        if (TryFlatten(expr) is { } flat)
-            return ApplyWithWarnings(query(selector), flat, applyAll);
+        List<DocumentNode> results;
+        List<FilterDiagnostic> warnings;
+        List<Condition> leafConds;
 
-        // Boolean path. Most elements are filtered by the generic engine on the
-        // broad result, so strip the brackets and query bare. Elements that
-        // resolve their OWN virtual attributes — Excel `row` table-column values
-        // are attached by the handler's row-where, NOT present on a bare row —
-        // must receive the full selector so the handler can resolve them; the tree
-        // then re-confirms on the carried column values.
-        var queryStr = ElementResolvesOwnBoolean(selector) ? selector : StripFilterBrackets(selector);
-        return ApplyExprWithWarnings(query(queryStr), expr);
+        if (TryFlatten(expr) is { } flat)
+        {
+            (results, warnings) = ApplyWithWarnings(query(selector), flat, applyAll);
+            leafConds = flat;
+        }
+        else
+        {
+            // Boolean path. Most elements are filtered by the generic engine on the
+            // broad result, so strip the brackets and query bare. Elements that
+            // resolve their OWN virtual attributes — Excel `row` table-column values
+            // are attached by the handler's row-where, NOT present on a bare row —
+            // must receive the full selector so the handler can resolve them; the tree
+            // then re-confirms on the carried column values.
+            var queryStr = ElementResolvesOwnBoolean(selector) ? selector : StripFilterBrackets(selector);
+            (results, warnings) = ApplyExprWithWarnings(query(queryStr), expr);
+            leafConds = expr == null ? new List<Condition>() : LeafConditions(expr).ToList();
+        }
+
+        // Agent self-correction: a zero-result query is the moment a caller most
+        // needs guidance, yet the diagnostics above can fall silent. When the
+        // operator is `=` / `!=` the handler pre-filters at the selector level, so a
+        // wrong key or value leaves an EMPTY candidate set — there are no nodes left
+        // to enumerate available keys from, and a non-matching value emits nothing at
+        // all. (A non-pre-filtered operator like `>` / `~=` keeps the full set and so
+        // already warns, which is exactly the operator-dependent inconsistency this
+        // closes.) Re-introspect against the full element set (filter brackets
+        // stripped) so a missing key is always reported and a near-miss value is
+        // suggested regardless of operator. Error path only — successful queries keep
+        // their existing warning set untouched.
+        if (results.Count == 0 && leafConds.Count > 0)
+        {
+            try
+            {
+                var fullSet = query(StripFilterBrackets(selector));
+                if (fullSet.Count > 0)
+                    warnings = DiagnoseEmptyResult(fullSet, leafConds);
+            }
+            catch (CliException)
+            {
+                // A stripped selector the handler rejects must not turn a clean
+                // empty result into a failure; keep the original diagnostics.
+            }
+        }
+
+        return (results, warnings);
     }
 
     /// <summary>

@@ -1335,7 +1335,18 @@ public partial class WordHandler
         // different default and render at the wrong size/alignment.
         if (properties.TryGetValue("default", out var sDefault) && IsTruthy(sDefault))
             newStyle.Default = true;
-        newStyle.AppendChild(new StyleName { Val = styleName });
+        // BUG-DUMP-STYLE-EMPTY-NAME: append <w:name> only when the caller actually
+        // gave a name. A style added with an id but no name key must round-trip
+        // WITHOUT a <w:name> child — auto table sub-styles (Table1/2/3, …) carry no
+        // <w:name> in the source, and the recursive style-decomposition emit drops
+        // an empty name from the shell props, so explicitName is false here for
+        // them. The old unconditional append injected a spurious <w:name w:val=""/>
+        // the source never had (validate-clean and render-identical, but it broke
+        // the decomposition's exact-element-multiset guarantee). BUG-R7-08
+        // (never default the name to the id) is still honored: no name in, no name
+        // out. An explicit empty name (name="" passed) still emits <w:name w:val=""/>.
+        if (explicitName)
+            newStyle.AppendChild(new StyleName { Val = styleName });
 
         if ((properties.TryGetValue("basedon", out var basedOn) || properties.TryGetValue("basedOn", out basedOn)) && !string.IsNullOrEmpty(basedOn))
             newStyle.AppendChild(new BasedOn { Val = basedOn });

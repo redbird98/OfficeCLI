@@ -646,7 +646,18 @@ public partial class WordHandler
                 }
                 else if (Uri.TryCreate(linkVal, UriKind.Absolute, out linkUri))
                 {
-                    Core.HyperlinkUriValidator.RequireSafeScheme(linkVal, "link");
+                    // BUG-DUMP-PIC-UNSAFE-LINK: a clickable image whose click-link
+                    // carries an unsafe scheme (javascript:/data:/vbscript: — common
+                    // in web-exported docs that wrap thumbnails in javascript:popUp())
+                    // must NOT abort the whole picture. The link is a decoration on
+                    // the image; RequireSafeScheme used to throw here and the entire
+                    // `add picture` op failed, DROPPING the image — silently losing
+                    // content and reflowing the page (lost pages on dump→batch). Word
+                    // never executes a javascript: link anyway, so drop just the
+                    // unsafe link and keep the image (same security outcome as the
+                    // throw, without sacrificing the picture).
+                    if (!Core.HyperlinkUriValidator.IsSafeScheme(linkVal))
+                        linkUri = null;
                 }
                 else
                 {

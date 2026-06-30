@@ -509,6 +509,20 @@ public partial class WordHandler
                 if (endSdt != null
                     && !bkStart.Ancestors().Any(a => ReferenceEquals(a, endSdt)))
                     return true;
+                // BUG-DUMP-BMCELL-DUP: the matching end lives OUTSIDE the start's
+                // table cell — a zero-length bookmark straddling a cell/row boundary
+                // (start the last child of a cell paragraph, end a <w:tr>-level child
+                // between cells, raw-injected verbatim by GetTableStructuralBookmarks
+                // which carries the end). Same shape as the SDT case above: treat it
+                // as a span so the emitter emits an open=true start (reusing the id)
+                // that pairs with the verbatim structural end — NOT a self-contained
+                // `add bookmark` that auto-creates a SECOND, orphan bookmarkEnd
+                // (duplicate/unbalanced marker, silent: the validator does not flag
+                // it). A genuinely adjacent end in the SAME cell stays empty.
+                var startCell = bkStart.Ancestors<TableCell>().FirstOrDefault();
+                if (startCell != null
+                    && !be.Ancestors().Any(a => ReferenceEquals(a, startCell)))
+                    return true;
                 return false; // adjacent → empty
             }
             // Content between Start and End → this is a wrapping span.

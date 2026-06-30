@@ -51,6 +51,72 @@ internal static class SchemaOrder
     // elements, reflection shape changed) — callers then leave order as-is.
     private static readonly ConcurrentDictionary<Type, Comparison<OpenXmlElement>?> s_cmpCache = new();
 
+    // Per-(parent type, child qualified-name) schema maxOccurs cache. Keyed by
+    // parent runtime type + "{ns}:{localName}" of the child. Value: the child's
+    // maxOccurs in the parent's content model — 1 = singleton, anything else
+    // (0 = unbounded, or a finite bound > 1) = repeatable, int.MinValue = the
+    // child/particle couldn't be resolved (caller treats as repeatable).
+    private static readonly ConcurrentDictionary<(Type, string), int> s_maxOccursCache = new();
+
+    public const int MaxOccursUnknown = int.MinValue;
+
+    /// <summary>
+    /// The schema maxOccurs of <paramref name="child"/> within
+    /// <paramref name="parent"/>'s content model, via the SDK's compiled
+    /// particle. Returns 1 for a singleton child, 0 for unbounded, a finite
+    /// bound for bounded-repeatable, or <see cref="MaxOccursUnknown"/> when the
+    /// particle can't be read or the child isn't found (caller should then NOT
+    /// assume singleton). Used by the generic add to decide replace (singleton)
+    /// vs append-distinct-sibling (repeatable).
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2075",
+        Justification = "Reflecting the SDK's internal element Metadata.Particle, same members the validator uses; returns MaxOccursUnknown if trimmed.")]
+    public static int GetMaxOccurs(OpenXmlElement parent, OpenXmlElement child)
+    {
+        var key = (parent.GetType(), $"{child.NamespaceUri}:{child.LocalName}");
+        return s_maxOccursCache.GetOrAdd(key, static (k, p) =>
+        {
+            try
+            {
+                var metaProp = typeof(OpenXmlElement).GetProperty("Metadata",
+                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                var meta = metaProp?.GetValue(p);
+                var compiled = meta?.GetType().GetProperty("Particle")?.GetValue(meta);
+                var root = compiled?.GetType().GetProperty("Particle")?.GetValue(compiled);
+                if (root == null) return MaxOccursUnknown;
+                return WalkForMaxOccurs(root, k.Item2);
+            }
+            catch { return MaxOccursUnknown; }
+        }, parent);
+    }
+
+    private static int WalkForMaxOccurs(object pc, string childQName)
+    {
+        var t = pc.GetType();
+        var particleType = t.GetProperty("ParticleType")?.GetValue(pc)?.ToString();
+        if (particleType == "Element")
+        {
+            // OpenXmlSchemaType.ToString() == "{ct-ns}:CT_Name/{el-ns}:localName".
+            // Both ns segments are full URLs (containing '/'), so the element id
+            // "{el-ns}:localName" == childQName is a SUFFIX of the string — match
+            // by EndsWith, not by splitting on '/'.
+            var typeStr = t.GetProperty("Type")?.GetValue(pc)?.ToString() ?? "";
+            if (typeStr.EndsWith(childQName, StringComparison.Ordinal))
+                return (int)(t.GetProperty("MaxOccurs")?.GetValue(pc) ?? MaxOccursUnknown);
+            return MaxOccursUnknown;
+        }
+        if (t.GetProperty("ChildrenParticles")?.GetValue(pc) is System.Collections.IEnumerable kids)
+        {
+            foreach (var k in kids)
+            {
+                if (k == null) continue;
+                var r = WalkForMaxOccurs(k, childQName);
+                if (r != MaxOccursUnknown) return r;
+            }
+        }
+        return MaxOccursUnknown;
+    }
+
     /// <summary>
     /// Move <paramref name="child"/> — already a child of <paramref name="parent"/>,
     /// typically just appended — to its schema-correct slot: immediately before
