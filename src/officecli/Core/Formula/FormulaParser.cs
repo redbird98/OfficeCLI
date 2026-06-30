@@ -1941,8 +1941,11 @@ internal static class FormulaParser
                     bbPr.AppendChild(new M.StrikeBottomLeftToTopRight { Val = M.BooleanValues.True });
                 else // xcancel — both diagonals
                 {
-                    bbPr.AppendChild(new M.StrikeTopLeftToBottomRight { Val = M.BooleanValues.True });
+                    // ECMA-376 CT_BorderBoxPr requires strikeBLTR before
+                    // strikeTLBR. Emitting them in the reverse order yields a
+                    // schema-invalid document.
                     bbPr.AppendChild(new M.StrikeBottomLeftToTopRight { Val = M.BooleanValues.True });
+                    bbPr.AppendChild(new M.StrikeTopLeftToBottomRight { Val = M.BooleanValues.True });
                 }
                 return new M.BorderBox(bbPr, new M.Base(ExtractChildren(cancelArg)));
             }
