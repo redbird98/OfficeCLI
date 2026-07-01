@@ -436,11 +436,20 @@ public partial class PowerPointHandler
         // TableLook flags
         if (tblPr != null)
         {
-            if (tblPr.FirstRow is not null) node.Format["firstRow"] = tblPr.FirstRow.Value;
+            // firstRow and bandRow default to TRUE in AddTable (an interactive
+            // nicety — a bare `add table` yields a styled header + banding). But
+            // the OOXML default for an ABSENT firstRow/bandRow attribute is
+            // FALSE. Emit their EFFECTIVE value (absent → false) so a source
+            // that omits them round-trips faithfully instead of gaining a header
+            // row / banding on replay (bnc480256: <a:tblPr bandRow="1"> with no
+            // firstRow replayed as firstRow="1", adding a header band + gap).
+            // The other four default to false in AddTable already, so emitting
+            // them only when present stays faithful.
+            node.Format["firstRow"] = tblPr.FirstRow?.Value ?? false;
             if (tblPr.LastRow is not null) node.Format["lastRow"] = tblPr.LastRow.Value;
             if (tblPr.FirstColumn is not null) node.Format["firstCol"] = tblPr.FirstColumn.Value;
             if (tblPr.LastColumn is not null) node.Format["lastCol"] = tblPr.LastColumn.Value;
-            if (tblPr.BandRow is not null) node.Format["bandedRows"] = tblPr.BandRow.Value;
+            node.Format["bandedRows"] = tblPr.BandRow?.Value ?? false;
             if (tblPr.BandColumn is not null) node.Format["bandedCols"] = tblPr.BandColumn.Value;
         }
 
