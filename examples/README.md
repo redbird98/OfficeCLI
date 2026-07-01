@@ -19,6 +19,9 @@ examples/
 │   ├── paragraph-formatting.{md,sh,py,docx} # paragraph property surface
 │   ├── document-formatting.{md,sh,py,docx}  # document-level property surface
 │   ├── sections.{md,sh,py,docx}             # section layout — multi-column, footnote/endnote props, per-section page setup
+│   ├── content-controls.{md,sh,py,docx}     # SDT content controls — text/dropdown/combobox/date/picture/group intake form
+│   ├── fields.{md,sh,py,docx}               # field codes (PAGE/DATE/REF/IF/HYPERLINK) + auto-populating table of contents
+│   ├── pictures.{md,sh,py,docx}             # inline/floating images — crop, alt, wrap, behind-text, absolute position
 │   ├── numbering.{md,sh,py,docx}            # list/numbering styles
 │   └── revisions.{md,sh,py,docx}            # tracked-change (revision) API
 ├── excel/                                 # 📊 Excel examples — *.{md,sh,py,xlsx}
@@ -30,6 +33,7 @@ examples/
 │   ├── workbook-settings.{md,sh,py,xlsx}
 │   ├── pivot-tables.{md,sh,py,xlsx}
 │   ├── slicers.{md,sh,py,xlsx}                # pivot-table slicers (field/caption/columnCount/rowHeight)
+│   ├── shapes.{md,sh,py,xlsx}                 # drawing shapes — geometry, flip, glow, gradient, reflection, outline
 │   ├── charts.{md,sh,py,xlsx}               # master chart showcase
 │   └── charts/                              # per-type chart scripts — charts-<type>.{md,sh,py,xlsx}
 │           (demo, basic, advanced, extended, area, bar, boxwhisker,
