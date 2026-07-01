@@ -42,13 +42,17 @@ public sealed class SequenceDiagram
 /// </summary>
 public static class SequenceLayout
 {
+    // Participant/actor ids accept Unicode letters, not just ASCII — a
+    // fully-Chinese sequence (客户->>服务器: 登录) must parse, mirroring the
+    // flowchart parser. \p{L} = any letter, \p{N} = any digit.
+    private const string SeqId = @"[\p{L}\p{N}_]+";
     private static readonly Regex Decl =
-        new(@"^(?:participant|actor)\s+([A-Za-z0-9_]+)(?:\s+as\s+(.+))?$", RegexOptions.IgnoreCase);
+        new(@"^(?:participant|actor)\s+(" + SeqId + @")(?:\s+as\s+(.+))?$", RegexOptions.IgnoreCase);
     // `A->>B: msg`, plus optional activation control `+`/`-` on the target
     // (`A->>+B`, `B-->>-A`) — we don't draw activation bars, but the message must
     // still render rather than being dropped.
     private static readonly Regex Msg =
-        new(@"^([A-Za-z0-9_]+)\s*(-{1,2}[>)x]{1,2})\s*[+-]?\s*([A-Za-z0-9_]+)\s*:\s*(.*)$");
+        new(@"^(" + SeqId + @")\s*(-{1,2}[>)x]{1,2})\s*[+-]?\s*(" + SeqId + @")\s*:\s*(.*)$");
 
     public static SequenceDiagram Parse(string text)
     {
