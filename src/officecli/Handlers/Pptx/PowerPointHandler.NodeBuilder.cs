@@ -1341,6 +1341,11 @@ public partial class PowerPointHandler
                     node.Format["textOutline"] = toColor;
                 else
                     node.Format["textOutline"] = "true";
+                // Mirror the run-level textOutlineRaw carrier (dash/gradient/
+                // cap-join beyond the width:color compound, sample10).
+                if (firstRunOutline.ChildElements.Any(c => c is not Drawing.SolidFill)
+                    || firstRunOutline.GetAttributes().Any(a => a.LocalName != "w"))
+                    node.Format["textOutlineRaw"] = firstRunOutline.OuterXml;
             }
             if (firstRun.RunProperties.Strike?.HasValue == true)
             {
@@ -2423,6 +2428,16 @@ public partial class PowerPointHandler
                     node.Format["textOutline"] = toColor;
                 else
                     node.Format["textOutline"] = "true";
+                // The width:color compound can't represent dash patterns,
+                // gradient strokes, caps/joins etc. (sample10: a sysDot
+                // WordArt outline replayed solid). Carry the verbatim <a:ln>
+                // whenever it holds anything beyond width + solidFill; the
+                // emitter suppresses the semantic keys in favour of the raw.
+                bool outlineBeyondCompound =
+                    runOutline.ChildElements.Any(c => c is not Drawing.SolidFill)
+                    || runOutline.GetAttributes().Any(a => a.LocalName != "w");
+                if (outlineBeyondCompound)
+                    node.Format["textOutlineRaw"] = runOutline.OuterXml;
             }
 
             // Long-tail OOXML fallback. drawingML rPr carries most properties

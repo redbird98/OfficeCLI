@@ -1865,7 +1865,20 @@ public static partial class PptxBatchEmitter
             // top. When the source has a stable following sibling, insert the
             // graphicFrame BEFORE it (anchored by that sibling's cNvPr id, which
             // survives round-trip); otherwise append into the parent as before.
-            if (sa.InsertBeforeShapeId is { Length: > 0 } anchorId)
+            if (sa.InsertBeforeSegment is { Length: > 0 } anchorSeg)
+            {
+                // Group-nested: positional sibling anchor (group-descendant
+                // cNvPr ids are reassigned on replay, so @id can't match).
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = slidePath,
+                    Xpath = sa.ParentXpath + anchorSeg,
+                    Action = "insertbefore",
+                    Xml = gfCanon,
+                });
+            }
+            else if (sa.InsertBeforeShapeId is { Length: > 0 } anchorId)
             {
                 items.Add(new BatchItem
                 {

@@ -100,6 +100,8 @@ public static partial class PptxBatchEmitter
         // onto the paragraph set bag and silently broadcasting to every
         // run in the paragraph.
         "textOutline", "textOutline.color", "textOutline.width",
+        // Verbatim <a:ln> companion of textOutline — same run-only scope.
+        "textOutlineRaw",
     };
 
     // Pull a `link=slide[N]` prop out of the bag and queue a deferred `set`

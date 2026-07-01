@@ -2975,7 +2975,11 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         // elements) → the emitter appends, as before. Without this a SmartArt
         // that sat BEHIND a later shape was appended last and rendered ON TOP,
         // occluding that shape (bnc880763).
-        string? InsertBeforeShapeId);
+        string? InsertBeforeShapeId,
+        // Positional sibling xpath segment (e.g. "/p:sp[1]") for group-nested
+        // SmartArt — group-descendant cNvPr ids are reassigned on replay, so
+        // the @id anchor form cannot match there.
+        string? InsertBeforeSegment = null);
 
     // External (TargetMode="External") hyperlink relationships on a part's own
     // .rels, surfaced as (rId, target-uri). Mirrors GetLayoutExternalHyperlinks
@@ -3299,9 +3303,27 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
             // this it always lands on top; anchoring an insert before the next
             // stable sibling preserves the source z-order.
             string? insertBeforeShapeId = null;
+            string? insertBeforeSegment = null;
             foreach (var sib in gf.ElementsAfter())
             {
                 if (!IsStableZOrderAnchor(sib)) continue;
+                if (grpChain.Count > 0)
+                {
+                    // Group-nested: replay REASSIGNS group-descendant cNvPr ids
+                    // (CONSISTENCY(group-id-autoassign)), so an @id anchor
+                    // matches nothing and the SmartArt silently never lands
+                    // (smartart-groupshape). Use the sibling's positional form
+                    // instead — same-tag ordinal within the group, stable
+                    // because the group's children replay in source order.
+                    int ord = 1;
+                    foreach (var prev in sib.Parent!.ChildElements)
+                    {
+                        if (ReferenceEquals(prev, sib)) break;
+                        if (prev.LocalName == sib.LocalName) ord++;
+                    }
+                    insertBeforeSegment = $"/p:{sib.LocalName}[{ord}]";
+                    break;
+                }
                 var cnv = sib.Descendants().FirstOrDefault(e =>
                     e.LocalName == "cNvPr"
                     && e.NamespaceUri == "http://schemas.openxmlformats.org/presentationml/2006/main");
@@ -3317,7 +3339,8 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                 DataImages: dataImages, DrawingImages: drawingImages,
                 DataHyperlinks: dataHlinks, DrawingHyperlinks: drawingHlinks,
                 ParentXpath: parentXpath,
-                InsertBeforeShapeId: insertBeforeShapeId));
+                InsertBeforeShapeId: insertBeforeShapeId,
+                InsertBeforeSegment: insertBeforeSegment));
         }
         return result;
     }

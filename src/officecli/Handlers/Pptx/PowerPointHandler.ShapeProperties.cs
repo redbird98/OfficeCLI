@@ -582,6 +582,20 @@ public partial class PowerPointHandler
                 // `textOutline.color` allow additive Set without overwriting
                 // the other half. Schema order bucket 1 (ln) — ReorderDrawingRunProperties
                 // moves it before solidFill/latin/etc.
+                case "textOutlineRaw" or "textoutlineraw":
+                {
+                    // Verbatim run <a:ln> — dash / gradient stroke / cap-join
+                    // forms the width:color compound can't express (sample10).
+                    foreach (var run in runs)
+                    {
+                        var rp = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
+                        rp.RemoveAllChildren<Drawing.Outline>();
+                        if (!string.IsNullOrWhiteSpace(value))
+                            rp.PrependChild(new Drawing.Outline(value));
+                    }
+                    break;
+                }
+
                 case "textOutline" or "textoutline":
                 {
                     // "none" / "false" → strip; mirrors text underline=none clearing.

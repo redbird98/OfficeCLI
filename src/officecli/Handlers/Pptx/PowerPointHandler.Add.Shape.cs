@@ -903,7 +903,7 @@ public partial class PowerPointHandler
                       // BUG1: text direction — Set handles in SetRunOrShapeProperties
                       "textdirection", "textdir",
                       // BUG2: text outline — Set handles all three key variants
-                      "textOutline", "textoutline",
+                      "textOutline", "textoutline", "textOutlineRaw", "textoutlineraw",
                       "textOutline.width", "textoutline.width",
                       "textOutline.color", "textoutline.color",
                       // CONSISTENCY(highlight): a:highlight — Set's curated case

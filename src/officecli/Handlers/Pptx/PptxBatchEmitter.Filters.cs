@@ -256,6 +256,16 @@ public static partial class PptxBatchEmitter
         if (result.ContainsKey("textWarpRaw"))
             result.Remove("textWarp");
 
+        // textOutlineRaw carries the verbatim run <a:ln>; the width:color
+        // compound (and its split keys) would rebuild a plain solid stroke
+        // over it.
+        if (result.ContainsKey("textOutlineRaw"))
+        {
+            result.Remove("textOutline");
+            result.Remove("textOutline.width");
+            result.Remove("textOutline.color");
+        }
+
         return result;
     }
 }

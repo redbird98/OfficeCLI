@@ -761,7 +761,17 @@ public partial class PowerPointHandler
                 // Symmetric with the Set branch in ShapeProperties.cs. Schema
                 // order is enforced by ReorderDrawingRunProperties at the end
                 // of this method (already invoked for endParaRPr inheritance).
-                if (properties.TryGetValue("textOutline", out var rTextOutline)
+                // Verbatim <a:ln> (dash pattern / gradient stroke / cap-join —
+                // everything the width:color compound can't express). Wins over
+                // the semantic keys; the emitter suppresses them when present.
+                if ((properties.TryGetValue("textOutlineRaw", out var rToRaw)
+                        || properties.TryGetValue("textoutlineraw", out rToRaw))
+                    && !string.IsNullOrWhiteSpace(rToRaw))
+                {
+                    rProps.RemoveAllChildren<Drawing.Outline>();
+                    rProps.PrependChild(new Drawing.Outline(rToRaw));
+                }
+                else if (properties.TryGetValue("textOutline", out var rTextOutline)
                     || properties.TryGetValue("textoutline", out rTextOutline))
                 {
                     if (!rTextOutline.Equals("none", StringComparison.OrdinalIgnoreCase)
