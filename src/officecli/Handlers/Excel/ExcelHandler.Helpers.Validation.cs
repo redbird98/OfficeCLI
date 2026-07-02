@@ -363,4 +363,22 @@ public partial class ExcelHandler
         OfficeCli.Core.ParseHelpers.ValidateXmlText(value,
             string.IsNullOrEmpty(cellRef) ? "cell value" : $"cell value at {cellRef}");
     }
+
+    // Numeric literal forms Excel's <v> parser accepts. double.TryParse is
+    // far more lenient (leading '+', thousands separators, padding, currency
+    // NumberStyles) — writing such text verbatim into an untyped (numeric)
+    // <v> makes real Excel refuse the file (0x800A03EC) even though
+    // schema validation stays green.
+    private static readonly System.Text.RegularExpressions.Regex CanonicalNumericLiteral =
+        new(@"^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    internal static bool IsCanonicalNumericText(string text) => CanonicalNumericLiteral.IsMatch(text);
+
+    /// <summary>Text to store in a numeric cell's &lt;v&gt;: the literal digits
+    /// when already canonical (preserves >15-significant-digit values that
+    /// double cannot represent), else the parsed double re-serialized.</summary>
+    internal static string NormalizeNumericCellText(string text, double parsed)
+        => CanonicalNumericLiteral.IsMatch(text)
+            ? text
+            : parsed.ToString(System.Globalization.CultureInfo.InvariantCulture);
 }

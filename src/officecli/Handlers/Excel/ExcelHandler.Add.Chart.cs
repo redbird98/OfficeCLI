@@ -90,8 +90,12 @@ public partial class ExcelHandler
         int fromCol, fromRow, toCol, toRow;
         if (properties.TryGetValue("anchor", out var chartAnchorStr) && !string.IsNullOrWhiteSpace(chartAnchorStr))
         {
-            if (properties.ContainsKey("width") || properties.ContainsKey("height")
-                || properties.ContainsKey("x") || properties.ContainsKey("y"))
+            // Non-short-circuit | on purpose: each ContainsKey marks the key
+            // as handler-read in TrackingPropertyDictionary. With ||, finding
+            // `width` skipped the x/y/height probes and they surfaced as a
+            // false "UNSUPPORTED props" warning alongside this explicit one.
+            if (properties.ContainsKey("width") | properties.ContainsKey("height")
+                | properties.ContainsKey("x") | properties.ContainsKey("y"))
                 Console.Error.WriteLine(
                     "Warning: 'x'/'y'/'width'/'height' are ignored when 'anchor' is provided (anchor defines the full rectangle).");
             if (!TryParseCellRangeAnchor(chartAnchorStr, out var cxFrom, out var cyFrom, out var cxTo, out var cyTo))

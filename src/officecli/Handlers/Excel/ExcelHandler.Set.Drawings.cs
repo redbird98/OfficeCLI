@@ -188,7 +188,7 @@ public partial class ExcelHandler
                 {
                     // CONSISTENCY(ole-width-units): mirror Add-side warn — width/height
                     // dropped silently when anchor= present.
-                    if (properties.ContainsKey("width") || properties.ContainsKey("height"))
+                    if (properties.ContainsKey("width") | properties.ContainsKey("height"))
                         Console.Error.WriteLine(
                             "Warning: 'width'/'height' are ignored when 'anchor' is provided (anchor defines the full rectangle).");
                     var anchorM = Regex.Match(value ?? "", @"^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$", RegexOptions.IgnoreCase);

@@ -513,6 +513,11 @@ public partial class ExcelHandler
                 }
                 else if (!double.TryParse(safeValue, out var dbl) || !double.IsFinite(dbl))
                     cell.DataType = new EnumValue<CellValues>(CellValues.String);
+                else
+                    // R-fuzz2-1: TryParse accepts spellings Excel's <v> parser
+                    // does not ("+5", "1,234", padded). Store the canonical
+                    // form; literal digits are preserved when already canonical.
+                    cell.CellValue = new CellValue(NormalizeNumericCellText(safeValue, dbl));
             }
         }
         if (properties.TryGetValue("formula", out var formula))

@@ -308,7 +308,16 @@ public static partial class ExcelBatchEmitter
             }
 
             if (chart.Format.TryGetValue("anchor", out var anch) && anch is string anchS && anchS.Length > 0)
+            {
                 props["anchor"] = anchS;
+                // anchor defines the full rectangle on replay; the x/y/width/
+                // height BuildChartProps also emitted would be ignored with a
+                // warning — drop them so the replay is warning-free.
+                props.Remove("x");
+                props.Remove("y");
+                props.Remove("width");
+                props.Remove("height");
+            }
 
             items.Add(new BatchItem { Command = "add", Parent = sheetPath, Type = "chart", Props = props });
         }

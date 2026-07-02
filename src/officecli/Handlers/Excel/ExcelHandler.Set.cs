@@ -509,22 +509,31 @@ public partial class ExcelHandler
                                 || !double.IsFinite(numDbl))
                                 throw new ArgumentException(
                                     $"Cannot store '{cellValue}' as number; use type=string or remove type=");
-                            cell.CellValue = new CellValue(cellValue);
+                            // R-fuzz2-1: TryParse accepts "+5" / padded spellings
+                            // Excel's <v> parser rejects — store canonical form.
+                            cell.CellValue = new CellValue(NormalizeNumericCellText(cellValue, numDbl));
                             cell.DataType = null;
                         }
                         else
                         {
-                            cell.CellValue = new CellValue(cellValue);
                             // R32-1: double.TryParse("NaN") returns true; without
                             // an IsFinite gate, the cell would be written with
                             // no t= attribute (numeric default) and content
                             // "NaN", which Excel rejects as invalid xs:double.
                             // Force string storage for non-finite doubles,
                             // matching how "Infinity" already behaves.
+                            // R-fuzz2-1: numeric text is stored in canonical form
+                            // ("+5" / "1,234" parse fine but corrupt <v> verbatim).
                             if (double.TryParse(cellValue, out var dbl) && double.IsFinite(dbl))
+                            {
+                                cell.CellValue = new CellValue(NormalizeNumericCellText(cellValue, dbl));
                                 cell.DataType = null;
+                            }
                             else
+                            {
+                                cell.CellValue = new CellValue(cellValue);
                                 cell.DataType = new EnumValue<CellValues>(CellValues.String);
+                            }
                         }
                     }
                     break;
@@ -791,7 +800,29 @@ public partial class ExcelHandler
                     existing.Tooltip = string.IsNullOrEmpty(value) ? null : value;
                     break;
                 }
+                case "runs":
+                    // Consumed by ApplyRichTextToCell (the type=richtext case
+                    // above); without this case the key falls through to the
+                    // unsupported list even though it WAS applied — a false
+                    // "UNSUPPORTED props: runs" on every dump→batch replay of a
+                    // richtext cell. CE1 parity with Add: runs= without type=
+                    // implies richtext.
+                    if (!properties.Keys.Any(k => k.Equals("type", StringComparison.OrdinalIgnoreCase)))
+                        ApplyRichTextToCell(cell, properties);
+                    else if (!properties.Any(p => p.Key.Equals("type", StringComparison.OrdinalIgnoreCase)
+                             && (p.Value.Equals("richtext", StringComparison.OrdinalIgnoreCase)
+                                 || p.Value.Equals("rich", StringComparison.OrdinalIgnoreCase))))
+                        unsupported.Add("runs (only valid with type=richtext)");
+                    break;
                 default:
+                    // Legacy richtext mini-spec keys (run1=, run2=, …) are read
+                    // inside ApplyRichTextToCell — same false-unsupported hole
+                    // as `runs` above.
+                    if (System.Text.RegularExpressions.Regex.IsMatch(key, @"^run\d+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                        && properties.Any(p => p.Key.Equals("type", StringComparison.OrdinalIgnoreCase)
+                            && (p.Value.Equals("richtext", StringComparison.OrdinalIgnoreCase)
+                                || p.Value.Equals("rich", StringComparison.OrdinalIgnoreCase))))
+                        break;
                     // Check for known flat-key misuse first, even before generic
                     // attribute fallback — otherwise user typos like `size=14`
                     // would be silently written as unknown XML attributes.

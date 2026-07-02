@@ -588,6 +588,33 @@ internal class ExcelStyleManager
                 "\"(\"000\") \"000-0000); writing an unclosed literal makes Excel " +
                 "refuse to open the file.");
 
+        // Excel's format grammar allows at most 4 ;-separated sections
+        // (positive;negative;zero;text). A 5th section is invisible to schema
+        // validation but real Excel refuses the file (0x800A03EC). Count only
+        // separators outside "quoted literals", [brackets] and \-escapes.
+        int nfSections = 1;
+        bool nfInQuote = false, nfInBracket = false;
+        for (int i = 0; i < formatCode.Length; i++)
+        {
+            var c = formatCode[i];
+            if (c == '"') nfInQuote = !nfInQuote;
+            else if (!nfInQuote && c == '[') nfInBracket = true;
+            else if (!nfInQuote && c == ']') nfInBracket = false;
+            else if (!nfInQuote && c == '\\') i++;
+            else if (!nfInQuote && !nfInBracket && c == ';') nfSections++;
+        }
+        if (nfSections > 4)
+            throw new ArgumentException(
+                $"number format has {nfSections} sections: '{formatCode}'. Excel allows " +
+                "at most 4 (positive;negative;zero;text); more makes Excel refuse to open the file.");
+
+        // Excel caps format codes at 255 chars; schema validate flags it but
+        // the write path should fail fast rather than rely on a separate
+        // validate run.
+        if (formatCode.Length > 255)
+            throw new ArgumentException(
+                $"number format is {formatCode.Length} chars; Excel's limit is 255.");
+
         // Check built-in formats
         var builtinMap = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase)
         {

@@ -145,6 +145,13 @@ public partial class ExcelHandler
                 rowNode.Format["height"] = $"{row.Height.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}pt";
             if (row.Hidden?.Value == true)
                 rowNode.Format["hidden"] = true;
+            // CONSISTENCY(nested-get-parity): the same node fetched directly
+            // (Query.cs row path) exposes outlineLevel/collapsed — the nested
+            // sheet-children view must return the identical Format dict.
+            if (row.OutlineLevel?.HasValue == true && row.OutlineLevel.Value > 0)
+                rowNode.Format["outlineLevel"] = (int)row.OutlineLevel.Value;
+            if (row.Collapsed?.Value == true)
+                rowNode.Format["collapsed"] = true;
 
             if (depth > 0)
             {

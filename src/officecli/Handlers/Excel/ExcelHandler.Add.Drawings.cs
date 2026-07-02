@@ -92,7 +92,7 @@ public partial class ExcelHandler
             // Add call would be ambiguous and are silently dropped.
             // Warn loudly rather than fail, so existing scripts keep
             // working but users notice the dropped value.
-            if (properties.ContainsKey("width") || properties.ContainsKey("height"))
+            if (properties.ContainsKey("width") | properties.ContainsKey("height"))
                 Console.Error.WriteLine(
                     "Warning: 'width'/'height' are ignored when 'anchor' is provided (anchor defines the full rectangle).");
             var m = Regex.Match(oleAnchorStr, @"^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$", RegexOptions.IgnoreCase);
@@ -320,8 +320,8 @@ public partial class ExcelHandler
             if (!TryParseCellRangeAnchor(picAnchorRaw, out picRangeFromCol, out picRangeFromRow, out picRangeToCol, out picRangeToRow))
                 throw new ArgumentException($"Invalid anchor: '{picAnchorRaw}'. Expected e.g. 'B2', 'B2:E6', or one of 'oneCell'/'twoCell'/'absolute'.");
             picHasRange = true;
-            if (properties.ContainsKey("width") || properties.ContainsKey("height")
-                || properties.ContainsKey("x") || properties.ContainsKey("y"))
+            if (properties.ContainsKey("width") | properties.ContainsKey("height")
+                | properties.ContainsKey("x") | properties.ContainsKey("y"))
                 Console.Error.WriteLine(
                     "Warning: 'x'/'y'/'width'/'height' are ignored when 'anchor' is a cell range (anchor defines the full rectangle).");
         }
@@ -548,8 +548,8 @@ public partial class ExcelHandler
         int sx, sy, sw, sh;
         if (properties.TryGetValue("anchor", out var shpAnchorStr) && !string.IsNullOrWhiteSpace(shpAnchorStr))
         {
-            if (properties.ContainsKey("width") || properties.ContainsKey("height")
-                || properties.ContainsKey("x") || properties.ContainsKey("y"))
+            if (properties.ContainsKey("width") | properties.ContainsKey("height")
+                | properties.ContainsKey("x") | properties.ContainsKey("y"))
                 Console.Error.WriteLine(
                     "Warning: 'x'/'y'/'width'/'height' are ignored when 'anchor' is provided (anchor defines the full rectangle).");
             if (!TryParseCellRangeAnchor(shpAnchorStr, out var sxFrom, out var syFrom, out var sxTo, out var syTo))

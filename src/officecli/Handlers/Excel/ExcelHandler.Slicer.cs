@@ -575,8 +575,8 @@ public partial class ExcelHandler
         // let anchor= win.
         if (properties.TryGetValue("anchor", out var slAnchorStr) && !string.IsNullOrWhiteSpace(slAnchorStr))
         {
-            if (properties.ContainsKey("width") || properties.ContainsKey("height")
-                || properties.ContainsKey("x") || properties.ContainsKey("y"))
+            if (properties.ContainsKey("width") | properties.ContainsKey("height")
+                | properties.ContainsKey("x") | properties.ContainsKey("y"))
                 Console.Error.WriteLine(
                     "Warning: 'x'/'y'/'width'/'height' are ignored when 'anchor' is provided (anchor defines the full rectangle).");
             if (!TryParseCellRangeAnchor(slAnchorStr, out var sxFrom, out var syFrom, out var sxTo, out var syTo))

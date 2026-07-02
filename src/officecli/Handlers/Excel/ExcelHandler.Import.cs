@@ -242,11 +242,7 @@ public partial class ExcelHandler
             // would corrupt them. Normalization is kept for the non-canonical
             // spellings double.TryParse accepts (whitespace padding,
             // thousands separators, "Infinity"/"NaN").
-            var isCanonicalNumericLiteral = System.Text.RegularExpressions.Regex.IsMatch(
-                value, @"^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$");
-            cell.CellValue = new CellValue(isCanonicalNumericLiteral
-                ? value
-                : numVal.ToString(CultureInfo.InvariantCulture));
+            cell.CellValue = new CellValue(NormalizeNumericCellText(value, numVal));
             cell.DataType = null; // numeric is default
             return;
         }
