@@ -870,6 +870,39 @@ public static partial class PptxBatchEmitter
         // poster image rel.
         EmitExternalMediaForSlide(ppt, slideNum, slidePath, items, ctx);
 
+        // Bitmap glyph fills: any textFillRaw prop emitted for this slide's
+        // runs carries an <a:blipFill r:embed="rIdN"> whose ImagePart must be
+        // re-created with the pinned rId or the spliced XML dangles
+        // (sample10 WordArt picture fill). Scan the slide's raw XML for
+        // rPr-level blipFill embeds and carry each once.
+        try
+        {
+            var rawSlide = ppt.Raw(slidePath);
+            var tfRids = new HashSet<string>(StringComparer.Ordinal);
+            foreach (System.Text.RegularExpressions.Match m in
+                     System.Text.RegularExpressions.Regex.Matches(rawSlide,
+                         @"<a:rPr[^>]*>(?:(?!</a:rPr>).)*?<a:blipFill[^>]*>(?:(?!</a:blipFill>).)*?r:embed=""(rId\d+)""",
+                         System.Text.RegularExpressions.RegexOptions.Singleline))
+                tfRids.Add(m.Groups[1].Value);
+            if (tfRids.Count > 0)
+            {
+                foreach (var img in ppt.GetSlideImagePartsByRelId(slideNum, tfRids))
+                    items.Add(new BatchItem
+                    {
+                        Command = "add-part",
+                        Parent = slidePath,
+                        Type = "image",
+                        Props = new Dictionary<string, string>
+                        {
+                            ["rid"] = img.RelId,
+                            ["content-type"] = img.ContentType,
+                            ["data"] = img.Base64Data,
+                        },
+                    });
+            }
+        }
+        catch { /* best-effort */ }
+
         // Timing / transition SOUND relationships: <p:sndTgt r:embed> in the
         // raw-passed-through <p:timing> tree (and <p:snd r:embed> in a
         // <p:transition>) reference a bare `.../audio` rel that the media pass

@@ -761,6 +761,18 @@ public partial class PowerPointHandler
                 // Symmetric with the Set branch in ShapeProperties.cs. Schema
                 // order is enforced by ReorderDrawingRunProperties at the end
                 // of this method (already invoked for endParaRPr inheritance).
+                // Verbatim <a:blipFill> glyph fill (WordArt picture fill).
+                if ((properties.TryGetValue("textFillRaw", out var rTfRaw)
+                        || properties.TryGetValue("textfillraw", out rTfRaw))
+                    && !string.IsNullOrWhiteSpace(rTfRaw))
+                {
+                    rProps.RemoveAllChildren<Drawing.SolidFill>();
+                    rProps.RemoveAllChildren<Drawing.GradientFill>();
+                    rProps.RemoveAllChildren<Drawing.BlipFill>();
+                    rProps.RemoveAllChildren<Drawing.PatternFill>();
+                    InsertFillInRunProperties(rProps, new Drawing.BlipFill(rTfRaw));
+                }
+
                 // Verbatim <a:ln> (dash pattern / gradient stroke / cap-join —
                 // everything the width:color compound can't express). Wins over
                 // the semantic keys; the emitter suppresses them when present.

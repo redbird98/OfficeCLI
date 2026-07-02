@@ -371,6 +371,17 @@ public partial class PowerPointHandler
                     // (manual letterbox padding inside the picture frame) and
                     // negative insets (manual outset crop). R47 fixed the
                     // srcRect side; this is the stretch/fillRect counterpart.
+                    // Bare <a:stretch/> (no fillRect child): real PowerPoint
+                    // renders a negative-srcRect "outset crop" differently
+                    // with vs without an explicit <a:fillRect/> (sample17 —
+                    // the zoom vanished when replay added one). Preserve the
+                    // source's bare form when the dump flags it.
+                    if (properties.TryGetValue("stretchBare", out var sbVal)
+                        && IsTruthy(sbVal))
+                    {
+                        picture.BlipFill.AppendChild(new Drawing.Stretch());
+                        goto stretchDone;
+                    }
                     var fr = new Drawing.FillRectangle();
                     if (properties.TryGetValue("fillRect", out var frStr)
                         || properties.TryGetValue("fillrect", out frStr))
@@ -389,6 +400,7 @@ public partial class PowerPointHandler
                         }
                     }
                     picture.BlipFill.AppendChild(new Drawing.Stretch(fr));
+                    stretchDone: ;
                 }
 
                 picture.ShapeProperties = new ShapeProperties();
@@ -411,6 +423,12 @@ public partial class PowerPointHandler
                         new Drawing.PresetGeometry(new Drawing.AdjustValueList()) { Preset = ParsePresetShape(picGeomName) }
                     );
                 }
+
+                // Shape fill on the picture frame (paints wherever the image
+                // doesn't cover — negative srcRect outsets, sample17).
+                if (properties.TryGetValue("frameFill", out var picFrameFill)
+                    && !string.IsNullOrWhiteSpace(picFrameFill))
+                    picture.ShapeProperties.AppendChild(BuildSolidFill(picFrameFill));
 
                 // 3D on the picture's spPr — verbatim <a:scene3d>/<a:sp3d>
                 // carriers from PictureToNode (a 3D-rotated picture replayed

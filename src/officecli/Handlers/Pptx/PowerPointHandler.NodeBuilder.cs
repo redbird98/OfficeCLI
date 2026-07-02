@@ -2440,6 +2440,14 @@ public partial class PowerPointHandler
                     node.Format["textOutlineRaw"] = runOutline.OuterXml;
             }
 
+            // Bitmap text fill: <a:rPr><a:blipFill> paints the glyphs with an
+            // image (WordArt picture fill, sample10). No semantic key can
+            // express it — carry verbatim; the emitter also re-creates the
+            // referenced ImagePart with the pinned rId.
+            var runBlipFill = run.RunProperties.GetFirstChild<Drawing.BlipFill>();
+            if (runBlipFill != null)
+                node.Format["textFillRaw"] = runBlipFill.OuterXml;
+
             // Long-tail OOXML fallback. drawingML rPr carries most properties
             // as attributes on rPr itself (kern, spc, lang, dirty, smtClean,
             // normalizeH, baseline, ...), with sub-elements for fills/fonts/
@@ -2700,6 +2708,15 @@ public partial class PowerPointHandler
         if (picCustGeom != null)
             node.Format["customGeometryXml"] = picCustGeom.OuterXml;
 
+        // Shape fill ON the picture's spPr — visible wherever the image
+        // doesn't cover the frame (e.g. a negative srcRect outset leaves a
+        // border that the spPr fill paints; sample17's black surround).
+        // `fill` on picture Add is taken by the fit-mode alias, so use a
+        // dedicated key.
+        var picSpFill = ReadColorFromFill(pic.ShapeProperties?.GetFirstChild<Drawing.SolidFill>());
+        if (picSpFill != null)
+            node.Format["frameFill"] = picSpFill;
+
         // 3D on a picture: <a:scene3d>/<a:sp3d> on the pic's spPr (camera
         // rotation + extrusion/bevel). ShapeToNode reads these semantically
         // for shapes, but pictures had no readback at all — a 3D-rotated
@@ -2920,6 +2937,14 @@ public partial class PowerPointHandler
                 var fb = fr.Bottom?.Value;
                 if (fl.HasValue || ft.HasValue || frVal.HasValue || fb.HasValue)
                     node.Format["fillRect"] = $"{fl ?? 0},{ft ?? 0},{frVal ?? 0},{fb ?? 0}";
+            }
+            else
+            {
+                // Bare <a:stretch/> — real PowerPoint renders a negative
+                // srcRect differently with vs without an explicit
+                // <a:fillRect/> (sample17). Flag it so AddPicture writes
+                // the same bare form back.
+                node.Format["stretchBare"] = "true";
             }
         }
 

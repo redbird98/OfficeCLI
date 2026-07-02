@@ -102,6 +102,8 @@ public static partial class PptxBatchEmitter
         "textOutline", "textOutline.color", "textOutline.width",
         // Verbatim <a:ln> companion of textOutline — same run-only scope.
         "textOutlineRaw",
+        // Bitmap glyph fill — run-only scope too.
+        "textFillRaw",
     };
 
     // Pull a `link=slide[N]` prop out of the bag and queue a deferred `set`

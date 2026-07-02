@@ -582,6 +582,24 @@ public partial class PowerPointHandler
                 // `textOutline.color` allow additive Set without overwriting
                 // the other half. Schema order bucket 1 (ln) — ReorderDrawingRunProperties
                 // moves it before solidFill/latin/etc.
+                case "textFillRaw" or "textfillraw":
+                {
+                    // Verbatim <a:blipFill> glyph fill (WordArt picture fill,
+                    // sample10). The referenced ImagePart rides separately via
+                    // add-part image with the pinned rId.
+                    foreach (var run in runs)
+                    {
+                        var rp = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
+                        rp.RemoveAllChildren<Drawing.SolidFill>();
+                        rp.RemoveAllChildren<Drawing.GradientFill>();
+                        rp.RemoveAllChildren<Drawing.BlipFill>();
+                        rp.RemoveAllChildren<Drawing.PatternFill>();
+                        if (!string.IsNullOrWhiteSpace(value))
+                            InsertFillInRunProperties(rp, new Drawing.BlipFill(value));
+                    }
+                    break;
+                }
+
                 case "textOutlineRaw" or "textoutlineraw":
                 {
                     // Verbatim run <a:ln> — dash / gradient stroke / cap-join
