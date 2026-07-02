@@ -1957,8 +1957,8 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                 if (!properties.TryGetValue("chart", out var csOrdRaw) || !int.TryParse(csOrdRaw, out var csOrd))
                     throw new ArgumentException("add-part chartstyle requires property 'chart' (1-based chart ordinal)");
                 if (!properties.TryGetValue("kind", out var csKind)
-                    || csKind is not ("style" or "colors"))
-                    throw new ArgumentException("add-part chartstyle requires property 'kind' (style|colors)");
+                    || csKind is not ("style" or "colors" or "themeoverride"))
+                    throw new ArgumentException("add-part chartstyle requires property 'kind' (style|colors|themeoverride)");
                 if (!properties.TryGetValue("data", out var csB64) || string.IsNullOrEmpty(csB64))
                     throw new ArgumentException("add-part chartstyle requires property 'data' (base64)");
                 var csIdx = int.Parse(csm.Groups[1].Value);
@@ -1974,9 +1974,12 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                 byte[] csBytes;
                 try { csBytes = Convert.FromBase64String(csB64); }
                 catch (FormatException) { throw new ArgumentException("add-part chartstyle: 'data' is not valid base64"); }
-                OpenXmlPart csPart = csKind == "style"
-                    ? csChart.AddNewPart<ChartStylePart>(csRid)
-                    : csChart.AddNewPart<ChartColorStylePart>(csRid);
+                OpenXmlPart csPart = csKind switch
+                {
+                    "style" => csChart.AddNewPart<ChartStylePart>(csRid),
+                    "colors" => csChart.AddNewPart<ChartColorStylePart>(csRid),
+                    _ => csChart.AddNewPart<ThemeOverridePart>(csRid),
+                };
                 using (var css = new MemoryStream(csBytes)) csPart.FeedData(css);
                 return (csRid, parentPartPath);
             }
@@ -4574,6 +4577,10 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
             string kind;
             if (pair.OpenXmlPart is ChartStylePart) kind = "style";
             else if (pair.OpenXmlPart is ChartColorStylePart) kind = "colors";
+            // Theme override (themeOverride1.xml) — swaps the accent palette
+            // for THIS chart only; dropping it recolors every theme-inherited
+            // series.
+            else if (pair.OpenXmlPart is ThemeOverridePart) kind = "themeoverride";
             else continue;
             using var st = pair.OpenXmlPart.GetStream();
             using var ms = new MemoryStream();

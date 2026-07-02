@@ -557,6 +557,15 @@ internal static partial class ChartHelper
                 {
                     var numCache = BuildNumberingCacheFromLiteral(
                         valEl.GetFirstChild<C.NumberLiteral>(), blanks);
+                    // Source cache formatCode (series{N}.valuesNumFmt, e.g.
+                    // #,##0) — sourceLinked data labels render this format.
+                    if (numCache != null
+                        && properties.TryGetValue($"series{i + 1}.valuesNumFmt", out var vnf)
+                        && !string.IsNullOrWhiteSpace(vnf))
+                    {
+                        var fcEl = numCache.GetFirstChild<C.FormatCode>();
+                        if (fcEl != null) fcEl.Text = vnf;
+                    }
                     valEl.RemoveAllChildren();
                     var numRef = new C.NumberReference(new C.Formula(info.ValuesRef));
                     if (numCache != null)

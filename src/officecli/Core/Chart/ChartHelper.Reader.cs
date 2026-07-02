@@ -1046,20 +1046,38 @@ internal static partial class ChartHelper
                         seriesNode.Format["seriesOrder"] = srcOrder.Value.ToString();
                 }
 
-                // Source series with NO <c:spPr> inherit their fill from the
-                // theme accent cycle. Flag it so a replay suppresses the
-                // DefaultSeriesColors injection (which would pin a modern
-                // Office palette over the deck's own theme colors). Consumed
-                // by SeriesWithNoCapturedFill via series{N}.inheritFill.
-                if (serEl != null
-                    && serEl.GetFirstChild<C.ChartShapeProperties>() == null)
-                    seriesNode.Format["inheritFill"] = "true";
+                // Source series with no explicit color (no <c:spPr> at all,
+                // OR an spPr that only sets geometry like <a:ln w=…> without
+                // any fill) inherit their color from the theme accent cycle.
+                // Flag it so a replay suppresses the DefaultSeriesColors
+                // injection (which would pin a modern Office palette over
+                // the deck's own theme colors). Consumed by
+                // SeriesWithNoCapturedFill via series{N}.inheritFill.
+                if (serEl != null)
+                {
+                    var serSpPrEl = serEl.GetFirstChild<C.ChartShapeProperties>();
+                    bool hasExplicitColor = serSpPrEl != null
+                        && serSpPrEl.Descendants().Any(d => d.LocalName
+                            is "solidFill" or "gradFill" or "pattFill" or "blipFill" or "noFill");
+                    if (!hasExplicitColor)
+                        seriesNode.Format["inheritFill"] = "true";
+                }
 
                 // Cell reference formulas (for series with NumberReference/StringReference)
                 if (serEl != null)
                 {
                     var valRef = ReadFormulaRef(serEl.GetFirstChild<C.Values>());
                     if (valRef != null) seriesNode.Format["valuesRef"] = valRef;
+
+                    // Source numCache formatCode (e.g. #,##0). Data labels
+                    // with numFmt sourceLinked=1 render THIS format — losing
+                    // it drops thousands separators ("220,000" → "220000").
+                    var valCacheFmt = serEl.GetFirstChild<C.Values>()
+                        ?.GetFirstChild<C.NumberReference>()
+                        ?.GetFirstChild<C.NumberingCache>()
+                        ?.GetFirstChild<C.FormatCode>()?.Text;
+                    if (!string.IsNullOrEmpty(valCacheFmt) && valCacheFmt != "General")
+                        seriesNode.Format["valuesNumFmt"] = valCacheFmt;
                     var catRef = ReadFormulaRef(serEl.GetFirstChild<C.CategoryAxisData>());
                     if (catRef != null) seriesNode.Format["categoriesRef"] = catRef;
 

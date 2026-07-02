@@ -207,7 +207,10 @@ public static partial class PptxBatchEmitter
                     "seriesIdx", "seriesOrder",
                     // Verbatim per-series <c:dLbls> (per-point dLbl / numFmt /
                     // separator — beyond the dataLabels flag summary).
-                    "dlbls" })
+                    "dlbls",
+                    // Source numCache formatCode — sourceLinked data labels
+                    // render this format (thousands separators etc.).
+                    "valuesNumFmt" })
                 {
                     if (s.Format.TryGetValue(key, out var val) && val != null)
                     {
