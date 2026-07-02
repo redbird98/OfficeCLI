@@ -495,8 +495,20 @@ public partial class ExcelHandler
                     {
                         var (colNumFmtId, colFmtCode) = ExcelDataFormatter.GetCellFormat(
                             new Cell { StyleIndex = colStyleIdx }, _doc.WorkbookPart);
-                        if (colNumFmtId > 0 && !string.IsNullOrEmpty(colFmtCode))
-                            colNode.Format["numberformat"] = colFmtCode;
+                        // A built-in numFmtId (e.g. 4 = "#,##0.00") carries no
+                        // <numFmt> entry in the styles part, so GetCellFormat
+                        // returns a null code for it. Resolve the built-in code
+                        // so column Get surfaces `numberformat` the same way the
+                        // cell reader does (CellToNode's built-in id map).
+                        if (colNumFmtId > 0)
+                        {
+                            var colCode = !string.IsNullOrEmpty(colFmtCode)
+                                ? colFmtCode
+                                : ExcelDataFormatter.ResolveBuiltInFormatCode(colNumFmtId);
+                            if (!string.IsNullOrEmpty(colCode))
+                                colNode.Format["numberformat"] = colCode;
+                            colNode.Format["numFmtId"] = (int)colNumFmtId;
+                        }
                     }
                     // Long-tail CT_Col attributes (style, bestFit, phonetic, ...).
                     // Symmetric with column Set's case-preserving SetAttribute fallback.

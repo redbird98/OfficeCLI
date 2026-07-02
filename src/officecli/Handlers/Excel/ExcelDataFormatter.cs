@@ -60,6 +60,16 @@ internal static class ExcelDataFormatter
     private static readonly Regex BracketCodeRegex = new(@"\[[^\]]*\]", RegexOptions.Compiled);
 
     /// <summary>
+    /// Resolve a built-in numFmtId to its canonical format-code string
+    /// (ECMA-376 Part 1, 18.8.30). Returns null for ids that carry no
+    /// implied code (a truly-custom id whose code lives in the styles part,
+    /// or an unknown id). Callers use this to surface a built-in number
+    /// format whose code is NOT stored in <numFmt> — mirrors the cell reader.
+    /// </summary>
+    public static string? ResolveBuiltInFormatCode(uint numFmtId) =>
+        BuiltInFormats.TryGetValue(numFmtId, out var code) ? code : null;
+
+    /// <summary>
     /// Format a raw numeric cell value using its number format.
     /// Returns null if no formatting is needed (raw value is fine as-is).
     /// </summary>
