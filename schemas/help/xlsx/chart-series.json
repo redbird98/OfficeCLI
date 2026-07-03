@@ -4,17 +4,17 @@
   "element": "chart-series",
   "parent": "chart",
   "operations": {
-    "add": true,
+    "add": false,
     "set": true,
     "get": true,
-    "remove": true
+    "remove": false
   },
   "paths": {
     "positional": [
       "/SheetName/chart[N]/series[K]"
     ]
   },
-  "note": "At Add time, series pass as dotted props on the parent chart (series1.name, series1.values, series1.color, series1.categories); this schema is per-series Set/Get after creation. Combo charts (mixed chartType / secondary axis) are unsupported — create separate charts. `lineStyle` is not a key (rejected as UNSUPPORTED — use lineWidth + lineDash).",
+  "note": "At Add time, series pass as dotted props on the parent chart (series1.name, series1.values, series1.color, series1.categories); this schema is per-series Set/Get after creation. Combo charts (mixed chartType / secondary axis) are unsupported — create separate charts. `lineStyle` is not a key (rejected as UNSUPPORTED — use lineWidth + lineDash). add/remove are NOT supported on this element: series are declared at chart-creation time via the dotted props and cannot be appended or deleted individually afterward (recreate the chart with the full series list instead).",
   "extends": [
     "_shared/chart-series",
     "_shared/chart-series.pptx-xlsx"

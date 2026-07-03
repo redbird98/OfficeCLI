@@ -627,9 +627,22 @@ public partial class ExcelHandler
                     break;
                 case "arrayformula":
                 {
-                    RejectCrossWorkbookFormula(value);
+                    // Flag form (arrayformula=true): convert the cell's
+                    // existing/companion formula rather than writing the
+                    // literal "true" as formula text (silent corruption).
+                    var arrText = value;
+                    if (arrText.Equals("true", StringComparison.OrdinalIgnoreCase)
+                        || arrText == "1"
+                        || arrText.Equals("yes", StringComparison.OrdinalIgnoreCase))
+                    {
+                        arrText = properties.GetValueOrDefault("formula")
+                            ?? cell.CellFormula?.Text
+                            ?? throw new ArgumentException(
+                                "arrayformula=true requires a formula: pass the text directly (arrayformula=\"B1:B3*C1:C3\") or combine with formula=, or set it on a cell that already has a formula.");
+                    }
+                    RejectCrossWorkbookFormula(arrText);
                     var arrRef = properties.GetValueOrDefault("ref", cellRef);
-                    cell.CellFormula = new CellFormula(Core.PivotTableHelper.SanitizeXmlText(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(value.TrimStart('=')))))
+                    cell.CellFormula = new CellFormula(Core.PivotTableHelper.SanitizeXmlText(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(arrText.TrimStart('=')))))
                     {
                         FormulaType = CellFormulaValues.Array,
                         Reference = arrRef

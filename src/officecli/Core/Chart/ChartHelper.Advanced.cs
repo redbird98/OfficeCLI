@@ -666,7 +666,36 @@ internal static partial class ChartHelper
         if (idx != null) target.AppendChild(idx.CloneNode(true));
         if (order != null) target.AppendChild(order.CloneNode(true));
         if (tx != null) target.AppendChild(tx.CloneNode(true));
-        if (spPr != null) target.AppendChild(spPr.CloneNode(true));
+        if (spPr != null)
+        {
+            var spPrClone = (OpenXmlCompositeElement)spPr.CloneNode(true);
+            // Line-based series carry their color on the stroke
+            // (<a:ln><a:solidFill>); a bare <a:solidFill> cloned from an
+            // area/bar source is stroke-inert (real Office ignores it and
+            // renders the theme color), AND the dump reads it as the series
+            // color and replays it as an <a:ln> stroke — a first-round
+            // dump→replay drift. Rewrap the fill as the stroke here.
+            if (targetType is "line" or "scatter")
+            {
+                var bareFill = spPrClone.ChildElements
+                    .FirstOrDefault(e => e.LocalName == "solidFill");
+                var hasLn = spPrClone.ChildElements.Any(e => e.LocalName == "ln");
+                if (bareFill != null && !hasLn)
+                {
+                    bareFill.Remove();
+                    var outline = new Drawing.Outline { Width = 25400 }; // 2pt, same as ApplySeriesColor
+                    outline.AppendChild(bareFill);
+                    // CT_ShapeProperties order puts <a:ln> after the fill
+                    // group; the fill was just removed, so insert before any
+                    // effect/3d/ext tail else append.
+                    var lnBefore = spPrClone.ChildElements.FirstOrDefault(e =>
+                        e.LocalName is "effectLst" or "effectDag" or "scene3d" or "sp3d" or "extLst");
+                    if (lnBefore != null) spPrClone.InsertBefore(outline, lnBefore);
+                    else spPrClone.AppendChild(outline);
+                }
+            }
+            target.AppendChild(spPrClone);
+        }
 
         // invertIfNegative only valid on bar series; marker on line/scatter
         if (targetType is "bar" or "column" or "col")

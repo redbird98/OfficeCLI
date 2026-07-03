@@ -685,6 +685,20 @@ public partial class ExcelHandler
         // Array formula support during Add
         if (properties.TryGetValue("arrayformula", out var arrFormula))
         {
+            // arrayformula=true|1|yes is flag intent ("make my formula= an
+            // array formula"), not formula text. Writing it verbatim replaced
+            // the real formula with the literal string "true" — silent
+            // corruption. Substitute the companion formula= text; without one
+            // there is nothing to convert, so reject clearly.
+            if (arrFormula.Equals("true", StringComparison.OrdinalIgnoreCase)
+                || arrFormula == "1"
+                || arrFormula.Equals("yes", StringComparison.OrdinalIgnoreCase))
+            {
+                arrFormula = properties.GetValueOrDefault("formula")
+                    ?? cell.CellFormula?.Text
+                    ?? throw new ArgumentException(
+                        "arrayformula=true requires a formula: pass the text directly (arrayformula=\"B1:B3*C1:C3\") or combine with formula=.");
+            }
             RejectCrossWorkbookFormula(arrFormula);
             ValidateFormulaCellRefs(arrFormula);
             // BUG-R36-B1: if ref was a range (A1:C3), use the full range as
