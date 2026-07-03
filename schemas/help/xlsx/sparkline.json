@@ -164,6 +164,43 @@
       "examples": ["--prop lineWeight=1.5"],
       "readback": "number",
       "enforcement": "report"
+    },
+    "displayEmptyCellsAs": {
+      "type": "enum",
+      "values": ["gap", "zero", "span"],
+      "description": "how empty cells in the data range are plotted.",
+      "aliases": ["displayemptycellsas"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop displayEmptyCellsAs=zero"],
+      "readback": "gap|zero|span",
+      "enforcement": "report"
+    },
+    "displayXAxis": {
+      "type": "bool",
+      "description": "show the horizontal axis when data crosses zero.",
+      "aliases": ["displayxaxis"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop displayXAxis=true"],
+      "readback": "true|false",
+      "enforcement": "report"
+    },
+    "rightToLeft": {
+      "type": "bool",
+      "description": "plot the sparkline right-to-left.",
+      "aliases": ["righttoleft"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop rightToLeft=true"],
+      "readback": "true|false",
+      "enforcement": "report"
+    },
+    "dateAxis": {
+      "type": "bool",
+      "description": "treat the data range as a date axis (uneven spacing by date).",
+      "aliases": ["dateaxis"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop dateAxis=true"],
+      "readback": "true|false",
+      "enforcement": "report"
     }
   }
 }

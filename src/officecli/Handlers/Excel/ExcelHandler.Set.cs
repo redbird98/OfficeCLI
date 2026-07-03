@@ -716,6 +716,8 @@ public partial class ExcelHandler
                         var setHlTip = properties.GetValueOrDefault("tooltip")
                             ?? properties.GetValueOrDefault("screenTip")
                             ?? properties.GetValueOrDefault("screentip");
+                        // H2b: optional display= friendly text (OOXML @display).
+                        var setHlDisplay = properties.GetValueOrDefault("display");
                         // R37-B: also accept bare `SheetName!Cell` (no '#' prefix)
                         // and quoted `'Multi Word'!Cell` as internal targets.
                         // CONSISTENCY(internal-hyperlink): same detection used in Add.Cells.cs.
@@ -731,6 +733,7 @@ public partial class ExcelHandler
                                 Location = internalLoc
                             };
                             if (!string.IsNullOrEmpty(setHlTip)) hl.Tooltip = setHlTip;
+                            if (!string.IsNullOrEmpty(setHlDisplay)) hl.Display = setHlDisplay;
                             hyperlinksEl.AppendChild(hl);
                         }
                         else
@@ -745,6 +748,7 @@ public partial class ExcelHandler
                             var hlRel = worksheet.AddHyperlinkRelationship(hlUri, isExternal: true);
                             var hl = new Hyperlink { Reference = cellRef.ToUpperInvariant(), Id = hlRel.Id };
                             if (!string.IsNullOrEmpty(setHlTip)) hl.Tooltip = setHlTip;
+                            if (!string.IsNullOrEmpty(setHlDisplay)) hl.Display = setHlDisplay;
                             hyperlinksEl.AppendChild(hl);
                         }
                         // H3: apply the built-in "Hyperlink" cellStyle (blue +
@@ -827,6 +831,22 @@ public partial class ExcelHandler
                         break;
                     }
                     existing.Tooltip = string.IsNullOrEmpty(value) ? null : value;
+                    break;
+                }
+                case "display":
+                {
+                    // H2b: display may also be applied to an EXISTING hyperlink,
+                    // or is consumed as a sibling of link= above (idempotent).
+                    var ws = GetSheet(worksheet);
+                    var hyperlinksEl = ws.GetFirstChild<Hyperlinks>();
+                    var existing = hyperlinksEl?.Elements<Hyperlink>()
+                        .FirstOrDefault(h => h.Reference?.Value?.Equals(cellRef, StringComparison.OrdinalIgnoreCase) == true);
+                    if (existing == null)
+                    {
+                        unsupported.Add($"display (no hyperlink exists on {cellRef}; add a link first)");
+                        break;
+                    }
+                    existing.Display = string.IsNullOrEmpty(value) ? null : value;
                     break;
                 }
                 case "runs":

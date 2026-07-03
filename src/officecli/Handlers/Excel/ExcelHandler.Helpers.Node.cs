@@ -80,6 +80,21 @@ public partial class ExcelHandler
         if (spkGroup.LineWeight?.HasValue == true)
             node.Format["lineWeight"] = spkGroup.LineWeight.Value;
 
+        // Group-level axis / empty-cell / RTL attributes. Add/Set persist these
+        // into the x14 group; without the readback they were invisible to Get
+        // and silently dropped by dump round-trips.
+        if (spkGroup.DisplayEmptyCellsAs?.HasValue == true)
+        {
+            var de = spkGroup.DisplayEmptyCellsAs.Value;
+            node.Format["displayEmptyCellsAs"] =
+                de == X14.DisplayBlanksAsValues.Gap ? "gap"
+                : de == X14.DisplayBlanksAsValues.Span ? "span"
+                : "zero";
+        }
+        if (spkGroup.DisplayXAxis?.Value == true) node.Format["displayXAxis"] = true;
+        if (spkGroup.RightToLeft?.Value == true) node.Format["rightToLeft"] = true;
+        if (spkGroup.DateAxis?.Value == true) node.Format["dateAxis"] = true;
+
         // Cell / range from first sparkline element
         var firstSparkline = spkGroup.GetFirstChild<X14.Sparklines>()?.GetFirstChild<X14.Sparkline>();
         if (firstSparkline != null)
@@ -427,6 +442,12 @@ public partial class ExcelHandler
             if (hyperlink?.Tooltip?.Value is { Length: > 0 } hlTooltip)
                 node.Format["tooltip"] = hlTooltip;
 
+            // Display readback — the @display attribute is the friendly text
+            // Excel shows for the link; without this emit it was invisible to
+            // Get and silently dropped by dump round-trips.
+            if (hyperlink?.Display?.Value is { Length: > 0 } hlDisplay)
+                node.Format["display"] = hlDisplay;
+
             // Border readback from stylesheet
             var styleIndex = cell.StyleIndex?.Value ?? 0;
             var wbStylesPart = _doc.WorkbookPart?.WorkbookStylesPart;
@@ -454,7 +475,10 @@ public partial class ExcelHandler
                             // normalize to the canonical key so set->get round-trips.
                             if (font.Strike != null) node.Format["strike"] = true;
                             if (font.Underline != null)
-                                node.Format["underline"] = font.Underline.Val?.InnerText == "double" ? "double" : "single";
+                            {
+                                var uCanon = OfficeCli.Core.ExcelStyleManager.NormalizeStoredUnderline(font.Underline.Val?.InnerText);
+                                if (uCanon != null) node.Format["underline"] = uCanon;
+                            }
                             if (font.Color?.Rgb?.Value != null)
                                 node.Format["font.color"] = ParseHelpers.FormatHexColor(font.Color.Rgb.Value);
                             else if (font.Color?.Theme?.Value != null)
@@ -518,7 +542,26 @@ public partial class ExcelHandler
                             else
                             {
                                 var pf = fill.PatternFill;
-                                if (pf?.ForegroundColor?.Rgb?.Value != null)
+                                // Non-solid pattern fills (lightGray, darkGrid, …)
+                                // carry a pattern type plus fg/bg colors that must
+                                // all survive round-trip. Solid/none keep the
+                                // legacy single-color `fill` readback so existing
+                                // behavior is unchanged.
+                                var patType = pf?.PatternType?.Value;
+                                bool nonSolidPattern = patType != null
+                                    && patType != PatternValues.Solid
+                                    && patType != PatternValues.None;
+                                if (nonSolidPattern)
+                                {
+                                    // Emit the OOXML wire name (e.g. "lightGray"),
+                                    // not the enum struct's ToString.
+                                    node.Format["fillPattern"] = pf!.PatternType!.InnerText;
+                                    if (pf!.ForegroundColor?.Rgb?.Value != null)
+                                        node.Format["fill"] = ParseHelpers.FormatHexColor(pf.ForegroundColor.Rgb.Value);
+                                    if (pf.BackgroundColor?.Rgb?.Value != null)
+                                        node.Format["fillBg"] = ParseHelpers.FormatHexColor(pf.BackgroundColor.Rgb.Value);
+                                }
+                                else if (pf?.ForegroundColor?.Rgb?.Value != null)
                                     node.Format["fill"] = ParseHelpers.FormatHexColor(pf.ForegroundColor.Rgb.Value);
                                 else if (pf?.ForegroundColor?.Theme?.Value != null)
                                 {
@@ -826,6 +869,100 @@ public partial class ExcelHandler
         return rPr;
     }
 
+    // Serialize a multi-run comment's runs into the `runs=<json>` array
+    // BuildCommentTextFromRuns consumes. Vocabulary mirrors SerializeRichTextRuns.
+    internal static string SerializeCommentRuns(List<Run> runs)
+    {
+        var arr = new System.Text.Json.Nodes.JsonArray();
+        foreach (var run in runs)
+        {
+            var o = new System.Text.Json.Nodes.JsonObject { ["text"] = run.Text?.Text ?? "" };
+            var rp = run.RunProperties;
+            if (rp != null)
+            {
+                if (rp.GetFirstChild<Bold>() != null) o["bold"] = true;
+                if (rp.GetFirstChild<Italic>() != null) o["italic"] = true;
+                if (rp.GetFirstChild<Strike>() != null) o["strike"] = true;
+                var ul = rp.GetFirstChild<Underline>();
+                if (ul != null) o["underline"] = ul.Val?.InnerText == "double" ? "double" : "single";
+                var va = rp.GetFirstChild<VerticalTextAlignment>();
+                if (va?.Val?.Value == VerticalAlignmentRunValues.Superscript) o["superscript"] = true;
+                if (va?.Val?.Value == VerticalAlignmentRunValues.Subscript) o["subscript"] = true;
+                var sz = rp.GetFirstChild<FontSize>();
+                if (sz?.Val?.Value != null) o["size"] = $"{sz.Val.Value:0.##}pt";
+                var clr = rp.GetFirstChild<Color>();
+                if (clr?.Rgb?.Value != null) o["color"] = ParseHelpers.FormatHexColor(clr.Rgb.Value!);
+                var rf = rp.GetFirstChild<RunFont>();
+                if (rf?.Val?.Value != null) o["font"] = rf.Val.Value!;
+            }
+            arr.Add(o);
+        }
+        return arr.ToJsonString();
+    }
+
+    // Build a CommentText from a `runs=<json array>` value, one <r> per run
+    // carrying its own <rPr>. Run vocabulary mirrors rich-text cells
+    // (bold/italic/strike/underline/superscript/subscript/size/color/font) so
+    // the two paths share one input contract. Comment runs keep the Tahoma-9
+    // indexed-81 default for facets a run leaves unspecified.
+    internal static CommentText BuildCommentTextFromRuns(string runsJson)
+    {
+        System.Text.Json.Nodes.JsonArray? arr;
+        try { arr = System.Text.Json.Nodes.JsonNode.Parse(runsJson) as System.Text.Json.Nodes.JsonArray; }
+        catch (System.Text.Json.JsonException ex)
+        {
+            throw new ArgumentException($"comment runs: invalid JSON array — {ex.Message}");
+        }
+        if (arr == null)
+            throw new ArgumentException("comment runs: value must be a JSON array");
+
+        var ct = new CommentText();
+        foreach (var item in arr)
+        {
+            if (item is not System.Text.Json.Nodes.JsonObject o) continue;
+            var text = o["text"]?.GetValue<string>() ?? "";
+            OfficeCli.Core.ParseHelpers.ValidateXmlText(text, "comment run text");
+
+            var rPr = new RunProperties();
+            bool RunBool(string key) => o[key] is { } n
+                && (n.GetValueKind() == System.Text.Json.JsonValueKind.True
+                    || (n.GetValueKind() == System.Text.Json.JsonValueKind.String && IsTruthy(n.GetValue<string>())));
+
+            if (RunBool("bold")) rPr.AppendChild(new Bold());
+            if (RunBool("italic")) rPr.AppendChild(new Italic());
+            if (RunBool("strike")) rPr.AppendChild(new Strike());
+            var uStr = o["underline"]?.GetValue<string>();
+            if (!string.IsNullOrEmpty(uStr) && !string.Equals(uStr, "none", StringComparison.OrdinalIgnoreCase))
+            {
+                rPr.AppendChild(new Underline
+                {
+                    Val = string.Equals(uStr, "double", StringComparison.OrdinalIgnoreCase)
+                        ? UnderlineValues.Double : UnderlineValues.Single
+                });
+            }
+            if (RunBool("superscript"))
+                rPr.AppendChild(new VerticalTextAlignment { Val = VerticalAlignmentRunValues.Superscript });
+            else if (RunBool("subscript"))
+                rPr.AppendChild(new VerticalTextAlignment { Val = VerticalAlignmentRunValues.Subscript });
+
+            var szStr = o["size"]?.GetValue<string>();
+            rPr.AppendChild(new FontSize { Val = szStr != null ? ParseHelpers.ParseFontSize(szStr) : 9.0 });
+
+            var colStr = o["color"]?.GetValue<string>();
+            if (!string.IsNullOrWhiteSpace(colStr))
+                rPr.AppendChild(new Color { Rgb = ParseHelpers.NormalizeArgbColor(colStr) });
+            else
+                rPr.AppendChild(new Color { Indexed = 81 });
+
+            var fontStr = o["font"]?.GetValue<string>();
+            rPr.AppendChild(new RunFont { Val = string.IsNullOrWhiteSpace(fontStr) ? "Tahoma" : fontStr });
+
+            ct.AppendChild(new Run(rPr,
+                new Text(text.Replace("\r\n", "\n")) { Space = SpaceProcessingModeValues.Preserve }));
+        }
+        return ct;
+    }
+
     // ==================== Data Validation Helpers ====================
 
     private DocumentNode TableToNode(string sheetName, WorksheetPart worksheetPart, int tableIndex, int depth)
@@ -902,8 +1039,18 @@ public partial class ExcelHandler
         // CONSISTENCY(xlsx/comment-font): C8 — surface font.* from first run's
         // rPr so Query/Get round-trips the Add-time formatting. Only report
         // non-default facets so Tahoma-9-indexed-81 comments stay unadorned.
-        var firstRun = comment.CommentText?.Elements<Run>().FirstOrDefault();
-        var rProps = firstRun?.RunProperties;
+        var allRuns = comment.CommentText?.Elements<Run>().ToList() ?? new List<Run>();
+        // Per-run rich formatting: a comment with 2+ runs carries distinct
+        // per-run <rPr>. Surfacing only the first run's font.* (legacy path)
+        // collapsed the formatting on round-trip. Emit a `runs=<json>` carrier
+        // (same vocabulary as rich-text cells) so Add can rebuild every run.
+        // Single-run comments keep the legacy font.* readback unchanged.
+        if (allRuns.Count > 1)
+        {
+            node.Format["runs"] = SerializeCommentRuns(allRuns);
+        }
+        var firstRun = allRuns.FirstOrDefault();
+        var rProps = allRuns.Count <= 1 ? firstRun?.RunProperties : null;
         if (rProps != null)
         {
             if (rProps.Elements<Bold>().Any()) node.Format["font.bold"] = true;

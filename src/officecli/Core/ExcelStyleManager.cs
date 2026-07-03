@@ -159,7 +159,21 @@ internal class ExcelStyleManager
         // --- fill ---
         uint fillId = baseXf.FillId?.Value ?? 0;
         bool applyFill = baseXf.ApplyFill?.Value ?? false;
-        if (styleProps.TryGetValue("fill", out var fillColor) || styleProps.TryGetValue("bgcolor", out fillColor) || styleProps.TryGetValue("bg", out fillColor))
+        // Non-solid pattern fills (e.g. patternType=lightGray with fg/bg
+        // colors). Canonical key `fillPattern` selects the pattern type; the
+        // foreground color reuses `fill`, and `fillBg` carries the background
+        // color. Without this branch a lightGray/fg/bg fill collapsed to a
+        // plain solid fill on round-trip.
+        if (styleProps.TryGetValue("fillPattern", out var fillPattern)
+            && !string.IsNullOrEmpty(fillPattern))
+        {
+            var patFg = styleProps.TryGetValue("fill", out var pfg) ? pfg
+                : styleProps.TryGetValue("bgcolor", out pfg) ? pfg : null;
+            var patBg = styleProps.TryGetValue("fillBg", out var pbg) ? pbg : null;
+            fillId = GetOrCreatePatternFill(stylesheet, fillPattern, patFg, patBg);
+            applyFill = true;
+        }
+        else if (styleProps.TryGetValue("fill", out var fillColor) || styleProps.TryGetValue("bgcolor", out fillColor) || styleProps.TryGetValue("bg", out fillColor))
         {
             if (fillColor.Contains('-') || fillColor.Contains(';'))
             {
@@ -539,7 +553,7 @@ internal class ExcelStyleManager
     public static bool IsStyleKey(string key)
     {
         var lower = key.ToLowerInvariant();
-        return lower is "numfmt" or "fill" or "bgcolor" or "bg" or "font" or "border"
+        return lower is "numfmt" or "fill" or "fillpattern" or "fillbg" or "bgcolor" or "bg" or "font" or "border"
             or "bold" or "italic" or "strike" or "strikethrough" or "underline"
             or "superscript" or "subscript" or "size" or "fontsize"
             or "wrap" or "wraptext" or "numberformat" or "format" or "halign" or "align" or "valign"
@@ -751,6 +765,37 @@ internal class ExcelStyleManager
         return true; // unknown attrs: pass through (forward-compat)
     }
 
+    // Underline enum canonicalization. OOXML CT_UnderlineProperty allows
+    // single / double / singleAccounting / doubleAccounting / none. The four
+    // non-none variants are all preserved; boolean truthy inputs map to single.
+    internal static string? NormalizeUnderlineValue(string raw)
+    {
+        switch (raw.Trim().ToLowerInvariant())
+        {
+            case "double": case "dbl": return "double";
+            case "singleaccounting": case "singleacct": return "singleAccounting";
+            case "doubleaccounting": case "doubleacct": return "doubleAccounting";
+            case "single": return "single";
+            case "none": return null;
+            default:
+                return (IsValidBooleanString(raw) && IsTruthy(raw)) ? "single" : null;
+        }
+    }
+
+    // Map a stored OOXML underline val InnerText back to the canonical form.
+    // Empty/null InnerText means the default <u/> which is "single".
+    internal static string? NormalizeStoredUnderline(string? innerText)
+    {
+        switch (innerText)
+        {
+            case "double": return "double";
+            case "singleAccounting": return "singleAccounting";
+            case "doubleAccounting": return "doubleAccounting";
+            case "none": return null;
+            default: return "single";
+        }
+    }
+
     private static uint GetOrCreateFont(Stylesheet stylesheet, uint baseFontId,
         Dictionary<string, string> fontProps,
         Dictionary<string, string>? longTailFontProps = null,
@@ -783,8 +828,8 @@ internal class ExcelStyleManager
         bool strike = fontProps.TryGetValue("strike", out var sVal)
             ? IsTruthy(sVal) : baseFont.Strike != null;
         string? underline = fontProps.TryGetValue("underline", out var uVal)
-            ? (uVal.ToLowerInvariant() is "double" ? "double" : (uVal.ToLowerInvariant() == "single" || (IsValidBooleanString(uVal) && IsTruthy(uVal)) ? "single" : null))
-            : (baseFont.Underline != null ? (baseFont.Underline.Val?.InnerText == "double" ? "double" : "single") : null);
+            ? NormalizeUnderlineValue(uVal)
+            : (baseFont.Underline != null ? NormalizeStoredUnderline(baseFont.Underline.Val?.InnerText) : null);
         // vertAlign: superscript / subscript / null (baseline)
         var baseVertAlign = baseFont.GetFirstChild<VerticalTextAlignment>();
         string? vertAlign;
@@ -858,8 +903,14 @@ internal class ExcelStyleManager
         if (underline != null)
         {
             var ul = new Underline();
-            if (underline == "double")
-                ul.Val = UnderlineValues.Double;
+            // "single" is the OOXML default (u element with no val); the other
+            // three variants carry an explicit val.
+            switch (underline)
+            {
+                case "double": ul.Val = UnderlineValues.Double; break;
+                case "singleAccounting": ul.Val = UnderlineValues.SingleAccounting; break;
+                case "doubleAccounting": ul.Val = UnderlineValues.DoubleAccounting; break;
+            }
             newFont.Append(ul);
         }
         if (vertAlign != null)
@@ -1027,6 +1078,78 @@ internal class ExcelStyleManager
         ) { PatternType = PatternValues.Solid }));
         fills.Count = (uint)fills.Elements<Fill>().Count();
 
+        return (uint)(fills.Elements<Fill>().Count() - 1);
+    }
+
+    // Map a user pattern name (any case, hyphen/space tolerant) to the OOXML
+    // PatternValues enum. Returns null for unrecognized names so the caller
+    // can reject rather than silently coerce to solid.
+    internal static PatternValues? ParsePatternType(string raw)
+    {
+        switch (raw.Trim().Replace("-", "").Replace(" ", "").ToLowerInvariant())
+        {
+            case "none": return PatternValues.None;
+            case "solid": return PatternValues.Solid;
+            case "mediumgray": case "gray50": return PatternValues.MediumGray;
+            case "darkgray": case "gray75": return PatternValues.DarkGray;
+            case "lightgray": case "gray25": return PatternValues.LightGray;
+            case "gray125": return PatternValues.Gray125;
+            case "gray0625": return PatternValues.Gray0625;
+            case "darkhorizontal": return PatternValues.DarkHorizontal;
+            case "darkvertical": return PatternValues.DarkVertical;
+            case "darkdown": return PatternValues.DarkDown;
+            case "darkup": return PatternValues.DarkUp;
+            case "darkgrid": return PatternValues.DarkGrid;
+            case "darktrellis": return PatternValues.DarkTrellis;
+            case "lighthorizontal": return PatternValues.LightHorizontal;
+            case "lightvertical": return PatternValues.LightVertical;
+            case "lightdown": return PatternValues.LightDown;
+            case "lightup": return PatternValues.LightUp;
+            case "lightgrid": return PatternValues.LightGrid;
+            case "lighttrellis": return PatternValues.LightTrellis;
+            default: return null;
+        }
+    }
+
+    // Create or find a pattern fill entry carrying a non-solid pattern type
+    // plus optional foreground / background colors. Unknown pattern names fall
+    // back to solid (matching legacy behavior) only when a foreground exists.
+    private static uint GetOrCreatePatternFill(Stylesheet stylesheet,
+        string patternName, string? fgHex, string? bgHex)
+    {
+        var fills = stylesheet.Fills;
+        if (fills == null)
+        {
+            fills = new Fills(
+                new Fill(new PatternFill { PatternType = PatternValues.None }),
+                new Fill(new PatternFill { PatternType = PatternValues.Gray125 })
+            ) { Count = 2 };
+            var fonts = stylesheet.Fonts;
+            if (fonts != null) fonts.InsertAfterSelf(fills);
+            else stylesheet.Append(fills);
+        }
+
+        var pat = ParsePatternType(patternName) ?? PatternValues.Solid;
+        var normFg = fgHex != null ? NormalizeColor(fgHex) : null;
+        var normBg = bgHex != null ? NormalizeColor(bgHex) : null;
+
+        int idx = 0;
+        foreach (var fill in fills.Elements<Fill>())
+        {
+            var pf = fill.PatternFill;
+            if (pf?.PatternType?.Value == pat
+                && string.Equals(pf.ForegroundColor?.Rgb?.Value, normFg, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(pf.BackgroundColor?.Rgb?.Value, normBg, StringComparison.OrdinalIgnoreCase))
+                return (uint)idx;
+            idx++;
+        }
+
+        var newPf = new PatternFill { PatternType = pat };
+        // OOXML element order: fgColor before bgColor.
+        if (normFg != null) newPf.Append(new ForegroundColor { Rgb = normFg });
+        if (normBg != null) newPf.Append(new BackgroundColor { Rgb = normBg });
+        fills.Append(new Fill(newPf));
+        fills.Count = (uint)fills.Elements<Fill>().Count();
         return (uint)(fills.Elements<Fill>().Count() - 1);
     }
 

@@ -49,14 +49,14 @@ public static partial class ExcelBatchEmitter
     };
     private static readonly HashSet<string> CellStyleKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "fill", "numberformat", "strike", "underline", "superscript", "subscript",
+        "fill", "fillPattern", "fillBg", "numberformat", "strike", "underline", "superscript", "subscript",
     };
     // Cell Format keys the emitter consumes through dedicated channels or
     // intentionally drops (derived/readonly state).
     private static readonly HashSet<string> HandledOrDerivedCellKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "type", "formula", "cachedValue", "computedValue", "evaluated", "empty",
-        "merge", "link", "tooltip", "arrayformula", "arrayref", "numFmtId",
+        "merge", "link", "tooltip", "display", "arrayformula", "arrayref", "numFmtId",
         "quotePrefix", "phonetic", "__raw", "__richruns",
     };
 
@@ -358,6 +358,8 @@ public static partial class ExcelBatchEmitter
                     var linkProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["link"] = link };
                     if (cell.Format.TryGetValue("tooltip", out var tt) && tt is string tts && tts.Length > 0)
                         linkProps["tooltip"] = tts;
+                    if (cell.Format.TryGetValue("display", out var dp) && dp is string dps && dps.Length > 0)
+                        linkProps["display"] = dps;
                     styleRows.Add(new BatchItem { Command = "set", Path = cell.Path, Props = linkProps });
                 }
                 if (cell.Format.TryGetValue("phonetic", out _))

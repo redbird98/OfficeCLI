@@ -71,6 +71,23 @@ public partial class ExcelHandler
                 case "lineweight":
                     if (double.TryParse(value, out var lw)) spkGroup.LineWeight = lw;
                     break;
+                case "displayemptycellsas":
+                    spkGroup.DisplayEmptyCellsAs = value.Trim().ToLowerInvariant() switch
+                    {
+                        "span" => X14.DisplayBlanksAsValues.Span,
+                        "zero" => X14.DisplayBlanksAsValues.Zero,
+                        _ => X14.DisplayBlanksAsValues.Gap,
+                    };
+                    break;
+                case "displayxaxis":
+                    spkGroup.DisplayXAxis = ParseHelpers.IsTruthy(value) ? (bool?)true : null;
+                    break;
+                case "righttoleft":
+                    spkGroup.RightToLeft = ParseHelpers.IsTruthy(value) ? (bool?)true : null;
+                    break;
+                case "dateaxis":
+                    spkGroup.DateAxis = ParseHelpers.IsTruthy(value) ? (bool?)true : null;
+                    break;
                 case "datarange" or "range":
                 {
                     // Same shape guard as Add: garbage landed verbatim in

@@ -99,6 +99,23 @@
       "readback": "#RRGGBB uppercase, 'gradient;#START;#END;ANGLE' for gradients, scheme color name (e.g. accent1) when set externally",
       "enforcement": "report"
     },
+    "fillPattern": {
+      "type": "enum",
+      "values": ["none", "solid", "gray125", "gray0625", "mediumGray", "darkGray", "lightGray", "darkHorizontal", "darkVertical", "darkDown", "darkUp", "darkGrid", "darkTrellis", "lightHorizontal", "lightVertical", "lightDown", "lightUp", "lightGrid", "lightTrellis"],
+      "description": "non-solid pattern fill type. When set, `fill` supplies the pattern foreground color and `fillBg` supplies the background color. Omit to keep a plain solid `fill`.",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop fillPattern=lightGray --prop fill=FF0000 --prop fillBg=FFFF00"],
+      "readback": "camelCase pattern name (e.g. lightGray); present only for non-solid patterns",
+      "enforcement": "report"
+    },
+    "fillBg": {
+      "type": "color",
+      "description": "background color of a non-solid pattern fill (see fillPattern). Ignored for solid fills.",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop fillPattern=darkGrid --prop fill=000000 --prop fillBg=FFFFFF"],
+      "readback": "#RRGGBB uppercase; present only for non-solid patterns with a background color",
+      "enforcement": "report"
+    },
     "strike": {
       "type": "bool",
       "description": "single strikethrough on the cell text.",
@@ -233,6 +250,14 @@
       "aliases": ["screenTip", "screentip"],
       "add": true, "set": true, "get": false,
       "examples": ["--prop link=https://example.com --prop tooltip=\"Open in browser\""],
+      "enforcement": "report"
+    },
+    "display": {
+      "type": "string",
+      "description": "friendly display text (@display attribute) for an existing hyperlink. Pair with link= during Add, or apply to a cell that already has a hyperlink during Set.",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop link=https://example.com --prop display=\"Company site\""],
+      "readback": "display string",
       "enforcement": "report"
     },
     "type": {

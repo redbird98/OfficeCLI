@@ -950,6 +950,23 @@ public partial class ExcelHandler
         if (properties.TryGetValue("lineweight", out var lwVal) && double.TryParse(lwVal, out var lw))
             spkGroup.LineWeight = lw;
 
+        // Group-level axis / empty-cell / RTL attributes.
+        if (properties.TryGetValue("displayemptycellsas", out var deca))
+        {
+            spkGroup.DisplayEmptyCellsAs = deca.Trim().ToLowerInvariant() switch
+            {
+                "span" => X14.DisplayBlanksAsValues.Span,
+                "zero" => X14.DisplayBlanksAsValues.Zero,
+                _ => X14.DisplayBlanksAsValues.Gap,
+            };
+        }
+        if (properties.TryGetValue("displayxaxis", out var dxa) && ParseHelpers.IsTruthy(dxa))
+            spkGroup.DisplayXAxis = true;
+        if (properties.TryGetValue("righttoleft", out var rtl) && ParseHelpers.IsTruthy(rtl))
+            spkGroup.RightToLeft = true;
+        if (properties.TryGetValue("dateaxis", out var dax) && ParseHelpers.IsTruthy(dax))
+            spkGroup.DateAxis = true;
+
         // Build the Sparkline element
         // Ensure range includes sheet reference. Validate the range shape
         // first: an arbitrary string ("NOTAREF!!!") landed verbatim in

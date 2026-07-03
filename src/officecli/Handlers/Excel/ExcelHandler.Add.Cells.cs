@@ -761,6 +761,10 @@ public partial class ExcelHandler
             // R37-B: detect internal `[#]Sheet!Cell` (and quoted variants);
             // emit as @location with no relationship.
             // CONSISTENCY(internal-hyperlink): same detection used in Set.cs.
+            // H2b: display (OOXML @display) — friendly text Excel shows for
+            // the link. Handler-as-truth: consumed here so it is not reported
+            // unsupported (schema hyperlink.json documents cell display=).
+            var hlDisplay = properties.GetValueOrDefault("display");
             var addInternalLoc = TryParseInternalHyperlinkLocation(linkUrl);
             if (addInternalLoc != null)
             {
@@ -770,6 +774,7 @@ public partial class ExcelHandler
                     Location = addInternalLoc
                 };
                 if (!string.IsNullOrEmpty(hlTip)) hl.Tooltip = hlTip;
+                if (!string.IsNullOrEmpty(hlDisplay)) hl.Display = hlDisplay;
                 hyperlinksEl.AppendChild(hl);
             }
             else
@@ -781,6 +786,7 @@ public partial class ExcelHandler
                 var hl = new Hyperlink { Reference = cellRef.ToUpperInvariant(), Id = hlRel.Id };
                 if (!string.IsNullOrEmpty(hlTip))
                     hl.Tooltip = hlTip;
+                if (!string.IsNullOrEmpty(hlDisplay)) hl.Display = hlDisplay;
                 hyperlinksEl.AppendChild(hl);
             }
         }

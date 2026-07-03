@@ -278,12 +278,24 @@ public partial class ExcelHandler
         // CONSISTENCY(text-escape-boundary): \n / \t resolution lives at the
         // CLI --prop parse boundary; this value already has real newlines.
         var cmtNormalized = (cmtText ?? "").Replace("\r\n", "\n");
-        comment.CommentText = new CommentText(
-            new Run(
-                BuildCommentRunProperties(properties),
-                new Text(cmtNormalized) { Space = SpaceProcessingModeValues.Preserve }
-            )
-        );
+        // Per-run rich formatting: `runs=<json array>` builds one <r> per run
+        // with its own <rPr>, mirroring rich-text cells. Without it a two-run
+        // comment (e.g. bold-red "Alice:" + plain " Check formula") collapsed
+        // to a single whole-comment run on round-trip. Falls back to the
+        // single-run text=/font.* path when no runs are supplied.
+        if (properties.TryGetValue("runs", out var cmtRunsJson) && !string.IsNullOrWhiteSpace(cmtRunsJson))
+        {
+            comment.CommentText = BuildCommentTextFromRuns(cmtRunsJson);
+        }
+        else
+        {
+            comment.CommentText = new CommentText(
+                new Run(
+                    BuildCommentRunProperties(properties),
+                    new Text(cmtNormalized) { Space = SpaceProcessingModeValues.Preserve }
+                )
+            );
+        }
         commentList.AppendChild(comment);
         commentsPart.Comments.Save();
 
