@@ -46,7 +46,10 @@ public partial class ExcelHandler
         // letter/underscore/backslash, contain only letter/digit/
         // underscore/period/backslash, and must not parse as a cell
         // reference. Otherwise Excel rejects the file with 0x800A03EC.
-        if (!System.Text.RegularExpressions.Regex.IsMatch(nrName, @"^[A-Za-z_\\][A-Za-z0-9_\\.]*$"))
+        // "Letter" is any Unicode letter (\p{L}) — Excel accepts CJK/
+        // Cyrillic/etc. names; the previous ASCII-only class falsely
+        // rejected them. Emoji/symbols stay rejected (not \p{L}).
+        if (!System.Text.RegularExpressions.Regex.IsMatch(nrName, @"^[\p{L}_\\][\p{L}\p{N}_\\.]*$"))
             throw new ArgumentException($"Invalid defined-name '{nrName}': must start with a letter/underscore and contain only letters, digits, underscores, or periods (no spaces).");
         // Excel caps defined-name identifier length at 255 characters; longer
         // names are silently truncated on open (or the file is rejected with
