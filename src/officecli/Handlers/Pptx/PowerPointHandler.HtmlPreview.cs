@@ -116,8 +116,9 @@ public partial class PowerPointHandler
         bool hasMathFormulas = slideParts.Any(sp => sp.Slide?.Descendants<DocumentFormat.OpenXml.Math.OfficeMath>().Any() == true);
         if (hasMathFormulas)
         {
-            sb.AppendLine("<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css\" media=\"print\" onload=\"this.media='all'\" onerror=\"this.remove()\">");
-            sb.AppendLine("<script defer src=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js\" onerror=\"document.querySelectorAll('.katex-formula').forEach(function(el){el.textContent=el.dataset.formula;el.style.fontFamily='monospace';el.style.color='#666'})\"></script>");
+            // CONSISTENCY(katex-mirror): mirror-first with CDN fallback chain — see Core/KatexAssets.
+            sb.AppendLine($"<link rel=\"stylesheet\" href=\"{Core.KatexAssets.CssUrl}\" media=\"print\" onload=\"this.media='all'\" onerror=\"{Core.KatexAssets.CssOnErrorJs}\">");
+            sb.AppendLine($"<script defer src=\"{Core.KatexAssets.JsUrl}\" onerror=\"{Core.KatexAssets.JsOnErrorJs("document.querySelectorAll('.katex-formula').forEach(function(el){el.textContent=el.dataset.formula;el.style.fontFamily='monospace';el.style.color='#666'})")}\"></script>");
         }
         // Three.js for 3D model rendering (graceful degradation: shows placeholder when offline)
         sb.AppendLine(@"<script type=""importmap"">{""imports"":{""three"":""https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"",""three/addons/"":""https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/""}}</script>");
@@ -248,15 +249,16 @@ public partial class PowerPointHandler
             // formula arrived via SSE patch.
             if (!window._katexLoading) {
                 window._katexLoading = true;
+                // CONSISTENCY(katex-mirror): mirror-first, CDN retry, then fallback.
                 var link = document.createElement('link');
                 link.rel = 'stylesheet';
-                link.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css';
-                link.onerror = function() { this.remove(); };
+                link.href = '{{KATEX_CSS}}';
+                link.onerror = function() { if (!this.dataset.f) { this.dataset.f = 1; this.href = '{{KATEX_CSS_CDN}}'; } else { this.remove(); } };
                 document.head.appendChild(link);
                 var script = document.createElement('script');
-                script.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js';
+                script.src = '{{KATEX_JS}}';
                 script.onload = renderKatex;
-                script.onerror = fallbackKatex;
+                script.onerror = function() { var s2 = document.createElement('script'); s2.src = '{{KATEX_JS_CDN}}'; s2.onload = renderKatex; s2.onerror = fallbackKatex; document.head.appendChild(s2); };
                 document.head.appendChild(script);
                 return;
             }
@@ -275,7 +277,13 @@ public partial class PowerPointHandler
     else renderKatex();
     // Re-render when DOM changes (watch mode incremental updates)
     new MutationObserver(function() { renderKatex(); }).observe(document.body, { childList: true, subtree: true });
-})();");
+})();"
+            // CONSISTENCY(katex-mirror): the verbatim block above can't interpolate;
+            // substitute the KaTeX asset URLs (mirror + CDN fallback) afterwards.
+            .Replace("{{KATEX_CSS}}", Core.KatexAssets.CssUrl)
+            .Replace("{{KATEX_CSS_CDN}}", Core.KatexAssets.CdnCssUrl)
+            .Replace("{{KATEX_JS}}", Core.KatexAssets.JsUrl)
+            .Replace("{{KATEX_JS_CDN}}", Core.KatexAssets.CdnJsUrl));
         sb.AppendLine("</script>");
         sb.AppendLine("</body>");
         sb.AppendLine("</html>");
