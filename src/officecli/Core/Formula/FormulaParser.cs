@@ -632,7 +632,9 @@ internal static class FormulaParser
                 var barPr = element.ChildElements.FirstOrDefault(e => e.LocalName == "barPr");
                 var posElem = barPr?.ChildElements.FirstOrDefault(e => e.LocalName == "pos");
                 var posVal = posElem?.GetAttribute("val", "http://schemas.openxmlformats.org/officeDocument/2006/math").Value;
-                return posVal == "bot" ? $"\\underline{{{baseText}}}" : $"\\overline{{{baseText}}}";
+                // ECMA-376: m:bar's omitted pos = bot (texmath #187 reached the
+                // same reading) — only an explicit pos="top" is an overline.
+                return posVal == "top" ? $"\\overline{{{baseText}}}" : $"\\underline{{{baseText}}}";
             }
 
             case "acc": // accent
@@ -741,6 +743,12 @@ internal static class FormulaParser
                 var chr = chrEl?.GetAttribute("val", "http://schemas.openxmlformats.org/officeDocument/2006/math").Value;
                 var posEl = gcPr?.ChildElements.FirstOrDefault(e => e.LocalName == "pos");
                 var pos = posEl?.GetAttribute("val", "http://schemas.openxmlformats.org/officeDocument/2006/math").Value;
+                // ECMA-376 defaults: omitted pos = bot, omitted chr = the brace
+                // matching pos (U+23DF under / U+23DE over). Word omits both for
+                // the default underbrace, which previously fell through to bare
+                // base text — the brace vanished.
+                pos ??= "bot";
+                chr ??= pos == "top" ? "\u23DE" : "\u23DF";
                 if (chr == "\u23DF" || pos == "bot") // ⏟
                     return $"\\underbrace{{{baseText}}}";
                 if (chr == "\u23DE" || pos == "top") // ⏞
@@ -911,7 +919,8 @@ internal static class FormulaParser
                 var baseText = ArgToReadable(element.ChildElements.FirstOrDefault(e => e.LocalName == "e"));
                 var accPr = element.ChildElements.FirstOrDefault(e => e.LocalName == "accPr");
                 var chrElem = accPr?.ChildElements.FirstOrDefault(e => e.LocalName == "chr");
-                var chr = chrElem?.GetAttribute("val", "http://schemas.openxmlformats.org/officeDocument/2006/math").Value ?? "";
+                // ECMA-376: omitted m:chr = U+0302 (hat) — mirror the LaTeX path's default.
+                var chr = chrElem?.GetAttribute("val", "http://schemas.openxmlformats.org/officeDocument/2006/math").Value ?? "\u0302";
                 return baseText + chr;
             }
 
