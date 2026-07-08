@@ -735,6 +735,11 @@ public partial class WordHandler
     /// — the first style in the chain that declares a tblCellMar wins.</summary>
     private TableCellMarginDefault? ResolveTableStyleCellMargin(string styleId)
     {
+        // Word merges w:tblCellMar PER SIDE across the basedOn chain (verified
+        // against real Word — unlike w:tblBorders, which replaces wholesale):
+        // a child style declaring only w:top keeps the parent's left/right/
+        // bottom margins. Walk derived→base, most-derived side wins.
+        TableCellMarginDefault? merged = null;
         var visited = new HashSet<string>();
         var currentId = styleId;
         while (currentId != null && visited.Add(currentId))
@@ -742,10 +747,18 @@ public partial class WordHandler
             var style = FindStyleById(currentId);
             if (style == null) break;
             var cm = style.StyleTableProperties?.TableCellMarginDefault;
-            if (cm != null) return cm;
+            if (cm != null)
+            {
+                if (merged == null)
+                    merged = (TableCellMarginDefault)cm.CloneNode(true);
+                else
+                    foreach (var side in cm.ChildElements)
+                        if (!merged.ChildElements.Any(c => c.LocalName == side.LocalName))
+                            merged.AppendChild(side.CloneNode(true));
+            }
             currentId = style.BasedOn?.Val?.Value;
         }
-        return null;
+        return merged;
     }
 
     /// <summary>Resolve the base cell shading (&lt;w:style&gt;&lt;w:tcPr&gt;&lt;w:shd&gt;)

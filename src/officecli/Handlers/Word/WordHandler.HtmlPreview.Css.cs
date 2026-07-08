@@ -959,6 +959,11 @@ public partial class WordHandler
     private IEnumerable<TabStop>? ResolveTabStopsFromStyle(string? styleId)
     {
         if (styleId == null) return null;
+        // Word ACCUMULATES w:tabs across the basedOn chain (verified against
+        // real Word): a child style's tab list adds to the parent's rather
+        // than replacing it. A derived declaration at the same position wins
+        // (and w:val="clear" removes the inherited stop at that position).
+        var byPos = new Dictionary<int, TabStop>();
         var visited = new HashSet<string>();
         var currentStyleId = styleId;
         while (currentStyleId != null && visited.Add(currentStyleId))
@@ -966,10 +971,23 @@ public partial class WordHandler
             var style = FindStyleById(currentStyleId);
             if (style == null) break;
             var tabs = style.StyleParagraphProperties?.Tabs?.Elements<TabStop>();
-            if (tabs != null && tabs.Any()) return tabs;
+            if (tabs != null)
+                foreach (var t in tabs)
+                {
+                    var pos = t.Position?.Value;
+                    if (pos == null) continue;
+                    // Derived styles are visited first — first declaration wins.
+                    if (!byPos.ContainsKey(pos.Value)) byPos[pos.Value] = t;
+                }
             currentStyleId = style.BasedOn?.Val?.Value;
         }
-        return null;
+        if (byPos.Count == 0) return null;
+        var mergedTabs = byPos
+            .Where(kv => kv.Value.Val == null || kv.Value.Val.InnerText != "clear")
+            .OrderBy(kv => kv.Key)
+            .Select(kv => kv.Value)
+            .ToList();
+        return mergedTabs.Count > 0 ? mergedTabs : null;
     }
 
     /// <summary>Word built-in style defaults (Office 2010+ Normal.dotm baseline).
@@ -2911,6 +2929,11 @@ public partial class WordHandler
     private ParagraphBorders? ResolveStyleParagraphBorders(string? styleId)
     {
         if (string.IsNullOrEmpty(styleId)) return null;
+        // Word merges w:pBdr PER SIDE across the basedOn chain: a child style
+        // declaring only w:bottom keeps the parent's top/left/right (verified
+        // against real Word — unlike w:tblBorders, which replaces wholesale).
+        // Walk derived→base and keep the most-derived declaration of each side.
+        ParagraphBorders? merged = null;
         var visited = new HashSet<string>();
         var current = styleId;
         while (current != null && visited.Add(current))
@@ -2920,10 +2943,18 @@ public partial class WordHandler
             // GetFirstChild — Open XML SDK doesn't always surface less-common
             // pPr children as typed properties on StyleParagraphProperties.
             var pBdr = style.StyleParagraphProperties?.GetFirstChild<ParagraphBorders>();
-            if (pBdr != null) return pBdr;
+            if (pBdr != null)
+            {
+                if (merged == null)
+                    merged = (ParagraphBorders)pBdr.CloneNode(true);
+                else
+                    foreach (var side in pBdr.ChildElements)
+                        if (!merged.ChildElements.Any(c => c.LocalName == side.LocalName))
+                            merged.AppendChild(side.CloneNode(true));
+            }
             current = style.BasedOn?.Val?.Value;
         }
-        return null;
+        return merged;
     }
 
     // Resolve a paragraph's effective shd fill (direct shd, else style chain).
