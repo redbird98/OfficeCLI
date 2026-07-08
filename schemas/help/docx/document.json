@@ -461,6 +461,16 @@
       "readback": "true when settings/autoHyphenation is present",
       "enforcement": "report"
     },
+    "trackRevisions": {
+      "type": "bool",
+      "description": "document-level track-changes MODE toggle (settings/trackRevisions; Word: Review > Track Changes). Turns the document into tracked mode so edits made in a word processor become revisions. Distinct from the per-run/paragraph revision.type keys that author the tracked-change DATA itself. Set on /settings or /.",
+      "aliases": ["trackChanges"],
+      "add": false,
+      "set": true,
+      "get": true,
+      "readback": "true when settings/trackRevisions is present",
+      "enforcement": "report"
+    },
     "defaultTabStop": {
       "type": "string",
       "description": "default tab stop (e.g. \"720\" twips or \"0.5in\").",

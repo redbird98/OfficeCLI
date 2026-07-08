@@ -189,6 +189,16 @@ public partial class WordHandler
                 SetOnOffSetting<AutoHyphenation>(EnsureSettings(), IsTruthy(value));
                 EnsureSettings().Save();
                 return true;
+            case "trackrevisions" or "trackchanges":
+                // <w:trackRevisions/> — the document-level track-changes MODE
+                // toggle (Word: Review → Track Changes). Distinct from the
+                // per-run/paragraph revision DATA authored via revision.type.
+                // `trackChanges` is the lenient Word-UI alias; Get emits the
+                // canonical `trackRevisions` (matches the OOXML element name,
+                // like every sibling flag on /settings).
+                SetOnOffSetting<TrackRevisions>(EnsureSettings(), IsTruthy(value));
+                EnsureSettings().Save();
+                return true;
             case "defaulttabstop":
             {
                 var settings = EnsureSettings();

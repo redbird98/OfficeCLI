@@ -190,6 +190,8 @@ public partial class WordHandler
             node.Format["updateFields"] = true;
         if (settings.GetFirstChild<AutoHyphenation>() != null)
             node.Format["autoHyphenation"] = true;
+        if (settings.GetFirstChild<TrackRevisions>() != null)
+            node.Format["trackRevisions"] = true;
         var defTabStop = settings.GetFirstChild<DefaultTabStop>();
         if (defTabStop?.Val?.Value != null)
             node.Format["defaultTabStop"] = FormatTwipsToCm((uint)defTabStop.Val.Value);
