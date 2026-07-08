@@ -1055,6 +1055,14 @@ public partial class WordHandler
                     InsertRunPropInSchemaOrder(props, new Vanish { Val = OnOffValue.FromBoolean(false) });
                 else if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Vanish());
                 return true;
+            case "specvanish":
+                // <w:specVanish/> — Word's style-separator marker (e.g. the
+                // hidden ¶ that lets a heading share a line with body text).
+                props.RemoveAllChildren<SpecVanish>();
+                if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new SpecVanish { Val = OnOffValue.FromBoolean(false) });
+                else if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new SpecVanish());
+                return true;
             case "bdr":
                 // BUG-R7-06: character border <w:bdr/> — round-trip captured
                 // it from real docs but Add/Set rejected it as UNSUPPORTED.

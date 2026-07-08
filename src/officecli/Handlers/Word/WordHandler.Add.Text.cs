@@ -292,6 +292,19 @@ public partial class WordHandler
             if (properties.TryGetValue("vanish", out var ntVanish)
                 || properties.TryGetValue("hidden", out ntVanish))
                 ApplyRunFormatting(EnsureNoTextMarkRPr(), "vanish", ntVanish);
+            // Glyph props the ¶-mark readback now surfaces as bare keys on a
+            // run-less paragraph (caps family, text effects, vertAlign, bdr,
+            // specVanish, position) — route each straight onto the mark rPr
+            // via ApplyRunFormatting so dump→batch round-trips them. caps/
+            // smallCaps change the empty paragraph's line height; specVanish
+            // is Word's style-separator marker.
+            foreach (var ntGlyphKey in new[] { "caps", "smallcaps", "dstrike", "outline",
+                "shadow", "emboss", "imprint", "superscript", "subscript", "vertalign",
+                "bdr", "specVanish", "position" })
+            {
+                if (properties.TryGetValue(ntGlyphKey, out var ntGlyphVal))
+                    ApplyRunFormatting(EnsureNoTextMarkRPr(), ntGlyphKey, ntGlyphVal);
+            }
             if (properties.TryGetValue("font", out var ntFont)
                 || properties.TryGetValue("font.name", out ntFont))
                 ApplyRunFormatting(EnsureNoTextMarkRPr(), "font", ntFont);

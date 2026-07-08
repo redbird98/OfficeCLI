@@ -4509,6 +4509,68 @@ public partial class WordHandler
         // replay can target ParagraphMarkRunProperties without conflating
         // with run-level formatting.
         var pmrpForDump = para.ParagraphProperties?.ParagraphMarkRunProperties;
+        // Local shared readback for the ¶-mark glyph props that were missing
+        // from BOTH mark paths (the dotted markRPr.* block below for
+        // text-bearing paragraphs AND the bare-key fallback for run-less /
+        // collapsed paragraphs): caps/smallCaps, dstrike, the text effects
+        // (outline/shadow/emboss/imprint), vertAlign, character border,
+        // vanish and specVanish. caps/smallCaps change the glyph width (and
+        // an empty paragraph's line height), vertAlign moves the baseline,
+        // specVanish is Word's style-separator marker — all silently dropped
+        // on dump→batch. Key forms mirror the run reader (RunToNode) so
+        // replay routes through ApplyRunFormatting unchanged.
+        void ReadMarkGlyphProps(OpenXmlCompositeElement src, string prefix)
+        {
+            void Emit(string key, object val)
+            {
+                var k = prefix + key;
+                if (!node.Format.ContainsKey(k)) node.Format[k] = val;
+            }
+            void Tog(OnOffType? el, string key)
+            {
+                if (el != null) Emit(key, el.Val == null || el.Val.Value);
+            }
+            Tog(src.GetFirstChild<Caps>(), "caps");
+            Tog(src.GetFirstChild<SmallCaps>(), "smallcaps");
+            Tog(src.GetFirstChild<DoubleStrike>(), "dstrike");
+            Tog(src.GetFirstChild<Outline>(), "outline");
+            Tog(src.GetFirstChild<Shadow>(), "shadow");
+            Tog(src.GetFirstChild<Emboss>(), "emboss");
+            Tog(src.GetFirstChild<Imprint>(), "imprint");
+            Tog(src.GetFirstChild<Vanish>(), "vanish");
+            Tog(src.GetFirstChild<SpecVanish>(), "specVanish");
+            var va = src.GetFirstChild<VerticalTextAlignment>()?.Val?.Value;
+            if (va == VerticalPositionValues.Superscript) Emit("superscript", true);
+            else if (va == VerticalPositionValues.Subscript) Emit("subscript", true);
+            // <w:position> raise/lower — pt form, same as the run reader
+            // (the dotted markRPr.position raw-half-point emit above wins
+            // when it already ran; ApplyRunFormatting accepts both forms).
+            var mgPos = src.GetFirstChild<Position>()?.Val?.Value;
+            if (!string.IsNullOrEmpty(mgPos)
+                && int.TryParse(mgPos, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var mgPosHp))
+                Emit("position", $"{mgPosHp / 2.0:0.##}pt");
+            // Character border — same colon-encoded compound form as the run
+            // reader (STYLE;SIZE;COLOR;SPACE[;SHADOW[;FRAME]]).
+            var mgBdr = src.GetFirstChild<Border>();
+            if (mgBdr?.Val?.HasValue == true)
+            {
+                var segs = new List<string>
+                {
+                    mgBdr.Val!.InnerText ?? "single",
+                    mgBdr.Size?.Value.ToString() ?? "",
+                    string.IsNullOrEmpty(mgBdr.Color?.Value) ? "" : ParseHelpers.FormatHexColor(mgBdr.Color!.Value!),
+                    mgBdr.Space?.Value.ToString() ?? "0"
+                };
+                bool? mgShadow = mgBdr.Shadow?.Value;
+                bool? mgFrame = mgBdr.Frame?.Value;
+                if (mgShadow.HasValue || mgFrame.HasValue)
+                    segs.Add(mgShadow == true ? "true" : "false");
+                if (mgFrame.HasValue)
+                    segs.Add(mgFrame == true ? "true" : "false");
+                Emit("bdr", string.Join(';', segs));
+            }
+        }
         // Suppress markRPr.* dotted keys when the paragraph has no
         // text-bearing runs — the bare keys below (size, font.latin, …)
         // already cover markRPr via the firstRun-fallback path. Emitting
@@ -4665,6 +4727,10 @@ public partial class WordHandler
             var pmSnap = pmrpForDump.GetFirstChild<SnapToGrid>();
             if (pmSnap != null)
                 node.Format["markRPr.snapToGrid"] = TryReadOnOff(pmSnap.Val) != false;
+            // Glyph props historically absent from this whitelist (caps family,
+            // text effects, vertAlign, bdr, vanish, specVanish) — see the
+            // shared readback above.
+            ReadMarkGlyphProps(pmrpForDump, "markRPr.");
             var hl = pmrpForDump.GetFirstChild<Highlight>();
             if (hl?.Val?.HasValue == true) node.Format["markRPr.highlight"] = hl.Val.InnerText;
             // BUG-DUMP-R27-1: ¶-mark character shading (<w:pPr><w:rPr><w:shd/>).
@@ -5012,6 +5078,16 @@ public partial class WordHandler
                 if (rtlEmpty != null && !node.Format.ContainsKey("markRPr.rtl"))
                     node.Format["markRPr.rtl"] = TryReadOnOff(rtlEmpty.Val) != false;
             }
+            // Glyph props historically absent from the bare-key fallback
+            // (caps family, text effects, vertAlign, bdr, specVanish) — the
+            // RUN-LESS ¶ mark only (markRp != null). The firstRun hoist must
+            // NOT surface them as bare paragraph keys: run-level content is
+            // emitted separately (run/field ops carry their own readback), so
+            // hoisting would double-apply — replay's no-text path writes the
+            // hoisted copy onto the ¶ mark and the XML gains a phantom
+            // duplicate (e.g. a 6th vertAlign on a 5-run superscript field).
+            if (markRp != null)
+                ReadMarkGlyphProps(markRp, "");
         }
 
         // Populate effective.* properties from style inheritance
