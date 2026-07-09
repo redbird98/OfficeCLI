@@ -2996,6 +2996,17 @@ public partial class ExcelHandler
         return unsupported;
     }
 
+    // Genuine CT_Row long-tail attributes that the row Get reader round-trips.
+    // Anything outside height/hidden/outlineLevel/collapsed (handled explicitly)
+    // and this set is rejected rather than silently written, so a typo or a
+    // column-name that binds to no table surfaces as unsupported_property.
+    private static bool IsLongTailRowAttribute(string key) => key.ToLowerInvariant() switch
+    {
+        "spans" or "style" or "s" or "customformat" or "ph"
+            or "thicktop" or "thickbot" or "customheight" => true,
+        _ => false,
+    };
+
     private List<string> SetRow(WorksheetPart worksheet, uint rowIdx, Dictionary<string, string> properties)
     {
         var unsupported = new List<string>();
@@ -3039,11 +3050,31 @@ public partial class ExcelHandler
                         || value == "1" || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
                     break;
                 default:
-                    // Long-tail Row attribute (CT_Row attrs beyond height/
-                    // hidden/outlineLevel/collapsed — e.g. spans, style, ph,
-                    // thickTop, thickBot, customFormat). Symmetric with the
-                    // row Get reader. Preserve original case.
-                    row.SetAttribute(new DocumentFormat.OpenXml.OpenXmlAttribute("", key, "", value));
+                    // A non-row-attribute key. First try it as a TABLE COLUMN on
+                    // this row — `set /Sheet/row[N] --prop <colName>=<val>` writes
+                    // the cell in that column, closing the query→edit loop
+                    // symmetrically with `query row[col op val]`. Only fall back
+                    // to a raw <row> XML attribute for genuine long-tail CT_Row
+                    // attrs (spans/style/ph/thickTop/thickBot/customFormat), which
+                    // the row Get reader round-trips. An unknown key that is
+                    // neither is reported as unsupported — NEVER silently written
+                    // (the old bug stamped `年龄="99"` onto <row> and reported
+                    // success while the data never changed).
+                    if (TryResolveRowColumnCell(worksheet, rowIdx, key, out var colCellRef))
+                    {
+                        var colCell = FindOrCreateCell(sheetData, colCellRef);
+                        unsupported.AddRange(ApplyCellProperties(
+                            colCell, colCellRef, worksheet, new() { ["value"] = value }));
+                        PruneEmptyCell(colCell);
+                    }
+                    else if (IsLongTailRowAttribute(key))
+                    {
+                        row.SetAttribute(new DocumentFormat.OpenXml.OpenXmlAttribute("", key, "", value));
+                    }
+                    else
+                    {
+                        unsupported.Add(key);
+                    }
                     break;
             }
         }

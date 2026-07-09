@@ -271,6 +271,68 @@ public partial class ExcelHandler
         return false;
     }
 
+    // Set-side counterpart of the read predicate: resolve a
+    // `set /Sheet/row[N] --prop <colName>=<val>` to the concrete cell in that
+    // row's column, so the "filter then edit" loop closes symmetrically with
+    // `query row[col op val]`. Binds to the single table (ListObject, else a
+    // detected header-row table) on THIS worksheet that both owns column `key`
+    // and has row N among its DATA rows (header/totals rows excluded). Returns
+    // the A1 cell ref (e.g. "C5"). Throws on cross-table ambiguity; returns
+    // false when nothing binds — the caller then reports the key as unsupported
+    // rather than silently stamping it onto the <row> element (the old bug:
+    // `set row[N] --prop 年龄=99` reported success but wrote an ignored XML attr).
+    private bool TryResolveRowColumnCell(WorksheetPart worksheet, uint rowIdx, string key, out string cellRef)
+    {
+        cellRef = "";
+        var listHits = new List<(string cell, string label)>();
+        var detHits = new List<(string cell, string label)>();
+        var realRanges = new List<(int c1, int r1, int c2, int r2)>();
+
+        foreach (var tdp in worksheet.TableDefinitionParts)
+        {
+            var tbl = tdp.Table;
+            if (tbl?.Reference?.Value == null) continue;
+            if (!TryParseRange(tbl.Reference.Value, out var rng)) continue;
+            realRanges.Add(rng);
+            bool headerRow = (tbl.HeaderRowCount?.Value ?? 1) != 0;
+            bool totalRow = (tbl.TotalsRowCount?.Value ?? 0) > 0 || (tbl.TotalsRowShown?.Value ?? false);
+            if (rowIdx < rng.r1 + (headerRow ? 1 : 0) || rowIdx > rng.r2 - (totalRow ? 1 : 0)) continue;
+            var colNames = tbl.GetFirstChild<TableColumns>()?.Elements<TableColumn>()
+                .Select(c => c.Name?.Value ?? "").ToList() ?? new List<string>();
+            if (TryResolveTableColumn(key, colNames, rng.c1, rng.c2, out var absCol))
+                listHits.Add(($"{IndexToColumnName(absCol)}{rowIdx}", tbl.Name?.Value ?? "table"));
+        }
+
+        if (listHits.Count == 0)
+        {
+            var sheetName = GetWorksheets().FirstOrDefault(t => t.Part == worksheet).Name ?? "";
+            foreach (var det in DetectTables(sheetName, worksheet, realRanges))
+            {
+                var colNames = (det.Format.TryGetValue("columns", out var cv) ? cv?.ToString() ?? "" : "")
+                    .Split(',').ToList();
+                var refStr = det.Format.TryGetValue("ref", out var rv) ? rv?.ToString() : null;
+                if (!TryParseRange(refStr, out var frng)) continue;
+                if (rowIdx < frng.r1 + 1 || rowIdx > frng.r2) continue;   // header sniff = 1 header row, no totals
+                if (TryResolveTableColumn(key, colNames, frng.c1, frng.c2, out var absCol))
+                    detHits.Add(($"{IndexToColumnName(absCol)}{rowIdx}", refStr!));
+            }
+        }
+
+        var hits = listHits.Count > 0 ? listHits : detHits;
+        if (hits.Count == 0) return false;
+        var distinctCells = hits.Select(h => h.cell).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (distinctCells.Count > 1)
+        {
+            var where = string.Join(", ", hits.Select(h => h.label).Distinct());
+            throw new Core.CliException(
+                $"set row[{rowIdx}] --prop {StripColPrefix(key)}=… is ambiguous — column '{StripColPrefix(key)}' " +
+                $"resolves in {distinctCells.Count} tables ({where}). Target the cell directly, e.g. {distinctCells[0]}.")
+            { Code = "not_found" };
+        }
+        cellRef = distinctCells[0];
+        return true;
+    }
+
     // True when an in-scope table (ListObject or detected) has a column whose
     // name equals `key`. Used to flag a bare `row[key op val]` whose key also
     // names a row PROPERTY (height/hidden/...): rather than silently choosing the
