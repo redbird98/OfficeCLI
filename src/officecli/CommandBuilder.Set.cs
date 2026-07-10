@@ -31,6 +31,12 @@ static partial class CommandBuilder
 
         setCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
+            // JSON mode: collect Core-layer advisory warnings (sites too deep
+            // to reach this command's local warning lists, e.g. the number-
+            // format check in ExcelStyleManager) so WrapEnvelope* folds them
+            // into warnings[]. CONSISTENCY(numfmt-warning): resident-routed
+            // commands get the same via ResidentServer.BuildWarnings.
+            if (json) OfficeCli.Core.WarningContext.Begin();
             var file = result.GetValue(setFileArg)!;
             var path = MsysPathHint.Restore(result.GetValue(setPathArg)!)!;
             var props = result.GetValue(propsOpt);

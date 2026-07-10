@@ -991,6 +991,16 @@ public class ResidentServer : IDisposable
             // unsupported_element code emitted by CommandBuilder.Dump.cs so
             // resident-routed and direct dump callers see the same envelope.
             else if (line.StartsWith("warning: skipped ", StringComparison.Ordinal)) warning.Code = "unsupported_element";
+            // CONSISTENCY(numfmt-warning): mirror the invalid_number_format
+            // code the one-shot --json path emits via WarningContext (see
+            // ExcelStyleManager.GetOrCreateNumFmt), so resident-routed and
+            // direct callers see the same envelope. Strip the "Warning: "
+            // prefix to match the one-shot message form.
+            else if (line.StartsWith("Warning: number format ", StringComparison.Ordinal))
+            {
+                warning.Code = "invalid_number_format";
+                warning.Message = line.Substring("Warning: ".Length).Trim();
+            }
             else warning.Code = "warning";
             return warning;
         }).ToList();

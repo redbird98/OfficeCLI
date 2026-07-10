@@ -162,8 +162,25 @@ internal static class OutputFormatter
     /// listing issues is the command's normal output, not a failure verdict.
     /// See the project conventions "JSON Envelope" for the per-command judgment table.
     /// </summary>
+    /// <summary>
+    /// Folds warnings queued in WarningContext (Core-layer advisory sites that
+    /// cannot reach a command's local warning list, e.g. ExcelStyleManager's
+    /// number-format check) into the caller-supplied list. Drains the context,
+    /// so the single top-level envelope a command emits picks them up exactly
+    /// once. No-op unless the command opted in via WarningContext.Begin().
+    /// </summary>
+    private static List<CliWarning>? MergeContextWarnings(List<CliWarning>? warnings)
+    {
+        var pending = WarningContext.End();
+        if (pending == null) return warnings;
+        if (warnings == null || warnings.Count == 0) return pending;
+        warnings.AddRange(pending);
+        return warnings;
+    }
+
     public static string WrapEnvelope(string dataJson, List<CliWarning>? warnings = null, bool success = true)
     {
+        warnings = MergeContextWarnings(warnings);
         var envelope = new JsonObject { ["success"] = success };
 
         // Parse and embed data as-is (preserves original structure)
@@ -182,6 +199,7 @@ internal static class OutputFormatter
     /// </summary>
     public static string WrapEnvelopeText(string message, List<CliWarning>? warnings = null, int? matched = null, bool success = true)
     {
+        warnings = MergeContextWarnings(warnings);
         var envelope = new JsonObject
         {
             ["success"] = success,
@@ -205,6 +223,7 @@ internal static class OutputFormatter
 
     public static string WrapEnvelopeWithData(string message, DocumentNode data, List<CliWarning>? warnings = null, int? matched = null, bool success = true)
     {
+        warnings = MergeContextWarnings(warnings);
         var envelope = new JsonObject
         {
             ["success"] = success,
@@ -227,6 +246,7 @@ internal static class OutputFormatter
     /// </summary>
     public static string WrapEnvelopeError(string message, List<CliWarning>? warnings = null)
     {
+        warnings = MergeContextWarnings(warnings);
         var envelope = new JsonObject
         {
             ["success"] = false,

@@ -737,10 +737,21 @@ internal class ExcelStyleManager
                     suspect = c;
             }
             if (suspect != null)
-                Console.Error.WriteLine(
-                    $"Warning: number format '{formatCode}' contains the unquoted letter '{suspect}', " +
+            {
+                var warnMessage =
+                    $"number format '{formatCode}' contains the unquoted letter '{suspect}', " +
                     "which real Excel may reject when opening the file (0x800A03EC). " +
-                    "Quote literal text, e.g. \"text\"0.00.");
+                    "Quote literal text, e.g. \"text\"0.00.";
+                // JSON mode (WarningContext active): queue for the envelope's
+                // warnings[] so --json callers see it. Otherwise keep the
+                // stderr line — the resident server lifts stderr into the
+                // envelope via BuildWarnings (CONSISTENCY(numfmt-warning)).
+                if (WarningContext.IsActive)
+                    WarningContext.Add(warnMessage, "invalid_number_format",
+                        "Quote literal text, e.g. \"text\"0.00");
+                else
+                    Console.Error.WriteLine($"Warning: {warnMessage}");
+            }
         }
 
         // Check built-in formats
