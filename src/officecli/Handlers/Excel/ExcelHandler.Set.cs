@@ -370,6 +370,28 @@ public partial class ExcelHandler
         }
     }
 
+    /// <summary>
+    /// Remove every &lt;hyperlink&gt; on <paramref name="cellRef"/> AND delete the
+    /// external relationship each referenced — unless another surviving
+    /// hyperlink still uses the same rId. Without the rel cleanup, repointing
+    /// or clearing a cell link leaves an orphan External relationship in
+    /// .rels on every edit (a per-file leak invisible to Get).
+    /// </summary>
+    private static void RemoveCellHyperlinksAndRels(WorksheetPart worksheet, Hyperlinks hyperlinksEl, string cellRef)
+    {
+        var toRemove = hyperlinksEl.Elements<Hyperlink>()
+            .Where(h => h.Reference?.Value?.Equals(cellRef, StringComparison.OrdinalIgnoreCase) == true)
+            .ToList();
+        var removedIds = toRemove.Select(h => h.Id?.Value).Where(id => !string.IsNullOrEmpty(id)).ToList();
+        foreach (var h in toRemove) h.Remove();
+        foreach (var id in removedIds.Distinct())
+        {
+            // Skip if a surviving hyperlink still references this rId.
+            if (hyperlinksEl.Elements<Hyperlink>().Any(h => h.Id?.Value == id)) continue;
+            try { worksheet.DeleteReferenceRelationship(id!); } catch { /* already gone */ }
+        }
+    }
+
     /// <summary>Apply cell properties without saving — caller is responsible for SaveWorksheet.</summary>
     private List<string> ApplyCellProperties(Cell cell, WorksheetPart worksheet, Dictionary<string, string> properties)
         => ApplyCellProperties(cell, cell.CellReference?.Value ?? "", worksheet, properties);
@@ -736,9 +758,8 @@ public partial class ExcelHandler
                     var hyperlinksEl = ws.GetFirstChild<Hyperlinks>();
                     if (string.IsNullOrEmpty(value) || value.Equals("none", StringComparison.OrdinalIgnoreCase))
                     {
-                        hyperlinksEl?.Elements<Hyperlink>()
-                            .Where(h => h.Reference?.Value?.Equals(cellRef, StringComparison.OrdinalIgnoreCase) == true)
-                            .ToList().ForEach(h => h.Remove());
+                        if (hyperlinksEl != null)
+                            RemoveCellHyperlinksAndRels(worksheet, hyperlinksEl, cellRef);
                         if (hyperlinksEl != null && !hyperlinksEl.HasChildren)
                             hyperlinksEl.Remove();
                         // Symmetric to H3 above: when removing a hyperlink,
@@ -779,9 +800,10 @@ public partial class ExcelHandler
                             hyperlinksEl = new Hyperlinks();
                             ws.AppendChild(hyperlinksEl);
                         }
-                        hyperlinksEl.Elements<Hyperlink>()
-                            .Where(h => h.Reference?.Value?.Equals(cellRef, StringComparison.OrdinalIgnoreCase) == true)
-                            .ToList().ForEach(h => h.Remove());
+                        // Replacing the link: drop the old <hyperlink> AND its
+                        // external relationship (else the .rels accumulates an
+                        // orphan target per repoint — a per-file leak).
+                        RemoveCellHyperlinksAndRels(worksheet, hyperlinksEl, cellRef);
                         // H2: optional tooltip/screenTip from sibling props.
                         var setHlTip = properties.GetValueOrDefault("tooltip")
                             ?? properties.GetValueOrDefault("screenTip")
