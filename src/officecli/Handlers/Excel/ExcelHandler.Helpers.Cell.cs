@@ -57,6 +57,13 @@ public partial class ExcelHandler
             }
         }
 
+        // Boolean cells store 0/1 in <v> per the OOXML spec, but Excel displays
+        // (and users expect) TRUE/FALSE. Decode it here so .Text matches what
+        // Excel renders — the write side already accepts TRUE/FALSE, and the
+        // dump emitter reads the raw 0/1 separately, so this is display-only.
+        if (cell.DataType?.Value == CellValues.Boolean)
+            return value == "1" ? "TRUE" : "FALSE";
+
         // Formula cells: if there's a cached value, return it.
         // If not, try to evaluate; otherwise emit a sentinel so callers can
         // distinguish "formula not evaluated" from "cell contains the literal
