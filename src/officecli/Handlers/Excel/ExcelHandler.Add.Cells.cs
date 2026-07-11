@@ -1182,7 +1182,20 @@ public partial class ExcelHandler
         }
         if (runSsi == null)
         {
+            // Converting a plain-string / inline-string / numeric cell to rich
+            // text: preserve the cell's existing content as the first unstyled
+            // run instead of silently discarding it. Without this, adding the
+            // first run to a cell that already had a value threw the value away
+            // (e.g. value="Hello World" + add run "Hi" → cell became just "Hi").
+            string? runExistingText = runCell.DataType?.Value == CellValues.InlineString
+                ? runCell.InlineString?.InnerText
+                : runCell.CellValue?.Text;
+
             runSsi = new SharedStringItem();
+            if (!string.IsNullOrEmpty(runExistingText))
+                runSsi.AppendChild(new Run(
+                    new Text(runExistingText) { Space = SpaceProcessingModeValues.Preserve }));
+            runCell.RemoveAllChildren<InlineString>();
             runSst.AppendChild(runSsi);
             var newSstIdx = runSst.Elements<SharedStringItem>().Count() - 1;
             runCell.CellValue = new CellValue(newSstIdx.ToString());
